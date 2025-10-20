@@ -44,16 +44,28 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
     }
   };
 
+  // Save current chat function
+  const saveCurrentChat = () => {
+    // chatStorage already auto-saves messages, but we ensure it's saved
+    const session = chatStorage.getCurrentSession();
+    if (session && session.messages.length > 0) {
+      // Session is already saved in localStorage through chatStorage
+      console.log('Current chat saved:', session.id);
+    }
+  };
+
   // Expose functions globally for sidebar to call
   useEffect(() => {
     (window as any).resetChat = resetChat;
     (window as any).loadChatSession = loadSession;
     (window as any).getRecentSessions = () => chatStorage.getRecentSessions();
+    (window as any).saveCurrentChat = saveCurrentChat;
 
     return () => {
       delete (window as any).resetChat;
       delete (window as any).loadChatSession;
       delete (window as any).getRecentSessions;
+      delete (window as any).saveCurrentChat;
     };
   }, []);
 

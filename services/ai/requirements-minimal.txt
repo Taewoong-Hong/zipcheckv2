@@ -1,10 +1,16 @@
-# 초경량 버전 - Container import 테스트용
 # FastAPI & Server
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
-# LLM Providers (직접 호출)
+# LangChain Core (최소)
+langchain==0.1.5
+langchain-community==0.0.17
+langchain-openai==0.0.5
+langchain-anthropic==0.1.1
+langchain-core==0.1.16
+
+# LLM Providers
 openai==1.10.0
 anthropic==0.17.0
 
@@ -18,10 +24,15 @@ psycopg[binary]==3.1.19
 SQLAlchemy==2.0.25
 pgvector==0.2.4
 
-# Utilities
+# Embeddings (OpenAI 임베딩 사용 - sentence-transformers 제거)
 tiktoken==0.5.2
-tenacity==8.2.3
-httpx==0.25.2
 
-# Observability
+# PDF Processing (최소)
+pymupdf==1.23.8
+pillow==10.2.0
+
+# Reliability
+tenacity==8.2.3
+
+# Observability (Sentry만)
 sentry-sdk[fastapi]==1.39.2

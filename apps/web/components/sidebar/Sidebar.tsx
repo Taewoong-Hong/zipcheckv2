@@ -27,6 +27,18 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
     }
   }, [recentExpanded]);
 
+  // Refresh recent sessions periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (recentExpanded && typeof (window as any).getRecentSessions === 'function') {
+        const sessions = (window as any).getRecentSessions();
+        setRecentSessions(sessions || []);
+      }
+    }, 2000); // Refresh every 2 seconds
+
+    return () => clearInterval(interval);
+  }, [recentExpanded]);
+
   // Format date for display
   const formatDate = (date: Date) => {
     const now = new Date();
@@ -150,10 +162,17 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
         <nav className="flex-1 overflow-y-auto">
           <div className="px-4 py-2">
             <div className="relative group">
-              <Link href="/" className={`flex items-center ${isExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-xl hover:bg-neutral-100 transition-colors`}>
+              <button
+                onClick={() => {
+                  // Reset to home view without saving
+                  if (typeof (window as any).resetChat === 'function') {
+                    (window as any).resetChat();
+                  }
+                }}
+                className={`w-full flex items-center ${isExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-xl hover:bg-neutral-100 transition-colors`}>
                 <Home className="w-5 h-5 shrink-0 text-neutral-600" />
-                {isExpanded && <span className="text-sm">홈</span>}
-              </Link>
+                {isExpanded && <span className="text-sm text-left">홈</span>}
+              </button>
               {!isExpanded && (
                 <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
                   홈

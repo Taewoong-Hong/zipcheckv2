@@ -4,10 +4,11 @@ const AI_API_URL = process.env.AI_API_URL || 'http://localhost:8000';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
   try {
-    const path = params.path.join('/');
+    const resolvedParams = await params;
+    const path = resolvedParams.path.join('/');
     const contentType = request.headers.get('content-type');
     
     let body;
@@ -48,10 +49,11 @@ export async function POST(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
   try {
-    const path = params.path.join('/');
+    const resolvedParams = await params;
+    const path = resolvedParams.path.join('/');
     const response = await fetch(`${AI_API_URL}/${path}`, {
       method: 'GET',
     });

@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, FileText, Shield, Calendar, Globe } from "lucide-react";
-import termsData from "@/zipcheck_terms_ko.json";
+// @ts-ignore
+import termsData from "../../../zipcheck_terms_ko.json";
 
 export default function TermsContent() {
   const [activeSection, setActiveSection] = useState(0);
@@ -16,7 +17,7 @@ export default function TermsContent() {
 
   const sectionTitles = [
     { id: 0, title: "전체보기", icon: <FileText className="w-4 h-4" /> },
-    ...termsData.sections.map(section => ({
+    ...termsData.sections.map((section: any) => ({
       id: section.article,
       title: `${section.article}. ${section.title}`,
       icon: section.article <= 3 ? <Shield className="w-4 h-4" /> : <FileText className="w-4 h-4" />
@@ -291,7 +292,7 @@ export default function TermsContent() {
             {activeSection === 0 ? (
               // Show all sections
               <div className="space-y-12">
-                {termsData.sections.map((section) => (
+                {termsData.sections.map((section: any) => (
                   <section key={section.article} className="scroll-mt-20">
                     <div className="mb-6">
                       <h2 className="text-2xl font-bold text-neutral-900 mb-4 flex items-center gap-3">
@@ -314,7 +315,7 @@ export default function TermsContent() {
                   </h2>
                   <div className="bg-white rounded-xl border border-neutral-200 p-6 shadow-sm">
                     <ul className="space-y-3 text-neutral-600">
-                      {termsData.privacy_cross_reference.notes.map((note, index) => (
+                      {termsData.privacy_cross_reference.notes.map((note: any, index: number) => (
                         <li key={index} className="flex items-start">
                           <span className="text-brand-primary mr-2 mt-1">•</span>
                           <span className="flex-1">{note}</span>
@@ -337,7 +338,7 @@ export default function TermsContent() {
                   </h2>
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
                     <ul className="space-y-3 text-amber-800">
-                      {termsData.service_specific_notices.map((notice, index) => (
+                      {termsData.service_specific_notices.map((notice: any, index: number) => (
                         <li key={index} className="flex items-start">
                           <span className="text-amber-600 mr-2 mt-1">⚡</span>
                           <span className="flex-1">{notice}</span>
@@ -354,7 +355,7 @@ export default function TermsContent() {
                   </h2>
                   <div className="bg-neutral-50 rounded-xl p-6 border border-neutral-200">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {termsData.legal_basis_refs.map((law, index) => (
+                      {termsData.legal_basis_refs.map((law: any, index: number) => (
                         <div key={index} className="flex items-center gap-2 text-sm text-neutral-600">
                           <Shield className="w-4 h-4 text-neutral-400" />
                           <span>{law}</span>
@@ -368,7 +369,7 @@ export default function TermsContent() {
               // Show specific section
               <section>
                 {(() => {
-                  const section = termsData.sections.find(s => s.article === activeSection);
+                  const section = termsData.sections.find((s: any) => s.article === activeSection);
                   if (!section) return null;
 
                   return (
@@ -404,7 +405,7 @@ export default function TermsContent() {
               </button>
 
               <div className="flex gap-1">
-                {[0, ...termsData.sections.map(s => s.article)].map((id) => (
+                {[0, ...termsData.sections.map((s: any) => s.article)].map((id) => (
                   <button
                     key={id}
                     onClick={() => setActiveSection(id)}

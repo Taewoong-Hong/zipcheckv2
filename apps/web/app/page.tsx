@@ -4,12 +4,7 @@ import { useState, useEffect } from "react";
 import Sidebar from "@/components/sidebar/Sidebar";
 import ChatInterface from "@/components/chat/ChatInterface";
 
-interface HomePageProps {
-  params?: Record<string, string | string[] | undefined>;
-  searchParams?: Record<string, string | string[] | undefined>;
-}
-
-export default function HomePage({ params, searchParams }: HomePageProps = {}) {
+export default function HomePage() {
   // SSR과 CSR 모두에서 일관된 초기값 사용 (서버에서는 항상 true)
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);

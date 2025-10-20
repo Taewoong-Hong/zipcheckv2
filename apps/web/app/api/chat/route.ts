@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
           const message = data.answer || data.message || '응답을 생성할 수 없습니다.';
           const chunks = message.split(' '); // 단어별로 나누기 (더 자연스러운 스트리밍 효과)
 
-          chunks.forEach((chunk, index) => {
+          chunks.forEach((chunk: string, index: number) => {
             setTimeout(() => {
               const content = index === 0 ? chunk : ' ' + chunk;
               const data = JSON.stringify({ content, done: false });

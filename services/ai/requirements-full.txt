@@ -1,0 +1,58 @@
+# FastAPI & Server
+fastapi[all]==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# LangChain Core
+langchain==0.1.5
+langchain-community==0.0.17  # Updated to resolve dependency conflict with langchain 0.1.5
+langchain-openai==0.0.5
+langchain-anthropic==0.1.1
+langchain-core==0.1.16
+
+# LLM Providers
+openai==1.10.0
+anthropic==0.17.0  # Updated to resolve dependency conflict with langchain-anthropic 0.1.1
+
+# Data & Validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+
+# Database
+psycopg[binary]==3.1.19
+SQLAlchemy==2.0.25
+pgvector==0.2.4
+
+# Embeddings
+sentence-transformers==2.3.1
+tiktoken==0.5.2
+
+# PDF Processing
+unstructured[pdf]==0.18.15  # Updated for Python 3.12 compatibility
+pymupdf==1.23.8
+pdf2image==1.17.0
+pillow==10.2.0
+
+# Reliability & Retry
+tenacity==8.2.3
+
+# Observability & Evaluation
+sentry-sdk[fastapi]==1.39.2
+ragas==0.1.1
+langfuse==2.6.3
+
+# Task Queue (Optional)
+redis==5.0.1
+celery==5.3.6
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+httpx==0.25.2  # Updated to resolve dependency conflict with langfuse 2.6.3
+schemathesis==3.27.1
+
+# Code Quality
+black==24.1.1
+ruff==0.1.14
+mypy==1.8.0
