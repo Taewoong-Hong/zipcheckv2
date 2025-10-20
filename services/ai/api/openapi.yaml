@@ -1,0 +1,349 @@
+openapi: 3.1.0
+info:
+  title: ZipCheck AI API
+  description: 부동산 계약서 리스크 분석 AI 서비스
+  version: 2.0.0
+  contact:
+    name: ZipCheck Support
+    email: support@zipcheck.app
+
+servers:
+  - url: http://localhost:8000
+    description: 로컬 개발 서버
+  - url: https://ai.zipcheck.app
+    description: 프로덕션 서버
+
+tags:
+  - name: health
+    description: 헬스체크
+  - name: ingest
+    description: 계약서 업로드 및 인덱싱
+  - name: analysis
+    description: 계약서 분석
+  - name: reports
+    description: 분석 리포트 관리
+
+paths:
+  /healthz:
+    get:
+      tags:
+        - health
+      summary: 헬스체크
+      description: 서비스 상태 확인
+      operationId: healthCheck
+      responses:
+        '200':
+          description: 정상
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                ok: true
+                version: "2.0.0"
+                environment: "production"
+
+  /ingest:
+    post:
+      tags:
+        - ingest
+      summary: 계약서 PDF 업로드
+      description: |
+        계약서 PDF를 업로드하고 벡터 DB에 저장합니다.
+        - 최대 파일 크기: 50MB
+        - 지원 형식: PDF
+      operationId: ingestContract
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - contract_id
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF 파일
+                contract_id:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: 계약서 고유 ID
+                  example: "contract_20240101_001"
+                addr:
+                  type: string
+                  maxLength: 200
+                  description: 부동산 주소 (선택)
+                  example: "서울시 강남구 테헤란로 123"
+      responses:
+        '200':
+          description: 업로드 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResponse'
+              example:
+                ok: true
+                contract_id: "contract_20240101_001"
+                length: 15234
+                chunks: 12
+        '400':
+          description: 잘못된 요청 (파일 형식, 크기 등)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /analyze:
+    post:
+      tags:
+        - analysis
+      summary: 계약서 분석
+      description: |
+        업로드된 계약서에 대해 리스크 분석을 수행합니다.
+        - single: 단일 LLM 모델 사용
+        - consensus: 듀얼 LLM 모델 + 저지 (P3에서 구현 예정)
+      operationId: analyzeContract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeRequest'
+            examples:
+              single_default:
+                summary: 단일 모델 (기본)
+                value:
+                  question: "계약금 관련 리스크를 분석해주세요"
+                  mode: "single"
+              single_claude:
+                summary: 단일 모델 (Claude)
+                value:
+                  question: "특약사항의 문제점을 찾아주세요"
+                  mode: "single"
+                  provider: "claude"
+              consensus:
+                summary: 컨센서스 모드
+                value:
+                  question: "전체 계약서의 리스크를 종합 분석해주세요"
+                  mode: "consensus"
+      responses:
+        '200':
+          description: 분석 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeResponse'
+              example:
+                answer: |
+                  계약서 분석 결과:
+
+                  1. 계약금 반환 조건 불명확
+                     - 근거: 제3조에서...
+                     - 권장 조치: 전문가 검토 필요
+
+                  2. 중도금 지급 시기 리스크
+                     - 근거: 제5조에서...
+                     - 권장 조치: 금융기관 확인 권장
+                mode: "single"
+                provider: "openai"
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 서버 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '501':
+          description: 구현되지 않음 (consensus 모드)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /reports/{report_id}:
+    get:
+      tags:
+        - reports
+      summary: 리포트 조회
+      description: 저장된 분석 리포트를 조회합니다 (P3에서 구현 예정)
+      operationId: getReport
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 리포트 ID
+      responses:
+        '200':
+          description: 리포트 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '404':
+          description: 리포트를 찾을 수 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '501':
+          description: 구현되지 않음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - ok
+        - version
+        - environment
+      properties:
+        ok:
+          type: boolean
+          description: 서비스 정상 여부
+        version:
+          type: string
+          description: API 버전
+          example: "2.0.0"
+        environment:
+          type: string
+          description: 실행 환경
+          enum: [development, staging, production]
+
+    IngestResponse:
+      type: object
+      required:
+        - ok
+        - contract_id
+        - length
+        - chunks
+      properties:
+        ok:
+          type: boolean
+          description: 업로드 성공 여부
+        contract_id:
+          type: string
+          description: 계약서 ID
+        length:
+          type: integer
+          description: 추출된 텍스트 길이 (문자 수)
+          example: 15234
+        chunks:
+          type: integer
+          description: 생성된 청크 개수
+          example: 12
+
+    AnalyzeRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 분석 질문
+          example: "계약금 관련 리스크를 분석해주세요"
+        mode:
+          type: string
+          enum: [single, consensus]
+          default: single
+          description: |
+            분석 모드
+            - single: 단일 LLM 모델 사용
+            - consensus: 듀얼 LLM + 저지 (P3)
+        provider:
+          type: string
+          enum: [openai, claude]
+          nullable: true
+          description: LLM 제공자 (single 모드에서만 사용)
+
+    AnalyzeResponse:
+      type: object
+      required:
+        - answer
+        - mode
+      properties:
+        answer:
+          type: string
+          description: 분석 결과 텍스트
+        mode:
+          type: string
+          description: 사용된 분석 모드
+          enum: [single, consensus]
+        provider:
+          type: string
+          nullable: true
+          description: 사용된 LLM 제공자
+          enum: [openai, claude]
+
+    ReportResponse:
+      type: object
+      required:
+        - report_id
+        - contract_id
+        - created_at
+        - result
+      properties:
+        report_id:
+          type: string
+          description: 리포트 ID
+        contract_id:
+          type: string
+          description: 계약서 ID
+        created_at:
+          type: string
+          format: date-time
+          description: 생성 시각
+        result:
+          type: object
+          description: 분석 결과 (구조화된 JSON)
+          properties:
+            summary:
+              type: string
+              description: 요약
+            risks:
+              type: array
+              description: 리스크 목록
+              items:
+                type: object
+                properties:
+                  title:
+                    type: string
+                    description: 리스크 제목
+                  evidence:
+                    type: string
+                    description: 근거
+                  recommendation:
+                    type: string
+                    description: 권장 조치
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: 오류 메시지
+          example: "파일 검증 실패: PDF 파일만 업로드 가능합니다"

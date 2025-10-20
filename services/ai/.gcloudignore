@@ -1,0 +1,57 @@
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore
+
+.gcloudignore
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing & Development
+.pytest_cache/
+.coverage
+htmlcov/
+test_*.py
+*_test.py
+
+# Environment files (use Secret Manager instead)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+*.pdf
+
+# Documentation (keep deployment guides)
+docs/
+!DEPLOYMENT.md
+!QUICKSTART.md
+
+# Docker files (not needed for source-based deployment)
+Dockerfile
+.dockerignore
+docker-compose.yml
+cloudbuild.yaml
+service.yaml

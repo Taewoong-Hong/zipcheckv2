@@ -1,0 +1,60 @@
+# Environment Variables - NEVER COMMIT THESE!
+.env
+.env.local
+.env.*.local
+*.env
+
+# Node.js
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+/tmp
+
+# Database
+*.db
+*.sqlite3
+
+# Secrets
+secrets/
+*.pem
+*.key
+credentials.json

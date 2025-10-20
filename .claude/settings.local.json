@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(python -m venv:*)",
+      "Bash(./venv/Scripts/pip:*)",
+      "Bash(./venv/Scripts/python.exe -m pip:*)",
+      "Bash(tree:*)",
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(mv:*)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(./venv/Scripts/pip.exe install:*)",
+      "Bash(./venv/Scripts/python.exe:*)",
+      "Bash(taskkill:*)",
+      "Bash(for pid in 10064 30308 4760 30632 1284)",
+      "Bash(do taskkill //F //PID $pid)",
+      "Bash(done)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

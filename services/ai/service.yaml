@@ -1,0 +1,112 @@
+# ============================================
+# ZipCheck AI - Cloud Run Service Definition
+# ============================================
+# Use: gcloud run services replace service.yaml
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: zipcheck-ai
+  labels:
+    cloud.googleapis.com/location: asia-northeast3
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Scaling
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '10'
+
+        # Resource limits
+        run.googleapis.com/cpu-throttling: 'true'
+        run.googleapis.com/startup-cpu-boost: 'true'
+
+        # Networking
+        run.googleapis.com/vpc-access-connector: ''  # Add VPC connector if needed
+
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: zipcheck-ai-sa  # Service account with Secret Manager access
+
+      containers:
+      - name: zipcheck-ai
+        image: gcr.io/PROJECT_ID/zipcheck-ai:latest  # Replace PROJECT_ID
+
+        ports:
+        - name: http1
+          containerPort: 8000
+
+        env:
+        - name: PORT
+          value: '8000'
+        - name: APP_ENV
+          value: 'production'
+        - name: LOG_LEVEL
+          value: 'INFO'
+        - name: PRIMARY_LLM
+          value: 'openai'
+        - name: JUDGE_LLM
+          value: 'claude'
+        - name: EMBED_MODEL
+          value: 'text-embedding-3-small'
+        - name: EMBED_DIMENSIONS
+          value: '1536'
+        - name: OPENAI_VISION_MODEL
+          value: 'gpt-4o'
+        - name: OPENAI_CLASSIFICATION_MODEL
+          value: 'gpt-4o-mini'
+        - name: OPENAI_ANALYSIS_MODEL
+          value: 'gpt-4o-mini'
+        - name: LLM_TEMPERATURE
+          value: '0.2'
+        - name: LLM_MAX_TOKENS
+          value: '2048'
+        - name: VISION_MAX_TOKENS
+          value: '4096'
+        - name: VISION_DETAIL
+          value: 'high'
+        - name: AI_ALLOWED_ORIGINS
+          value: 'https://zipcheck.app,https://www.zipcheck.app'
+
+        # Secrets from Secret Manager
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openai-api-key
+              key: latest
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: anthropic-api-key
+              key: latest
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: supabase-database-url
+              key: latest
+
+        resources:
+          limits:
+            cpu: '2000m'
+            memory: '2Gi'
+
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 10
+          timeoutSeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+          periodSeconds: 30
