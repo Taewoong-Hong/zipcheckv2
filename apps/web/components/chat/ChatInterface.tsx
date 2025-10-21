@@ -234,9 +234,9 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
           <div className="max-w-2xl w-full">
             {/* Welcome Message */}
             <div className="text-center mb-12 md:mb-16">
-              <h1 className="font-bold mb-2 md:mb-3 text-neutral-800">
-                <span className="text-3xl md:text-[2.5rem] block mb-4">주소를 입력하시면</span>
-                <span className="text-xl md:text-2xl block">부동산 계약을 분석해드릴게요</span>
+              <h1 className="mb-2 md:mb-3 text-neutral-800">
+                <span className="text-3xl md:text-[3.125rem] font-medium block mb-4 md:mb-10">주소를 입력하시면</span>
+                <span className="text-xl md:text-[2.625rem] font-medium block">부동산 계약을 분석해드릴게요</span>
               </h1>
             </div>
 
@@ -303,10 +303,10 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
             {/* Example Prompts */}
             <div className="mt-8 md:mt-12 grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
               <button
-                onClick={() => handleExampleClick("임대차 계약서에서 확인해야 할 중요한 포인트를 알려주세요")}
+                onClick={() => window.location.href = '/guide/lease-analysis'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">📄 임대차 계약서 분석</h3>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">📄 임대차 계약 분석 가이드</h3>
                 <p className="text-xs text-neutral-600">특약사항과 보증금 보호 조건을 확인해드려요</p>
               </button>
 
@@ -327,11 +327,11 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
               </button>
 
               <button
-                onClick={() => handleExampleClick("보증금, 중도금, 잔금 일정을 정리해주세요")}
+                onClick={() => window.location.href = '/guide/fraud-prevention'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">💰 금전 관련 조항</h3>
-                <p className="text-xs text-neutral-600">보증금, 중도금, 잔금 일정을 정리해드려요</p>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">🚨 전세사기 피해 가이드</h3>
+                <p className="text-xs text-neutral-600">전세사기 피해 대응을 위한 단계별 가이드, 셀프소송 양식을 제공해드려요</p>
               </button>
             </div>
           </div>

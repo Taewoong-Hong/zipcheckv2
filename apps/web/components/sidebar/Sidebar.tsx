@@ -66,8 +66,8 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
           <Image
             src="/toggle.svg"
             alt="Open sidebar"
-            width={24}
-            height={24}
+            width={20}
+            height={20}
             className="rotate-180"
           />
         </button>
@@ -84,7 +84,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
       {/* Sidebar */}
       <aside
         className={`fixed left-0 top-0 h-full bg-white border-r border-neutral-200 sidebar-transition z-40 flex flex-col
-          ${isExpanded ? "w-64" : "w-20"}
+          ${isExpanded ? "w-64 overflow-x-hidden" : "w-20 overflow-visible"}
           ${isExpanded ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
       >
@@ -105,18 +105,18 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
                 className={`shrink-0 ${!isExpanded ? 'group-hover/logo:opacity-0' : ''} transition-opacity`}
               />
               {!isExpanded && (
-                <Image 
-                  src="/toggle.svg" 
+                <Image
+                  src="/toggle.svg"
                   alt="Open sidebar"
-                  width={28}
-                  height={28}
+                  width={22}
+                  height={22}
                   className="opacity-0 group-hover/logo:opacity-100 rotate-180 transition-all absolute inset-0 m-auto"
                 />
               )}
               {isExpanded && <span className="font-bold text-base">집체크</span>}
             </button>
             {!isExpanded && (
-              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/logo:opacity-100 transition-opacity">
+              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover/logo:opacity-100 transition-opacity z-50">
                 사이드바 열기
               </div>
             )}
@@ -125,11 +125,11 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
                 className="p-2 rounded hover:bg-neutral-100 transition-colors cursor-w-resize"
                 onClick={() => setIsExpanded(false)}
               >
-                <Image 
-                  src="/toggle.svg" 
+                <Image
+                  src="/toggle.svg"
                   alt="Toggle sidebar"
-                  width={24}
-                  height={24}
+                  width={20}
+                  height={20}
                   className="transition-transform"
                 />
               </button>
@@ -151,7 +151,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
               {isExpanded && <span className="text-sm font-medium">새 채팅</span>}
             </button>
             {!isExpanded && (
-              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
+              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[100]">
                 새 채팅
               </div>
             )}
@@ -159,7 +159,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
         </div>
 
         {/* Main Navigation */}
-        <nav className="flex-1 overflow-y-auto">
+        <nav className={`flex-1 relative ${isExpanded ? 'overflow-y-auto' : ''}`}>
           <div className="px-4 py-2">
             <div className="relative group">
               <button
@@ -174,7 +174,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
                 {isExpanded && <span className="text-sm text-left">홈</span>}
               </button>
               {!isExpanded && (
-                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
+                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[100]">
                   홈
                 </div>
               )}
@@ -189,17 +189,24 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
                 {isExpanded && <span className="text-sm text-left">검색</span>}
               </button>
               {!isExpanded && (
-                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
-                  검색
+                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[100]">
+                  채팅 검색
                 </div>
               )}
             </div>
 
             {/* Recent Section */}
             <div className="relative group">
-              <button 
+              <button
                 className={`w-full flex items-center ${isExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-xl hover:bg-neutral-100 transition-colors`}
-                onClick={() => setRecentExpanded(!recentExpanded)}
+                onClick={() => {
+                  if (!isExpanded) {
+                    setIsExpanded(true);
+                    setRecentExpanded(true);
+                  } else {
+                    setRecentExpanded(!recentExpanded);
+                  }
+                }}
               >
                 <Clock className="w-5 h-5 shrink-0 text-neutral-600" />
                 {isExpanded && (
@@ -214,7 +221,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
                 )}
               </button>
               {!isExpanded && (
-                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
+                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[100]">
                   최근
                 </div>
               )}
@@ -250,9 +257,16 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
 
             {/* My Knowledge Section */}
             <div className="relative group">
-              <button 
+              <button
                 className={`w-full flex items-center ${isExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-xl hover:bg-neutral-100 transition-colors mt-4`}
-                onClick={() => setMyKnowledgeExpanded(!myKnowledgeExpanded)}
+                onClick={() => {
+                  if (!isExpanded) {
+                    setIsExpanded(true);
+                    setMyKnowledgeExpanded(true);
+                  } else {
+                    setMyKnowledgeExpanded(!myKnowledgeExpanded);
+                  }
+                }}
               >
                 <FolderOpen className="w-5 h-5 shrink-0 text-neutral-600" />
                 {isExpanded && (
@@ -267,7 +281,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
                 )}
               </button>
               {!isExpanded && (
-                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
+                <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[100]">
                   내 분석
                 </div>
               )}
@@ -295,7 +309,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
               {isExpanded && <span className="text-sm">고객지원</span>}
             </button>
             {!isExpanded && (
-              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity">
+              <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-gray-900 text-white text-sm rounded-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[100]">
                 고객지원
               </div>
             )}
