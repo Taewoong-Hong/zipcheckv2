@@ -6,6 +6,7 @@ import { Message as MessageType } from "@/types/chat";
 import Message from "./Message";
 import ChatInput from "./ChatInput";
 import { chatStorage } from "@/lib/chatStorage";
+import { simulateTestResponse } from "@/lib/testScenario";
 
 interface ChatInterfaceProps {
   isSidebarExpanded: boolean;
@@ -104,6 +105,57 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
       };
 
       setMessages(prev => [...prev, aiMessage]);
+
+      // Check if input is "test" - run simulation
+      if (content.toLowerCase() === 'test') {
+        try {
+          let accumulatedContent = '';
+
+          await simulateTestResponse(
+            // onChunk callback
+            (chunk: string) => {
+              accumulatedContent += chunk;
+              setMessages(prev => prev.map(msg =>
+                msg.id === aiMessageId
+                  ? { ...msg, content: accumulatedContent }
+                  : msg
+              ));
+            },
+            // onComplete callback
+            () => {
+              setMessages(prev => prev.map(msg =>
+                msg.id === aiMessageId
+                  ? { ...msg, isStreaming: false }
+                  : msg
+              ));
+              // Save final message
+              const finalMsg = {
+                id: aiMessageId,
+                role: 'assistant' as const,
+                content: accumulatedContent,
+                timestamp: new Date(),
+                isStreaming: false,
+              };
+              chatStorage.addMessage(finalMsg);
+              setIsLoading(false);
+            }
+          );
+        } catch (error) {
+          console.error('Test simulation error:', error);
+          setMessages(prev => prev.map(msg =>
+            msg.id === aiMessageId
+              ? {
+                  ...msg,
+                  content: '시뮬레이션 중 오류가 발생했습니다.',
+                  isError: true,
+                  isStreaming: false,
+                }
+              : msg
+          ));
+          setIsLoading(false);
+        }
+        return; // Exit early for test mode
+      }
 
       try {
         // Create abort controller for cancellation
@@ -311,19 +363,19 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
               </button>
 
               <button
-                onClick={() => handleExampleClick("매매 계약서에서 주의해야 할 법적 리스크가 무엇인가요?")}
+                onClick={() => window.location.href = '/guide/purchase-review'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">🏢 매매 계약서 검토</h3>
-                <p className="text-xs text-neutral-600">권리관계와 하자담보책임을 분석해드려요</p>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">🏢 매매 계약 검토 가이드</h3>
+                <p className="text-xs text-neutral-600">최적의 매매가와 협상 포지션, 특약사항을 검토해드려요</p>
               </button>
 
               <button
-                onClick={() => handleExampleClick("전세 사기를 예방하는 방법을 알려주세요")}
+                onClick={() => window.location.href = '/guide/rental-checklist'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">⚖️ 법적 리스크 체크</h3>
-                <p className="text-xs text-neutral-600">계약 조항의 법적 문제점을 찾아드려요</p>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">✅ 전세 계약 체크리스트</h3>
+                <p className="text-xs text-neutral-600">전세 계약 전 필수 확인사항을 단계별로 안내해드려요</p>
               </button>
 
               <button
@@ -331,7 +383,7 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
                 <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">🚨 전세사기 피해 가이드</h3>
-                <p className="text-xs text-neutral-600">전세사기 피해 대응을 위한 단계별 가이드, 셀프소송 양식을 제공해드려요</p>
+                <p className="text-xs text-neutral-600">피해 대응을 위한 단계별 가이드, 양식을 제공해드려요</p>
               </button>
             </div>
           </div>
