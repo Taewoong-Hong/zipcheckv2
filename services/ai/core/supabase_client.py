@@ -1,0 +1,232 @@
+"""Supabase client for ZipCheck backend integration."""
+import httpx
+from typing import Dict, Any, Optional
+from .settings import settings
+
+
+class SupabaseAuthClient:
+    """Supabase authentication client for backend operations.
+
+    This client is for server-side auth operations only.
+    Frontend should use @supabase/supabase-js directly.
+    """
+
+    def __init__(self):
+        self.url = settings.supabase_url
+        self.anon_key = settings.supabase_anon_key
+        self.service_role_key = settings.supabase_service_role_key
+
+    @property
+    def auth_url(self) -> str:
+        """Supabase Auth API base URL."""
+        return f"{self.url}/auth/v1"
+
+    async def create_or_update_user(
+        self,
+        email: str,
+        user_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create or update user in Supabase Auth.
+
+        This uses service_role_key to bypass RLS and create users server-side.
+        Should only be called from backend after OAuth verification.
+
+        Args:
+            email: User email from OAuth provider
+            user_metadata: Additional user data (name, picture, etc.)
+
+        Returns:
+            User object from Supabase
+
+        Raises:
+            httpx.HTTPStatusError: If user creation fails
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.auth_url}/admin/users",
+                json={
+                    "email": email,
+                    "email_confirm": True,  # Auto-confirm OAuth emails
+                    "user_metadata": user_metadata or {},
+                },
+                headers={
+                    "apikey": self.service_role_key,
+                    "Authorization": f"Bearer {self.service_role_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Get user by email using admin API.
+
+        Args:
+            email: User email to search
+
+        Returns:
+            User object if found, None otherwise
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.auth_url}/admin/users",
+                params={"filter": f"email.eq.{email}"},
+                headers={
+                    "apikey": self.service_role_key,
+                    "Authorization": f"Bearer {self.service_role_key}",
+                },
+            )
+            response.raise_for_status()
+            users = response.json().get("users", [])
+            return users[0] if users else None
+
+    async def generate_link_token(self, user_id: str) -> Dict[str, Any]:
+        """Generate magic link token for user.
+
+        This can be used to create a session token for frontend.
+
+        Args:
+            user_id: Supabase user ID
+
+        Returns:
+            Dict with access_token and refresh_token
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.auth_url}/admin/generate_link",
+                json={
+                    "type": "magiclink",
+                    "email": "",  # Will be inferred from user_id
+                    "user_id": user_id,
+                },
+                headers={
+                    "apikey": self.service_role_key,
+                    "Authorization": f"Bearer {self.service_role_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def sign_in_with_oauth(
+        self,
+        provider: str,
+        code: str,
+    ) -> Dict[str, Any]:
+        """Sign in user with OAuth code.
+
+        This exchanges OAuth code for Supabase session.
+        Typically used after Google/Kakao OAuth callback.
+
+        Args:
+            provider: OAuth provider name (e.g., "google", "kakao")
+            code: Authorization code from provider
+
+        Returns:
+            Session object with access_token, refresh_token, user
+
+        Note:
+            This method is typically NOT needed if you're using
+            Supabase client-side OAuth flow (redirect to supabase.co/auth/v1/callback).
+            Only use this for custom server-side OAuth flows.
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.auth_url}/token",
+                params={"grant_type": "authorization_code"},
+                json={
+                    "auth_code": code,
+                    "provider": provider,
+                },
+                headers={
+                    "apikey": self.anon_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+
+class SupabaseStorageClient:
+    """Supabase Storage client for file uploads."""
+
+    def __init__(self):
+        self.url = settings.supabase_url
+        self.service_role_key = settings.supabase_service_role_key
+
+    @property
+    def storage_url(self) -> str:
+        """Supabase Storage API base URL."""
+        return f"{self.url}/storage/v1"
+
+    async def upload_file(
+        self,
+        bucket: str,
+        path: str,
+        file_data: bytes,
+        content_type: str = "application/pdf",
+    ) -> Dict[str, Any]:
+        """Upload file to Supabase Storage.
+
+        Args:
+            bucket: Storage bucket name (e.g., "contracts")
+            path: File path in bucket (e.g., "user_id/contract_id.pdf")
+            file_data: File binary data
+            content_type: MIME type of file
+
+        Returns:
+            Dict with file path and public URL
+
+        Raises:
+            httpx.HTTPStatusError: If upload fails
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.storage_url}/object/{bucket}/{path}",
+                content=file_data,
+                headers={
+                    "apikey": self.service_role_key,
+                    "Authorization": f"Bearer {self.service_role_key}",
+                    "Content-Type": content_type,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def get_public_url(self, bucket: str, path: str) -> str:
+        """Get public URL for uploaded file.
+
+        Args:
+            bucket: Storage bucket name
+            path: File path in bucket
+
+        Returns:
+            Public URL string
+        """
+        return f"{self.storage_url}/object/public/{bucket}/{path}"
+
+    async def delete_file(self, bucket: str, path: str) -> Dict[str, Any]:
+        """Delete file from Supabase Storage.
+
+        Args:
+            bucket: Storage bucket name
+            path: File path in bucket
+
+        Returns:
+            Success response dict
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{self.storage_url}/object/{bucket}/{path}",
+                headers={
+                    "apikey": self.service_role_key,
+                    "Authorization": f"Bearer {self.service_role_key}",
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+
+
+# Singleton instances
+supabase_auth = SupabaseAuthClient()
+supabase_storage = SupabaseStorageClient()

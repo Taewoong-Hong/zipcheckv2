@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Home, Search, Clock, FolderOpen, PenSquare, HelpCircle, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
-import UserProfile from "./UserProfile";
+import UserProfileNew from "./UserProfileNew";
 import SearchModal from "../search/SearchModal";
 
 interface SidebarProps {
@@ -333,7 +333,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
         
         {/* User Profile - Always at bottom */}
         <div className="border-t border-neutral-200">
-          <UserProfile isExpanded={isExpanded} />
+          <UserProfileNew isExpanded={isExpanded} />
         </div>
       </aside>
 

@@ -305,6 +305,106 @@ gcloud run deploy zipcheck-ai \
 
 ---
 
+## 🔐 Google OAuth 설정 가이드 (2025-01-23)
+
+### ✅ 완료된 작업
+1. **Google Cloud Console 설정**
+   - Client ID: `901515411397-soknq5qg2l3ga3ggc3gcrp70rmt2iovt.apps.googleusercontent.com`
+   - OAuth 2.0 클라이언트 생성 완료
+
+2. **코드 구현**
+   - `core/google_oauth.py`: Google OAuth 2.0 클라이언트
+   - `core/supabase_client.py`: Supabase Auth/Storage 클라이언트
+   - `routes/auth.py`: FastAPI OAuth 라우터 (`/auth/google/login`, `/auth/google/callback`)
+   - `lib/supabase.ts`: Next.js Supabase 클라이언트
+   - `app/auth/callback/page.tsx`: OAuth 콜백 페이지
+   - `components/auth/LoginModal.tsx`: Google 로그인 버튼 통합
+
+### 🔧 필요한 추가 설정
+
+#### 1️⃣ Google Cloud Console 설정
+**승인된 JavaScript 원본** (OAuth 2.0 Client 설정):
+```
+http://localhost:3000
+https://zipcheck.kr
+```
+
+**승인된 리디렉션 URI**:
+```
+http://localhost:3000/auth/callback
+https://zipcheck.kr/auth/callback
+https://gsiismzchtgdklvdvggu.supabase.co/auth/v1/callback
+```
+
+> ⚠️ Supabase 콜백 URI가 가장 중요합니다! 여기서 실제 토큰 교환이 이루어집니다.
+
+#### 2️⃣ Supabase Dashboard 설정
+1. **Authentication → Providers → Google** 이동
+2. **Enable Google Provider** 활성화
+3. 다음 정보 입력:
+   - **Client ID**: `901515411397-soknq5qg2l3ga3ggc3gcrp70rmt2iovt.apps.googleusercontent.com`
+   - **Client Secret**: (Google Cloud Console에서 복사)
+4. **Authorized Redirect URLs** 확인:
+   - `https://gsiismzchtgdklvdvggu.supabase.co/auth/v1/callback`
+
+#### 3️⃣ Client Secret 발급
+1. Google Cloud Console → APIs & Services → Credentials
+2. OAuth 2.0 Client IDs → 생성한 클라이언트 선택
+3. **Client Secret** 복사
+4. 다음 파일에 추가:
+   - `services/ai/.env` → `GOOGLE_CLIENT_SECRET=YOUR_SECRET_HERE`
+
+### 📝 로그인 플로우
+
+#### Supabase 기반 플로우 (권장)
+```
+1. 사용자가 "구글로 계속하기" 버튼 클릭
+   ↓
+2. supabase.auth.signInWithOAuth({ provider: 'google' })
+   ↓
+3. Google 로그인 페이지로 리디렉션
+   ↓
+4. 사용자 로그인 후 Supabase 콜백으로 리디렉션
+   (https://gsiismzchtgdklvdvggu.supabase.co/auth/v1/callback?code=...)
+   ↓
+5. Supabase가 토큰 교환 후 /auth/callback으로 리디렉션
+   ↓
+6. /auth/callback 페이지에서 세션 확인
+   ↓
+7. 홈 페이지로 리디렉션
+```
+
+### 🧪 테스트 방법
+1. **로컬 개발 서버 시작**:
+   ```bash
+   cd apps/web
+   npm run dev
+   ```
+
+2. **로그인 테스트**:
+   - http://localhost:3000 접속
+   - 로그인 모달 열기
+   - "구글로 계속하기" 클릭
+   - Google 계정으로 로그인
+   - `/auth/callback`으로 리디렉션 확인
+   - 홈 페이지로 자동 이동 확인
+
+3. **세션 확인**:
+   ```typescript
+   import { supabase } from '@/lib/supabase';
+
+   const { data: { session } } = await supabase.auth.getSession();
+   console.log('User:', session?.user.email);
+   ```
+
+### 🚨 주의사항
+- **Client Secret은 절대 프론트엔드에 노출하지 마세요**
+- `.env.local` 파일은 `.gitignore`에 추가되어야 합니다
+- 프로덕션 배포 시 환경변수를 별도로 설정하세요
+- Supabase RLS (Row Level Security) 정책 설정 필수
+
+---
+
 ## 📋 향후 작업 (Next Steps)
 
 ### 1️⃣ Cloud Run 배포 완료 (진행 중)
@@ -363,6 +463,52 @@ gcloud run deploy zipcheck-ai \
 - **Secret Management**: Google Secret Manager
 - **PDF Processing**: unstructured + pymupdf
 - **Vector Store**: pgvector (Supabase)
+
+---
+
+## 📱 모바일 앱 기술 스택 (React Native)
+
+### 핵심 프레임워크
+- **앱 프레임워크**: React Native + Expo + TypeScript
+- **상태관리**: Zustand or Redux Toolkit (웹과 공유 가능)
+- **네비게이션**: @react-navigation/native
+
+### 기능별 라이브러리
+- **파일 업로드**:
+  - `expo-document-picker` (PDF/문서)
+  - `expo-image-picker` (이미지)
+  - → Cloud Run API로 업로드
+
+- **PDF 뷰어**:
+  - `react-native-pdf` (URL/바이너리 표시)
+
+- **푸시 알림**:
+  - `expo-notifications`
+  - 서버에서 FCM/APNs 연동
+
+### 백엔드 통합
+- **Auth/DB/Storage**:
+  - Supabase (Auth + Storage)
+  - `react-native-url-polyfill` 추가 (필수)
+
+- **에러/로그**:
+  - Sentry
+  - `react-native-device-info`
+
+- **AI 호출**:
+  - 백엔드(Cloud Run) REST API → OpenAI/Claude/Gemini 프록시
+  - 직접 LLM API 호출 없음 (보안)
+
+### 아키텍처
+```
+React Native App (TypeScript)
+    ↓
+Supabase Auth + Storage
+    ↓
+Cloud Run (FastAPI) ← AI Gateway
+    ↓
+OpenAI / Claude / Gemini
+```
 
 ---
 

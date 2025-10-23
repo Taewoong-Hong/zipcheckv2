@@ -23,6 +23,40 @@ class Settings(BaseSettings):
     # LLM Providers
     openai_api_key: str = Field(..., description="OpenAI API key")
     anthropic_api_key: str = Field(..., description="Anthropic API key")
+    gemini_api_key: str = Field(..., description="Google Gemini API key")
+
+    # Public Data API Keys
+    keyword_juso_api_key: str = Field(..., description="도로명주소 검색 API 키 (행안부)")
+    data_go_kr_api_key: str = Field(..., description="공공데이터포털 API 키 (국토부)")
+
+    # OAuth Configuration
+    # Kakao OAuth
+    kakao_client_id: str = Field(..., description="카카오 클라이언트 ID")
+    kakao_redirect_uri: str = Field(
+        default="http://localhost:8000/api/auth/kakao/callback",
+        description="카카오 리다이렉트 URI"
+    )
+
+    # Google OAuth
+    google_client_id: str = Field(..., description="Google OAuth 클라이언트 ID")
+    google_client_secret: str = Field(..., description="Google OAuth 클라이언트 시크릿")
+    google_redirect_uri: str = Field(
+        default="http://localhost:3000/auth/callback",
+        description="Google OAuth 리다이렉트 URI"
+    )
+
+    # Naver OAuth
+    naver_client_id: str = Field(..., description="Naver OAuth 클라이언트 ID")
+    naver_client_secret: str = Field(..., description="Naver OAuth 클라이언트 시크릿")
+    naver_redirect_uri: str = Field(
+        default="http://localhost:3000/auth/callback",
+        description="Naver OAuth 리다이렉트 URI"
+    )
+
+    # Supabase Configuration
+    supabase_url: str = Field(..., description="Supabase 프로젝트 URL")
+    supabase_anon_key: str = Field(..., description="Supabase Anonymous Key")
+    supabase_service_role_key: str = Field(..., description="Supabase Service Role Key (서버 전용)")
 
     # LLM Configuration
     primary_llm: Literal["openai", "claude"] = Field(

@@ -11,9 +11,16 @@ import { simulateTestResponse } from "@/lib/testScenario";
 interface ChatInterfaceProps {
   isSidebarExpanded: boolean;
   onToggleSidebar: () => void;
+  isLoggedIn?: boolean;
+  onLoginRequired?: () => void;
 }
 
-export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: ChatInterfaceProps) {
+export default function ChatInterface({
+  isSidebarExpanded,
+  onToggleSidebar,
+  isLoggedIn = true,
+  onLoginRequired
+}: ChatInterfaceProps) {
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -77,6 +84,12 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+
+    // 비로그인 상태일 때 로그인 유도
+    if (!isLoggedIn) {
+      onLoginRequired?.();
+      return;
+    }
 
     if (inputValue.trim() && !isLoading) {
       const content = inputValue.trim();
@@ -301,6 +314,11 @@ export default function ChatInterface({ isSidebarExpanded, onToggleSidebar }: Ch
                     type="text"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
+                    onClick={() => {
+                      if (!isLoggedIn) {
+                        onLoginRequired?.();
+                      }
+                    }}
                     placeholder="부동산 계약과 관련된 무엇이든 물어보세요"
                     className="flex-1 outline-none text-neutral-800 placeholder-neutral-400 text-sm md:text-base pl-2"
                     disabled={isLoading}

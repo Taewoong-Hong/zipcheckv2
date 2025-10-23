@@ -29,6 +29,9 @@ from ingest.validators import (
     FileValidationError,
 )
 
+# Import auth router
+from routes.auth import router as auth_router
+
 # 로깅 설정
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -81,6 +84,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# 라우터 등록
+app.include_router(auth_router)
 
 
 # Pydantic 모델

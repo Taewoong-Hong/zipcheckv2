@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 // Google Cloud Run에 배포된 AI 서비스 URL
-const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-xxxxx-du.a.run.app';
+const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-871793445649.asia-northeast3.run.app';
 
 export async function POST(request: NextRequest) {
   try {

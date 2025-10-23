@@ -49,9 +49,9 @@ docs/
 !DEPLOYMENT.md
 !QUICKSTART.md
 
-# Docker files (not needed for source-based deployment)
-Dockerfile
+# Docker files (Dockerfile needed for container build)
+# Dockerfile  ← 주석 처리하여 포함
 .dockerignore
 docker-compose.yml
-cloudbuild.yaml
-service.yaml
+# cloudbuild.yaml  ← 필요할 수 있으므로 주석
+# service.yaml

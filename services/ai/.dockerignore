@@ -53,10 +53,10 @@ logs/
 .gitignore
 
 # Docker
-Dockerfile
 .dockerignore
 docker-compose.yml
 
-# Documentation
+# Documentation (DEPLOYMENT.md는 포함)
 README.md
-*.md
+P*.md
+시작하기.md
