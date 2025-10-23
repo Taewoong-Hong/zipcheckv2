@@ -1,11 +1,54 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { X, Check } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import LoginModal from "@/components/auth/LoginModal";
 
 export default function PricingPage() {
+  const router = useRouter();
   const [isYearly, setIsYearly] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [pendingPlan, setPendingPlan] = useState<{ plan: string; cycle: string } | null>(null);
+
+  // 로그인 상태 확인
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsLoggedIn(!!session);
+    };
+    checkAuth();
+
+    // 로그인 상태 변경 감지
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setIsLoggedIn(!!session);
+
+      // 로그인 성공 후 대기 중인 플랜이 있으면 체크아웃으로 이동
+      if (session && pendingPlan) {
+        router.push(`/checkout?plan=${pendingPlan.plan}&cycle=${pendingPlan.cycle}`);
+        setPendingPlan(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [pendingPlan, router]);
+
+  // 업그레이드 버튼 클릭 핸들러
+  const handleUpgradeClick = (plan: "personal" | "pro") => {
+    const cycle = isYearly ? "yearly" : "monthly";
+
+    if (!isLoggedIn) {
+      // 미로그인 시 플랜 정보 저장 후 로그인 모달 표시
+      setPendingPlan({ plan, cycle });
+      setShowLoginModal(true);
+    } else {
+      // 로그인 상태면 바로 체크아웃으로 이동
+      router.push(`/checkout?plan=${plan}&cycle=${cycle}`);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-neutral-50 py-9 px-3">
@@ -54,6 +97,16 @@ export default function PricingPage() {
             </span>
           </div>
         </div>
+
+        {/* 연간 결제 환불 정책 안내 */}
+        {isYearly && (
+          <div className="max-w-2xl mx-auto mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+            <p className="text-sm text-amber-900 text-center leading-relaxed">
+              <strong>📋 연간 구독 환불 정책:</strong> 구독 취소 시 언제든지 환불 가능합니다.
+              단, 환불 금액은 <strong>월간 정가 기준</strong>으로 계산되며, 연간 할인 혜택은 적용되지 않습니다.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Pricing Cards */}
@@ -87,7 +140,7 @@ export default function PricingPage() {
             </li>
             <li className="flex items-start gap-2">
               <Check className="w-4 h-4 text-neutral-900 shrink-0 mt-0.5" />
-              <span className="text-neutral-700 text-sm leading-relaxed tracking-wide">빠른 고급 모델 1개 사용</span>
+              <span className="text-neutral-700 text-sm leading-relaxed tracking-wide">AI 분석 고급 모드 이용</span>
             </li>
             <li className="flex items-start gap-2">
               <Check className="w-4 h-4 text-neutral-900 shrink-0 mt-0.5" />
@@ -105,7 +158,10 @@ export default function PricingPage() {
             </p>
           </div>
 
-          <button className="w-full py-3 bg-neutral-900 text-white rounded-xl font-semibold hover:bg-neutral-800 transition-colors">
+          <button
+            onClick={() => handleUpgradeClick("personal")}
+            className="w-full py-3 bg-neutral-900 text-white rounded-xl font-semibold hover:bg-neutral-800 transition-colors"
+          >
             업그레이드
           </button>
         </div>
@@ -139,7 +195,7 @@ export default function PricingPage() {
             </li>
             <li className="flex items-start gap-2">
               <Check className="w-4 h-4 text-neutral-900 shrink-0 mt-0.5" />
-              <span className="text-neutral-700 text-sm leading-relaxed tracking-wide">빠른 고급 모델 2개 동시 선택(고속/정확 모드)</span>
+              <span className="text-neutral-700 text-sm leading-relaxed tracking-wide">다중 고급 모델을 이용한 AI 분석</span>
             </li>
             <li className="flex items-start gap-2">
               <Check className="w-4 h-4 text-neutral-900 shrink-0 mt-0.5" />
@@ -165,11 +221,19 @@ export default function PricingPage() {
             </p>
           </div>
 
-          <button className="w-full py-3 bg-neutral-900 text-white rounded-xl font-semibold hover:bg-neutral-800 transition-colors">
+          <button
+            onClick={() => handleUpgradeClick("pro")}
+            className="w-full py-3 bg-neutral-900 text-white rounded-xl font-semibold hover:bg-neutral-800 transition-colors"
+          >
             업그레이드
           </button>
         </div>
       </div>
+
+      {/* 로그인 모달 */}
+      {showLoginModal && (
+        <LoginModal onClose={() => setShowLoginModal(false)} />
+      )}
     </div>
   );
 }

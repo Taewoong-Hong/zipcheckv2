@@ -12,21 +12,21 @@ export default function CompanyPage() {
             <Link href="/" className="p-2 hover:bg-white/20 rounded-lg transition-colors">
               <ChevronLeft className="w-5 h-5" />
             </Link>
-            <h1 className="text-2xl font-bold">사업자 정보</h1>
+            <h1 className="text-2xl font-bold">회사소개</h1>
           </div>
 
           <div className="flex items-center gap-4">
             <div className="w-20 h-20 bg-white rounded-xl flex items-center justify-center">
               <Image
                 src="/logo-black.png"
-                alt="ZipCheck"
+                alt="집체크"
                 width={50}
                 height={50}
                 className="object-contain"
               />
             </div>
             <div>
-              <h2 className="text-3xl font-bold mb-1">집체크(ZipCheck)</h2>
+              <h2 className="text-3xl font-bold mb-1">집체크 (ZipCheck)</h2>
               <p className="text-white/90">AI 기반 부동산 계약 리스크 분석 서비스</p>
             </div>
           </div>
@@ -44,19 +44,15 @@ export default function CompanyPage() {
           <div className="space-y-3">
             <div className="flex items-start gap-3">
               <span className="text-neutral-500 min-w-[100px]">회사명</span>
-              <span className="text-neutral-800 font-medium">주식회사 집체크</span>
+              <span className="text-neutral-800 font-medium">아워</span>
             </div>
             <div className="flex items-start gap-3">
-              <span className="text-neutral-500 min-w-[100px]">대표이사</span>
-              <span className="text-neutral-800">홍길동</span>
+              <span className="text-neutral-500 min-w-[100px]">대표자</span>
+              <span className="text-neutral-800">이우리</span>
             </div>
             <div className="flex items-start gap-3">
               <span className="text-neutral-500 min-w-[100px]">설립일</span>
-              <span className="text-neutral-800">2024년 1월 1일</span>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="text-neutral-500 min-w-[100px]">직원수</span>
-              <span className="text-neutral-800">15명</span>
+              <span className="text-neutral-800">2024년 10월 30일</span>
             </div>
           </div>
         </div>
@@ -70,23 +66,7 @@ export default function CompanyPage() {
           <div className="space-y-3">
             <div className="flex items-start gap-3">
               <span className="text-neutral-500 min-w-[100px]">사업자번호</span>
-              <span className="text-neutral-800 font-mono">123-45-67890</span>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="text-neutral-500 min-w-[100px]">법인번호</span>
-              <span className="text-neutral-800 font-mono">110111-7654321</span>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="text-neutral-500 min-w-[100px]">업태</span>
-              <span className="text-neutral-800">정보통신업</span>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="text-neutral-500 min-w-[100px]">종목</span>
-              <span className="text-neutral-800">소프트웨어 개발 및 공급업, 정보서비스업</span>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="text-neutral-500 min-w-[100px]">통신판매업</span>
-              <span className="text-neutral-800">제2024-서울강남-0001호</span>
+              <span className="text-neutral-800 font-mono">533-15-02502</span>
             </div>
           </div>
         </div>
@@ -101,18 +81,13 @@ export default function CompanyPage() {
             <div className="flex items-start gap-3">
               <MapPin className="w-5 h-5 text-neutral-400 mt-0.5" />
               <div>
-                <p className="text-neutral-800">서울특별시 강남구 테헤란로 123</p>
-                <p className="text-neutral-600 text-sm">집체크빌딩 5층 (우) 06234</p>
+                <p className="text-neutral-800">인천광역시 중구 인중로 290 A동 1108호</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Phone className="w-5 h-5 text-neutral-400" />
-              <span className="text-neutral-800">02-1234-5678</span>
-            </div>
-            <div className="flex items-center gap-3">
               <Mail className="w-5 h-5 text-neutral-400" />
-              <a href="mailto:support@zipcheck.kr" className="text-brand-primary hover:underline">
-                support@zipcheck.kr
+              <a href="mailto:hourhong@zipcheck.kr" className="text-brand-primary hover:underline">
+                hourhong@zipcheck.kr
               </a>
             </div>
             <div className="flex items-center gap-3">
@@ -132,7 +107,7 @@ export default function CompanyPage() {
             안전한 부동산 거래를 도와드리는 프롭테크(PropTech) 서비스입니다.
           </p>
           <p className="text-neutral-600 leading-relaxed mb-4">
-            OpenAI GPT-4 기반의 최첨단 AI 기술과 부동산 전문 지식을 결합하여,
+            다중 고급 AI 기술과 부동산 전문 지식을 결합하여,
             일반 소비자도 쉽게 계약서의 문제점을 파악하고 대응할 수 있도록 지원합니다.
           </p>
           <div className="grid grid-cols-2 gap-4 mt-6">
@@ -156,16 +131,54 @@ export default function CompanyPage() {
         </div>
 
         {/* Legal Notice */}
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
-          <h3 className="text-lg font-bold text-amber-900 mb-3">법적 고지</h3>
-          <p className="text-amber-800 text-sm leading-relaxed mb-3">
-            집체크가 제공하는 AI 분석 서비스는 참고용이며, 법적 조언을 대체할 수 없습니다.
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
+          <h3 className="text-lg font-bold text-red-900 mb-3">⚠️ 서비스 이용 안내</h3>
+          <p className="text-red-800 text-sm leading-relaxed">
+            집체크가 제공하는 AI 분석 결과는 참고용이며, 법적 조언을 대체할 수 없습니다.
             중요한 부동산 거래는 반드시 전문가(변호사, 공인중개사)와 상담하시기 바랍니다.
           </p>
-          <p className="text-amber-800 text-sm leading-relaxed">
-            본 서비스 이용과 관련된 모든 법적 분쟁은 대한민국 법률에 따라 처리되며,
-            서울중앙지방법원을 제1심 관할법원으로 합니다.
-          </p>
+        </div>
+
+        {/* Policy Links */}
+        <div className="bg-white rounded-xl border border-neutral-200 p-6">
+          <h3 className="text-lg font-bold text-neutral-800 mb-4 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-brand-primary" />
+            정책 및 약관
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Link
+              href="/terms?tab=terms"
+              className="p-4 border border-neutral-200 rounded-lg hover:border-brand-primary hover:bg-brand-primary/5 transition-colors group"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-neutral-800 group-hover:text-brand-primary mb-1">
+                    이용약관
+                  </h4>
+                  <p className="text-sm text-neutral-500">
+                    서비스 이용 조건 및 규정
+                  </p>
+                </div>
+                <ChevronLeft className="w-5 h-5 text-neutral-400 rotate-180 group-hover:text-brand-primary" />
+              </div>
+            </Link>
+            <Link
+              href="/terms?tab=privacy"
+              className="p-4 border border-neutral-200 rounded-lg hover:border-brand-primary hover:bg-brand-primary/5 transition-colors group"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-neutral-800 group-hover:text-brand-primary mb-1">
+                    개인정보 보호 정책
+                  </h4>
+                  <p className="text-sm text-neutral-500">
+                    개인정보 처리 및 보호 방침
+                  </p>
+                </div>
+                <ChevronLeft className="w-5 h-5 text-neutral-400 rotate-180 group-hover:text-brand-primary" />
+              </div>
+            </Link>
+          </div>
         </div>
       </div>
     </div>
