@@ -7,11 +7,14 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export default function NaverCallbackPage() {
+// Force dynamic rendering for OAuth callback
+export const dynamic = 'force-dynamic';
+
+function NaverCallbackPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
@@ -164,5 +167,20 @@ export default function NaverCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function NaverCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto"></div>
+          <p className="mt-4 text-neutral-600">로딩 중...</p>
+        </div>
+      </div>
+    }>
+      <NaverCallbackPageContent />
+    </Suspense>
   );
 }
