@@ -1,11 +1,14 @@
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { XCircle, ArrowLeft, RefreshCw } from "lucide-react";
 
-export default function CheckoutFailPage() {
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
+function CheckoutFailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -185,5 +188,20 @@ export default function CheckoutFailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CheckoutFailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-neutral-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mx-auto"></div>
+          <p className="mt-4 text-neutral-600">로딩 중...</p>
+        </div>
+      </div>
+    }>
+      <CheckoutFailPageContent />
+    </Suspense>
   );
 }
