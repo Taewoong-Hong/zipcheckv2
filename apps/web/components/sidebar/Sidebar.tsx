@@ -325,7 +325,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
                 이용약관 & 개인정보처리방침
               </Link>
               <Link href="/company" className="block w-full text-left px-4 py-2 text-xs text-neutral-600 hover:bg-neutral-100 rounded-lg transition-colors">
-                사업자정보
+                회사소개
               </Link>
             </div>
           )}
