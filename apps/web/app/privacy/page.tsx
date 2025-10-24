@@ -2,14 +2,14 @@ import { Suspense } from "react";
 import TermsContent from "@/components/terms/TermsContent";
 
 export const metadata = {
-  title: "이용약관 및 개인정보 보호 정책 - 집체크",
-  description: "집체크 서비스 이용약관 및 개인정보 보호 정책을 확인하세요.",
+  title: "개인정보 보호 정책 - 집체크",
+  description: "집체크 개인정보 보호 정책을 확인하세요.",
 };
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
-export default function TermsPage() {
+export default function PrivacyPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-neutral-50 flex items-center justify-center">
