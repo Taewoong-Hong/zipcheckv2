@@ -183,6 +183,93 @@ def upsert_contract_pages(
         raise ValueError(f"페이지별 업서트 중 오류 발생: {e}") from e
 
 
+def upsert_document_embeddings(
+    doc_id: str,
+    user_id: str,
+    text: str,
+    metadata: Dict[str, Any] | None = None,
+    chunk_size: int = 1200,
+    chunk_overlap: int = 150,
+) -> int:
+    """
+    문서 텍스트를 청크로 분할하고 v2_embeddings 테이블에 직접 저장합니다.
+    (등기부등본 등 document_type='registry'인 문서용)
+
+    Args:
+        doc_id: 문서 고유 ID (v2_documents.id)
+        user_id: 사용자 UUID
+        text: 전체 텍스트
+        metadata: 추가 메타데이터
+        chunk_size: 청크 크기 (문자 수)
+        chunk_overlap: 청크 간 오버랩 (문자 수)
+
+    Returns:
+        업서트된 청크 개수
+    """
+    if not text or not text.strip():
+        raise ValueError("텍스트가 비어있습니다")
+
+    logger.info(
+        f"문서 임베딩 시작: doc_id={doc_id}, user_id={user_id}, "
+        f"길이={len(text)}, chunk_size={chunk_size}"
+    )
+
+    # 텍스트 분할기 설정
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+
+    # 청크 생성
+    chunks = splitter.split_text(text)
+    logger.info(f"{len(chunks)}개 청크 생성됨")
+
+    # 메타데이터 준비
+    base_metadata = metadata or {}
+
+    # Document 객체 생성 (pgvector용)
+    documents = []
+    for i, chunk in enumerate(chunks):
+        chunk_metadata = {
+            **base_metadata,
+            "doc_id": doc_id,
+            "user_id": user_id,
+            "chunk_index": i,
+            "chunk_total": len(chunks),
+        }
+        doc = Document(page_content=chunk, metadata=chunk_metadata)
+        documents.append(doc)
+
+    # 벡터 스토어에 추가 (재시도 로직 포함)
+    try:
+        # pgvector collection은 자동으로 v2_embeddings 테이블에 저장됨
+        vectorstore = get_vectorstore(collection_name="v2_embeddings")
+
+        # 임베딩 재시도 래퍼
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type((RateLimitError, APIError)),
+            reraise=True,
+        )
+        def add_documents_with_retry():
+            return vectorstore.add_documents(documents)
+
+        add_documents_with_retry()
+
+        logger.info(
+            f"문서 임베딩 완료: {len(documents)}개 청크, "
+            f"doc_id={doc_id}"
+        )
+        return len(documents)
+
+    except Exception as e:
+        logger.error(f"문서 임베딩 실패: {e}")
+        raise ValueError(f"문서 임베딩 중 오류 발생: {e}") from e
+
+
 def delete_document_chunks(
     doc_id: str,
     collection_name: str = "v2_contract_docs",

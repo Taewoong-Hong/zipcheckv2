@@ -16,6 +16,43 @@ class PublicDataAPIError(Exception):
     pass
 
 
+class BasePublicDataAPI:
+    """
+    공공데이터포털 API 베이스 클래스.
+
+    AsyncClient 생명주기를 관리하고 async context manager를 지원합니다.
+    """
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        """
+        Args:
+            api_key: 공공데이터포털 API 키
+            client: 외부에서 제공하는 httpx.AsyncClient (선택)
+            timeout: 요청 타임아웃 (초)
+        """
+        self.api_key = api_key
+        self.client = client
+        self._owns_client = client is None  # 클라이언트를 직접 생성했는지 여부
+        self.timeout = timeout
+
+    async def __aenter__(self):
+        """Async context manager 진입."""
+        if self.client is None:
+            self.client = httpx.AsyncClient(timeout=self.timeout)
+            self._owns_client = True
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager 종료."""
+        if self._owns_client and self.client is not None:
+            await self.client.aclose()
+
+    async def close(self):
+        """HTTP 클라이언트 종료."""
+        if self._owns_client and self.client is not None:
+            await self.client.aclose()
+
+
 class JusoAPIClient:
     """도로명주소 검색 API 클라이언트 (행정안전부)."""
 
@@ -99,18 +136,13 @@ class JusoAPIClient:
             raise PublicDataAPIError(f"API call failed: {e}") from e
 
 
-class LegalDongCodeAPIClient:
+class LegalDongCodeAPIClient(BasePublicDataAPI):
     """행정표준코드관리시스템 법정동코드 조회 API 클라이언트."""
 
     BASE_URL = "http://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList"
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.client = httpx.AsyncClient(timeout=30.0)
-
-    async def close(self):
-        """Close HTTP client."""
-        await self.client.aclose()
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
 
     @retry(
         stop=stop_after_attempt(2),  # flag Y/N 두 번 시도
@@ -188,9 +220,14 @@ class LegalDongCodeAPIClient:
             logger.info(f"법정동코드 조회 성공: {len(rows)}개 결과")
 
             return {
-                "totalCount": len(rows),
-                "items": self._normalize_legal_dong_items(rows),
-                "params": {"keyword": keyword}
+                "header": {
+                    "resultCode": "000",
+                    "resultMsg": "OK"
+                },
+                "body": {
+                    "items": self._normalize_legal_dong_items(rows),
+                    "totalCount": len(rows)
+                }
             }
 
         except httpx.HTTPError as e:
@@ -238,7 +275,7 @@ class LegalDongCodeAPIClient:
         return items
 
 
-class AptTradeAPIClient:
+class AptTradeAPIClient(BasePublicDataAPI):
     """국토교통부 아파트 실거래가 조회 API 클라이언트."""
 
     # 새 버전과 구 버전 API URL
@@ -247,18 +284,15 @@ class AptTradeAPIClient:
         "old": "http://apis.data.go.kr/1611000/RTMSObsvService/getRTMSDataSvcAptTradeDev"
     }
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.client = httpx.AsyncClient(timeout=30.0)
-
-    async def close(self):
-        """Close HTTP client."""
-        await self.client.aclose()
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
 
     async def get_apt_trades(
         self,
         lawd_cd: str,
-        deal_ymd: str
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
     ) -> Dict[str, Any]:
         """
         아파트 실거래가 조회.
@@ -266,6 +300,8 @@ class AptTradeAPIClient:
         Args:
             lawd_cd: 법정동코드 5자리 (예: "11680")
             deal_ymd: 거래년월 6자리 (예: "202501")
+            page_no: 페이지 번호 (기본값: 1)
+            num_of_rows: 한 페이지 결과 수 (기본값: 100)
 
         Returns:
             거래 내역 딕셔너리
@@ -291,8 +327,8 @@ class AptTradeAPIClient:
                     "serviceKey": self.api_key,
                     "LAWD_CD": lawd_cd,
                     "DEAL_YMD": deal_ymd,
-                    "pageNo": "1",
-                    "numOfRows": "100"
+                    "pageNo": str(page_no),
+                    "numOfRows": str(num_of_rows)
                 }
 
                 response = await self.client.get(base_url, params=params)
@@ -318,8 +354,8 @@ class AptTradeAPIClient:
                     data.get("OpenAPI_ServiceResponse", {}).get("cmmMsgHeader", {}).get("returnAuthMsg", {}).get("resultMessage")
                 )
 
-                # 성공 코드
-                success_codes = ["00", "0000", "INFO-000", "03", "INFO-003"]
+                # 성공 코드 (TypeScript 코드와 동일 + "000" 추가)
+                success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
                 is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
 
                 if result_code and result_code not in success_codes and not is_no_data:
@@ -330,11 +366,14 @@ class AptTradeAPIClient:
                 if is_no_data:
                     logger.info(f"아파트 실거래가 조회: 데이터 없음 (lawd_cd={lawd_cd}, deal_ymd={deal_ymd})")
                     return {
-                        "success": True,
-                        "query": {"lawd_cd": lawd_cd, "deal_ymd": deal_ymd},
-                        "count": 0,
-                        "items": [],
-                        "message": "해당 기간에 거래 내역이 없습니다."
+                        "header": {
+                            "resultCode": result_code,
+                            "resultMsg": result_msg or "NO_DATA"
+                        },
+                        "body": {
+                            "items": [],
+                            "totalCount": 0
+                        }
                     }
 
                 # rows 추출
@@ -344,10 +383,14 @@ class AptTradeAPIClient:
                 logger.info(f"아파트 실거래가 조회 성공: {len(items)}개 결과")
 
                 return {
-                    "success": True,
-                    "query": {"lawd_cd": lawd_cd, "deal_ymd": deal_ymd},
-                    "count": len(items),
-                    "items": self._normalize_apt_trade_items(items)
+                    "header": {
+                        "resultCode": result_code or "000",
+                        "resultMsg": result_msg or "OK"
+                    },
+                    "body": {
+                        "items": self._normalize_apt_trade_items(items),
+                        "totalCount": len(items)
+                    }
                 }
 
             except Exception as e:

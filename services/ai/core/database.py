@@ -10,6 +10,7 @@ from sqlalchemy import (
     Text,
     Integer,
     DateTime,
+    Date,
     ForeignKey,
     CheckConstraint,
     create_engine,
@@ -65,18 +66,27 @@ class Contract(Base):
 
 
 class Document(Base):
-    """문서 원본 및 텍스트 모델 (v2)."""
+    """문서 원본 및 텍스트 모델 (v2) - 등기부등본/계약서."""
     __tablename__ = "v2_documents"
+    __table_args__ = (
+        CheckConstraint("document_type IN ('registry', 'contract')", name="check_document_type"),
+        CheckConstraint("registry_type IN ('land', 'building', 'collective') OR registry_type IS NULL", name="check_registry_type"),
+    )
 
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     contract_id = Column(PGUUID(as_uuid=True), ForeignKey("v2_contracts.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
+    document_type = Column(String, default="registry", nullable=False, index=True)
     file_path = Column(Text)
     file_name = Column(Text)
     file_size = Column(Integer)
     mime_type = Column(String)
     text = Column(Text)
     text_length = Column(Integer)
+    property_address = Column(Text, index=True)
+    owner_info = Column(JSONB, default={})
+    registry_date = Column(Date, index=True)
+    registry_type = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     # Relationships
@@ -193,8 +203,13 @@ def create_document(
     file_path: Optional[str] = None,
     file_size: Optional[int] = None,
     mime_type: Optional[str] = None,
+    document_type: str = "registry",
+    property_address: Optional[str] = None,
+    owner_info: Optional[dict] = None,
+    registry_date: Optional[datetime] = None,
+    registry_type: Optional[str] = None,
 ) -> Document:
-    """문서 생성."""
+    """문서 생성 (등기부등본/계약서)."""
     document = Document(
         contract_id=contract_id,
         user_id=user_id,
@@ -204,11 +219,16 @@ def create_document(
         file_path=file_path,
         file_size=file_size,
         mime_type=mime_type,
+        document_type=document_type,
+        property_address=property_address,
+        owner_info=owner_info or {},
+        registry_date=registry_date,
+        registry_type=registry_type,
     )
     session.add(document)
     session.commit()
     session.refresh(document)
-    logger.info(f"문서 생성: doc_id={document.id}, text_length={len(text)}")
+    logger.info(f"문서 생성: doc_id={document.id}, type={document_type}, text_length={len(text)}")
     return document
 
 

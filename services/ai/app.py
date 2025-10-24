@@ -4,13 +4,17 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, UploadFile, Form, HTTPException, status
+from fastapi import FastAPI, UploadFile, Form, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from uuid import UUID, uuid4
+
+# 보안 모듈 임포트
+from core.config import get_settings, validate_environment
+from core.auth import get_current_user, get_optional_user, require_admin
 
 from core.settings import settings
 from core.chains import build_contract_analysis_chain, single_model_analyze
@@ -20,6 +24,7 @@ from core.database import (
     create_document,
     update_contract_status,
 )
+from core.guardrails import check_question
 from ingest.pdf_parse import parse_pdf_to_text, validate_pdf
 from ingest.upsert_vector import upsert_contract_text
 from ingest.validators import (
@@ -31,6 +36,10 @@ from ingest.validators import (
 
 # Import auth router
 from routes.auth import router as auth_router
+from routes.building import router as building_router
+from routes.registry import router as registry_router
+from routes.land_price import router as land_price_router
+from routes.apt_trade import router as apt_trade_router
 
 # 로깅 설정
 logging.basicConfig(
@@ -55,11 +64,17 @@ if settings.sentry_dsn:
 async def lifespan(app: FastAPI):
     """애플리케이션 시작/종료 시 실행되는 코드."""
     # 시작 시
-    logger.info("ZipCheck AI 서비스 시작")
+    logger.info("=== ZipCheck AI 서비스 시작 ===")
+
+    # 환경 변수 검증
+    logger.info("환경 변수 검증 중...")
+    validate_environment()
+
     logger.info(f"환경: {settings.app_env}")
     logger.info(f"Primary LLM: {settings.primary_llm}")
     logger.info(f"Judge LLM: {settings.judge_llm}")
     logger.info(f"Embedding Model: {settings.embed_model}")
+    logger.info("=== 서비스 준비 완료 ===")
 
     yield
 
@@ -87,7 +102,11 @@ app.add_middleware(
 
 
 # 라우터 등록
+app.include_router(building_router)
 app.include_router(auth_router)
+app.include_router(registry_router)
+app.include_router(land_price_router)
+app.include_router(apt_trade_router)
 
 
 # Pydantic 모델
@@ -155,16 +174,18 @@ async def ingest_contract(
     file: UploadFile,
     contract_id: str = Form(..., min_length=1, max_length=100),
     addr: str = Form(default="", max_length=200),
-    user_id: str = Form(...),  # TODO: 실제로는 JWT에서 추출
+    user: dict = Depends(get_current_user),  # ✅ JWT 인증 필수
 ):
     """
     계약서 PDF 업로드 및 벡터 DB 저장.
+
+    ⚠️ 인증 필수: JWT 토큰을 Authorization 헤더에 포함해야 합니다.
 
     Args:
         file: PDF 파일
         contract_id: 계약서 고유 ID
         addr: 부동산 주소 (선택)
-        user_id: 사용자 ID (UUID)
+        user: 인증된 사용자 정보 (JWT에서 자동 추출)
 
     Returns:
         업로드 결과
@@ -172,9 +193,11 @@ async def ingest_contract(
     Raises:
         HTTPException: 파일 검증 실패 또는 처리 오류 시
     """
+    # JWT에서 user_id 추출
+    user_id = user["sub"]  # Supabase user_id (UUID 문자열)
     logger.info(f"PDF 업로드 요청: contract_id={contract_id}, user_id={user_id}")
 
-    # user_id 검증
+    # user_id를 UUID로 변환
     try:
         user_uuid = UUID(user_id)
     except ValueError:
@@ -357,7 +380,10 @@ async def ingest_contract(
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_contract(request: AnalyzeRequest):
+async def analyze_contract(
+    request: AnalyzeRequest,
+    user: dict = Depends(get_current_user),  # ✅ JWT 인증 필수
+):
     """
     계약서 분석 요청.
 
@@ -374,6 +400,27 @@ async def analyze_contract(request: AnalyzeRequest):
         f"분석 요청: mode={request.mode}, "
         f"provider={request.provider}, "
         f"question={request.question[:50]}..."
+    )
+
+    # 가드레일: 부동산 관련 질문인지 확인
+    guardrail_result = check_question(request.question, strict=True)
+
+    if not guardrail_result["allowed"]:
+        logger.warning(
+            f"가드레일 차단: category={guardrail_result['category']}, "
+            f"confidence={guardrail_result['confidence']}"
+        )
+        # 거부 메시지를 정상 응답으로 반환 (사용자 친화적)
+        return AnalyzeResponse(
+            answer=guardrail_result["message"],
+            mode="guardrail",
+            provider="system",
+            sources=[],
+        )
+
+    logger.info(
+        f"가드레일 통과: category={guardrail_result['category']}, "
+        f"confidence={guardrail_result['confidence']}"
     )
 
     try:

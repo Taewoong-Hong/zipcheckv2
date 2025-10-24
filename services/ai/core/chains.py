@@ -1,32 +1,26 @@
 """LangChain LCEL chains for contract analysis."""
 from typing import Any, Dict
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.runnables import Runnable
 from langchain_core.output_parsers import StrOutputParser
 
 from .llm_factory import create_llm
 from .retriever import get_retriever
+from .prompts import SYSTEM_PROMPT
 
 
-# Contract analysis prompt template
-CONTRACT_ANALYSIS_PROMPT = """너는 부동산 계약서 리스크 점검 전문 보조원입니다.
+# Contract analysis prompt template (정중한 분석가 말투)
+CONTRACT_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(SYSTEM_PROMPT),
+    HumanMessagePromptTemplate.from_template("""고객님께서 다음과 같이 문의하셨습니다:
 
-사용자 질문: {question}
+**문의 내용**: {question}
 
-다음은 계약서에서 검색된 관련 내용입니다:
+**관련 계약서 내용**:
 {context}
 
-요구사항:
-1. 계약서에서 발견된 잠재적 리스크를 조목조목 리스트로 정리하세요
-2. 각 리스크 항목마다 다음을 포함하세요:
-   - 리스크 제목 및 설명
-   - 근거가 되는 계약서 내용 요약
-   - 권장 조치사항
-3. 법률적 단정 표현은 피하고, "검토가 필요합니다", "확인을 권장합니다" 등의 표현을 사용하세요
-4. 중요한 사항은 전문가(변호사, 공인중개사) 상담을 권장하세요
-5. 응답은 한국어로 작성하세요
-
-분석 결과:"""
+위 계약서 내용을 바탕으로 전문적인 분석을 제공해 주십시오.""")
+])
 
 
 def build_contract_analysis_chain(
@@ -50,7 +44,7 @@ def build_contract_analysis_chain(
     """
     retriever = get_retriever(k=k)
     llm = create_llm(provider=provider)
-    prompt = ChatPromptTemplate.from_template(CONTRACT_ANALYSIS_PROMPT)
+    prompt = CONTRACT_ANALYSIS_PROMPT
 
     def retrieve_context(inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve relevant documents and format as context."""
@@ -142,7 +136,7 @@ def single_model_analyze(
 
     # 3. LLM 호출
     llm = create_llm(provider=provider)
-    prompt = ChatPromptTemplate.from_template(CONTRACT_ANALYSIS_PROMPT)
+    prompt = CONTRACT_ANALYSIS_PROMPT
 
     messages = prompt.invoke({"question": question, "context": context}).to_messages()
     response = llm.invoke(messages)

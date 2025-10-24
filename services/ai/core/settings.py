@@ -27,7 +27,15 @@ class Settings(BaseSettings):
 
     # Public Data API Keys
     keyword_juso_api_key: str = Field(..., description="도로명주소 검색 API 키 (행안부)")
-    data_go_kr_api_key: str = Field(..., description="공공데이터포털 API 키 (국토부)")
+    data_go_kr_api_key: str = Field(..., description="공공데이터포털 API 키 (국토부 실거래가)")
+    building_ledger_api_key: str = Field(..., description="건축물대장 + 아파트 매매 기본 API 키 (국토부)")
+    vworld_api_key: str = Field(..., description="VWorld 개별공시지가 API 키")
+    vworld_domain: str | None = Field(default=None, description="VWorld API 도메인 (선택)")
+
+    @property
+    def public_data_api_key(self) -> str:
+        """아파트 매매 기본 API 키 (data_go_kr_api_key와 동일 - 법정동과 함께 승인됨)."""
+        return self.data_go_kr_api_key
 
     # OAuth Configuration
     # Kakao OAuth
