@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { Users, UserPlus, Activity, MousePointer, TrendingUp, Clock } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface KPIData {
   activeUsers: number;
@@ -32,14 +33,21 @@ export default function KPICards() {
   useEffect(() => {
     fetchKPIData();
   }, []);
-
   async function fetchKPIData() {
     try {
+      // Supabase 세션에서 Access Token 가져오기
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        throw new Error('인증 세션이 없습니다.');
+      }
+
       const response = await fetch('/api/admin/ga/overview', {
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
         },
-        credentials: 'include', // 쿠키 포함
+        credentials: 'include',
       });
 
       if (!response.ok) {

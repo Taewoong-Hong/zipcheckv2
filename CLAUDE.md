@@ -1,5 +1,7 @@
 # 🧩 **집체크 (ZipCheck) LLM 리팩토링 PRD v2 + 구현 구조**
 
+> **📚 문서 구조**: 프로젝트 전체 가이드는 이 파일에, 세부 기술 문서는 [docs/](docs/README.md) 폴더에 정리되어 있습니다.
+
 ## 🎨 브랜드 컬러
 - **Primary Colors**:
   - Red/Pink 계열의 그라데이션 (메인 로고 컬러)
@@ -305,6 +307,95 @@ gcloud run deploy zipcheck-ai \
 
 ---
 
+## 🛡️ Cloudflare Turnstile 봇 방지 시스템 (2025-01-24)
+
+### ✅ 구현 완료
+
+Cloudflare Turnstile을 통한 봇 차단 시스템 구현. 회원가입, 무료 분석 요청, 비회원 문의 등 Abuse 가능성이 있는 모든 엔드포인트에 적용.
+
+### 🔧 환경변수 설정
+
+#### 프론트엔드 (Vercel)
+```bash
+NEXT_PUBLIC_TURNSTILE_SITE_KEY=YOUR_SITE_KEY_HERE  # Cloudflare Dashboard에서 발급
+TURNSTILE_SECRET_KEY=0x4AAAAAAB0i7GZiRbNMj2tuUHgMjicQYLA  # 서버 사이드 검증용
+```
+
+#### 백엔드 (Google Cloud Run - Secret Manager)
+```bash
+TURNSTILE_SECRET_KEY=0x4AAAAAAB0i7GZiRbNMj2tuUHgMjicQYLA
+```
+
+### 📦 구현 파일
+
+1. **백엔드 검증 유틸**
+   - `services/ai/core/security/turnstile.py`: Cloudflare API 검증 로직
+   - 비동기/동기 버전 모두 지원
+
+2. **프론트엔드 위젯**
+   - `apps/web/components/auth/TurnstileWidget.tsx`: React 컴포넌트
+   - `apps/web/app/layout.tsx`: Turnstile 스크립트 로드
+
+### 🔐 보안 정책
+
+- **비밀키 관리**: `TURNSTILE_SECRET_KEY`는 절대 프론트엔드에 노출 금지
+- **토큰 검증**: 모든 폼 제출 시 백엔드에서 토큰 검증 필수
+- **실패 처리**: 검증 실패 시 사용자 친화적 메시지 표시
+- **재사용 방지**: Turnstile 자동 토큰 만료/재사용 체크
+
+### 📝 사용 예시
+
+#### 프론트엔드 (회원가입 페이지)
+```typescript
+import TurnstileWidget from '@/components/auth/TurnstileWidget';
+
+const [turnstileToken, setTurnstileToken] = useState('');
+
+<TurnstileWidget
+  onSuccess={(token) => setTurnstileToken(token)}
+  onError={() => setTurnstileToken('')}
+  theme="light"
+  size="normal"
+/>
+
+// 폼 제출 시 토큰 포함
+const formData = new FormData();
+formData.append('cf_turnstile_token', turnstileToken);
+```
+
+#### 백엔드 (FastAPI 엔드포인트)
+```python
+from fastapi import Form, HTTPException, Request
+from core.security.turnstile import verify_turnstile
+
+@app.post("/auth/signup")
+async def signup(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    cf_turnstile_token: str = Form(...)
+):
+    # Turnstile 검증
+    remote_ip = request.client.host if request.client else None
+    is_valid = await verify_turnstile(cf_turnstile_token, remote_ip=remote_ip)
+
+    if not is_valid:
+        raise HTTPException(400, "Bot verification failed")
+
+    # 가입 로직 수행
+    return {"ok": True}
+```
+
+### 🚨 운영 체크리스트
+- [x] 비밀키 서버 전용 환경변수 설정
+- [x] 실패 시 사용자 친화 메시지 표시
+- [x] 토큰 재사용/만료 체크 (Turnstile 자동 처리)
+- [ ] 레이트 리밋 (IP/세션) 추가 구현
+- [ ] 검증 실패율/IP 분포 모니터링
+- [ ] E2E 테스트: 위젯→토큰→검증→가입 흐름
+
+---
+
 ## 🔐 Google OAuth 설정 가이드 (2025-01-23)
 
 ### ✅ 완료된 작업
@@ -513,3 +604,126 @@ OpenAI / Claude / Gemini
 ---
 
 이 내용은 기존 PRD.md의 AI 리팩토링 및 구조 정의를 포함하며, 실제 코드 베이스 구성의 표준 가이드로 사용 가능합니다
+## 🔐 고객 데이터 암호화 시스템 (2025-01-24)
+
+### ✅ 구현 완료
+
+AES-256-GCM 알고리즘을 사용한 고객 데이터 암호화/복호화 시스템 구현. 개인정보 보호법 및 GDPR 준수.
+
+### 🔧 환경변수 설정
+
+#### 프론트엔드 & 백엔드 공통
+```bash
+# 데이터 암호화 키 (고객 데이터 보호)
+# ⚠️ 프로덕션에서는 32자 이상의 강력한 랜덤 키 사용 필수!
+# 키 생성 예시: openssl rand -base64 32
+ENCRYPTION_KEY=zipcheck_v2_encryption_key_change_this_in_production_12345
+```
+
+### 📦 구현 파일
+
+#### 프론트엔드 (Next.js)
+1. **암호화 유틸리티**
+   - `apps/web/lib/encryption.ts`: AES-256-GCM 암호화/복호화 로직
+   - 객체 필드 암호화/복호화 헬퍼 함수
+   - 마스킹 함수 (이메일, 이름, 전화번호)
+
+#### 백엔드 (FastAPI)
+1. **암호화 유틸리티**
+   - `services/ai/core/encryption.py`: AES-256-GCM 암호화/복호화 로직
+   - PBKDF2 키 파생 함수 (SHA-256, 100,000 iterations)
+   - 싱글톤 패턴으로 성능 최적화
+
+2. **관리자 API**
+   - `apps/web/app/api/admin/stats/route.ts`: 통계 데이터 API
+   - `apps/web/app/api/admin/data/route.ts`: 문서 데이터 API (암호화/복호화 포함)
+   - `apps/web/app/api/admin/users/route.ts`: 회원 데이터 API
+
+### 🔐 암호화 대상 데이터
+
+#### 필수 암호화 필드
+- **v2_profiles**: `name` (이름)
+- **v2_documents**: `property_address` (부동산 주소), `owner_info` (소유자 정보)
+- **v2_contracts**: `addr` (주소)
+- **이메일**: auth.users에서 관리 (Supabase 자체 암호화)
+
+#### 선택적 마스킹 (로그/디버깅용)
+- 이메일: `user@example.com` → `us***@example.com`
+- 이름: `홍길동` → `홍*동`
+- 전화번호: `010-1234-5678` → `010-****-5678`
+
+### 📝 사용 예시
+
+#### 프론트엔드 (TypeScript)
+```typescript
+import { encrypt, decrypt, encryptFields, decryptFields } from '@/lib/encryption';
+
+// 단일 필드 암호화
+const encrypted = encrypt('홍길동');
+
+// 단일 필드 복호화
+const decrypted = decrypt(encrypted);
+
+// 객체 필드 암호화
+const user = { name: '홍길동', email: 'user@example.com', age: 30 };
+const encryptedUser = encryptFields(user, ['name']); // name만 암호화
+
+// 객체 필드 복호화
+const decryptedUser = decryptFields(encryptedUser, ['name']);
+```
+
+#### 백엔드 (Python)
+```python
+from core.encryption import encrypt, decrypt, encrypt_fields, decrypt_fields
+
+# 단일 필드 암호화
+encrypted = encrypt('홍길동')
+
+# 단일 필드 복호화
+decrypted = decrypt(encrypted)
+
+# 딕셔너리 필드 암호화
+user = {'name': '홍길동', 'email': 'user@example.com', 'age': 30}
+encrypted_user = encrypt_fields(user, ['name'])  # name만 암호화
+
+# 딕셔너리 필드 복호화
+decrypted_user = decrypt_fields(encrypted_user, ['name'])
+
+# 리스트 필드 복호화
+users = [{'name': 'encrypted1'}, {'name': 'encrypted2'}]
+decrypted_users = decrypt_list_fields(users, ['name'])
+```
+
+### 🔒 보안 정책
+
+#### 키 관리
+- **환경변수 보호**: `ENCRYPTION_KEY`는 절대 코드에 하드코딩 금지
+- **키 교체**: 정기적인 키 교체 (6개월마다 권장)
+- **키 백업**: 안전한 시크릿 관리 시스템(GCP Secret Manager, AWS Secrets Manager) 사용
+
+#### 암호화 정책
+- **알고리즘**: AES-256-GCM (Authenticated Encryption)
+- **키 파생**: PBKDF2-HMAC-SHA256 (100,000 iterations)
+- **Nonce/IV**: 매번 랜덤 생성 (재사용 방지)
+- **인증 태그**: GCM 모드로 데이터 무결성 보장
+
+#### 데이터 처리
+- **저장**: 암호화된 데이터만 데이터베이스에 저장
+- **전송**: HTTPS로만 전송 (TLS 1.3 권장)
+- **로깅**: 복호화된 데이터는 로그에 절대 기록 금지
+- **백업**: 암호화 키는 별도 안전한 장소에 백업
+
+### 🚨 운영 체크리스트
+- [x] 암호화 라이브러리 설치 (cryptography==42.0.0)
+- [x] 환경변수 설정 (ENCRYPTION_KEY)
+- [x] 암호화 유틸리티 구현 (프론트엔드/백엔드)
+- [x] API 엔드포인트에 암호화/복호화 로직 통합
+- [x] 관리자 페이지 실제 데이터 연동
+- [ ] 프로덕션 키 생성 및 Secret Manager 등록
+- [ ] 기존 데이터 마이그레이션 (평문 → 암호문)
+- [ ] 암호화 성능 테스트 및 최적화
+- [ ] 로그 점검 (민감 데이터 노출 여부)
+- [ ] 키 교체 프로세스 문서화
+
+---
+
