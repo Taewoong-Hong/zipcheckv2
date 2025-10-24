@@ -34,24 +34,34 @@ function AuthCallbackPageContent() {
           return;
         }
 
-        // Exchange code for session using Supabase
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(
-          window.location.href
-        );
+        // Supabase가 자동으로 세션을 생성하므로, 세션만 확인
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-        if (exchangeError) {
-          console.error("Session exchange error:", exchangeError);
+        if (sessionError) {
+          console.error("Session error:", sessionError);
           setStatus("error");
-          setErrorMessage(exchangeError.message);
+          setErrorMessage(sessionError.message);
           return;
         }
 
-        // Get current session
-        const { data: { session } } = await supabase.auth.getSession();
-
         if (!session) {
-          setStatus("error");
-          setErrorMessage("세션을 생성하지 못했습니다.");
+          // 세션이 아직 생성되지 않았다면 잠시 대기 후 재시도
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+          const { data: { session: retrySession } } = await supabase.auth.getSession();
+
+          if (!retrySession) {
+            setStatus("error");
+            setErrorMessage("로그인 세션을 생성하지 못했습니다. 다시 시도해주세요.");
+            return;
+          }
+
+          console.log("로그인 성공:", retrySession.user.email);
+          setStatus("success");
+
+          setTimeout(() => {
+            router.push("/");
+          }, 1000);
           return;
         }
 
