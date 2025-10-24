@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { User, Settings, LogOut, Crown, ChevronDown, LogIn } from "lucide-react";
+import { User, LogOut, Crown, ChevronDown, LogIn } from "lucide-react";
 import LoginModal from "@/components/auth/LoginModal";
 
 interface UserProfileNewProps {
@@ -126,15 +126,6 @@ export default function UserProfileNew({ isExpanded }: UserProfileNewProps) {
           <div className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg shadow-lg border border-neutral-200 z-50 animate-slideUp">
             {/* Menu Items */}
             <div className="py-2">
-              <Link
-                href="/settings"
-                className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-neutral-50 transition-colors"
-                onClick={() => setIsDropdownOpen(false)}
-              >
-                <Settings className="w-4 h-4 text-neutral-600" />
-                <span>설정</span>
-              </Link>
-
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-neutral-50 transition-colors text-left"
@@ -142,6 +133,15 @@ export default function UserProfileNew({ isExpanded }: UserProfileNewProps) {
                 <LogOut className="w-4 h-4 text-neutral-600" />
                 <span>로그아웃</span>
               </button>
+
+              <Link
+                href="/company"
+                className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:bg-neutral-50 transition-colors"
+                onClick={() => setIsDropdownOpen(false)}
+              >
+                <User className="w-4 h-4 text-neutral-600" />
+                <span>회사소개</span>
+              </Link>
             </div>
 
             {/* Upgrade Button */}
