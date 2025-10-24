@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { User, LogOut, Crown, ChevronDown, LogIn } from "lucide-react";
 import LoginModal from "@/components/auth/LoginModal";
+import { supabase } from "@/lib/supabase";
 
 interface UserProfileNewProps {
   isExpanded: boolean;
@@ -12,26 +13,61 @@ interface UserProfileNewProps {
 export default function UserProfileNew({ isExpanded }: UserProfileNewProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-
-  // TODO: 백엔드 담당자가 실제 세션 상태로 교체할 부분
-  // const { data: session, status } = useSession();
-  // const isLoggedIn = status === "authenticated";
-
-  // 임시 로그인 상태 (테스트용)
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-
-  // Mock user data (로그인 시)
-  const user = {
-    name: "홍길동",
-    email: "hong@example.com",
+  const [user, setUser] = useState({
+    name: "사용자",
+    email: "",
     plan: "무료",
-    image: null, // 프로필 이미지 URL
-  };
+    image: null as string | null,
+  });
 
-  const handleLogout = () => {
-    // TODO: 백엔드 담당자가 연결할 로그아웃 로직
-    // signOut({ callbackUrl: "/" });
-    console.log("로그아웃");
+  useEffect(() => {
+    // 세션 확인
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsLoggedIn(!!session);
+
+      if (session?.user) {
+        // 사용자 정보 업데이트
+        setUser({
+          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || "사용자",
+          email: session.user.email || "",
+          plan: "무료", // TODO: 실제 플랜 정보 가져오기
+          image: session.user.user_metadata?.avatar_url || null,
+        });
+      }
+    };
+    checkAuth();
+
+    // 로그인 상태 변경 감지
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsLoggedIn(!!session);
+
+      if (session?.user) {
+        setUser({
+          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || "사용자",
+          email: session.user.email || "",
+          plan: "무료",
+          image: session.user.user_metadata?.avatar_url || null,
+        });
+      } else {
+        // 로그아웃 시 초기화
+        setUser({
+          name: "사용자",
+          email: "",
+          plan: "무료",
+          image: null,
+        });
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setIsLoggedIn(false);
     setIsDropdownOpen(false);
   };
