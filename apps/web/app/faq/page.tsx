@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronDown, Search, HelpCircle, MessageCircle, Shield, CreditCard, FileText, Settings } from "lucide-react";
+import { JsonLd, createFAQSchema } from "@/components/seo/JsonLd";
 
 interface FAQItem {
   id: string;
@@ -104,8 +105,18 @@ export default function FAQPage() {
     );
   };
 
+  // FAQ 구조화 데이터 생성
+  const faqSchema = createFAQSchema(
+    faqData.map(item => ({
+      question: item.question,
+      answer: item.answer,
+    }))
+  );
+
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <>
+      <JsonLd data={faqSchema} />
+      <div className="min-h-screen bg-neutral-50">
       {/* Header */}
       <div className="bg-white border-b border-neutral-200">
         <div className="max-w-4xl mx-auto px-4 py-6">
@@ -226,6 +237,7 @@ export default function FAQPage() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

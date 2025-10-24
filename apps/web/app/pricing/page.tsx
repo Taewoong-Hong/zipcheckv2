@@ -232,7 +232,7 @@ export default function PricingPage() {
 
       {/* 로그인 모달 */}
       {showLoginModal && (
-        <LoginModal onClose={() => setShowLoginModal(false)} />
+        <LoginModal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} />
       )}
     </div>
   );
