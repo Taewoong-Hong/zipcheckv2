@@ -79,11 +79,14 @@ export default function AdminDashboard() {
 
       const userMetadata = session.user.user_metadata;
       const email = session.user.email;
-      const providerId = session.user.app_metadata?.provider;
-      console.log('📧 Email:', email, 'Provider:', providerId);
 
-      // 2. Google OAuth 검증
-      if (providerId !== 'google') {
+      // 2. Google OAuth 검증 (identities 배열에서 google provider 확인)
+      const hasGoogleIdentity = session.user.identities?.some(
+        (identity: any) => identity.provider === 'google'
+      );
+      console.log('📧 Email:', email, 'Has Google Identity:', hasGoogleIdentity);
+
+      if (!hasGoogleIdentity) {
         console.log('❌ Step 2 FAILED - Not Google OAuth');
         setAuthError('접근 권한이 없습니다.');
         await supabase.auth.signOut();
