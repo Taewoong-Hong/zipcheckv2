@@ -5,15 +5,12 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/sidebar/Sidebar";
 import ChatInterface from "@/components/chat/ChatInterface";
 import LoginModal from "@/components/auth/LoginModal";
+import { supabase } from "@/lib/supabase";
 
 export default function HomePage() {
   const router = useRouter();
 
-  // TODO: 백엔드 담당자가 실제 세션 상태로 교체할 부분
-  // const { data: session, status } = useSession();
-  // const isLoggedIn = status === "authenticated";
-
-  // 임시 로그인 상태 (테스트용 - false로 설정하면 비로그인, true로 설정하면 로그인)
+  // 실제 Supabase 세션 상태로 로그인 확인
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
@@ -26,6 +23,22 @@ export default function HomePage() {
     // Hydration 완료 표시
     setIsHydrated(true);
 
+    // 로그인 상태 확인
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsLoggedIn(!!session);
+    };
+    checkAuth();
+
+    // 로그인 상태 변경 감지
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsLoggedIn(!!session);
+      // 로그인 성공 시 모달 닫기
+      if (session) {
+        setIsLoginModalOpen(false);
+      }
+    });
+
     // 모바일/태블릿 화면이면 사이드바 접기
     if (window.innerWidth < 1024) {
       setIsSidebarExpanded(false);
@@ -37,7 +50,10 @@ export default function HomePage() {
     };
 
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (
