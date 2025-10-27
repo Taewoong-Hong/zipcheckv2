@@ -65,3 +65,26 @@ credentials.json
 
 # Test files with hardcoded credentials (DO NOT COMMIT)
 services/ai/test_*.py
+test_*.py
+**/test_*.py
+test-oauth.js
+**/test-oauth.js
+test_oauth_config.py
+test_chat.json
+
+# Admin scripts with credentials
+create_admin.py
+**/create_admin.py
+
+# Batch processing scripts (may contain sensitive data)
+batch_*.py
+calc_*.py
+fix_*.py
+generate_*.py
+
+# Supabase temporary files
+supabase/.temp/
+supabase/**/.temp/
+
+# Build artifacts
+nul

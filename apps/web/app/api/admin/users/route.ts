@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
+import { decrypt } from '@/lib/encryption';
 
 export async function GET(request: Request) {
   try {
@@ -45,24 +46,62 @@ export async function GET(request: Request) {
       });
     }
 
-    // 데이터 결합
+    // 데이터 결합 및 복호화
     const users = authUsers.users.map((authUser: any) => {
       const profile = profiles?.find((p: any) => p.user_id === authUser.id);
       const analysisCount = analysisCountMap.get(authUser.id) || 0;
 
+      // 암호화된 이름 복호화 시도
+      let decryptedName = profile?.name || authUser.user_metadata?.name || '이름 없음';
+      if (profile?.name) {
+        try {
+          decryptedName = decrypt(profile.name);
+        } catch (error) {
+          // 복호화 실패 시 원본 사용 (평문 데이터 또는 마이그레이션 전)
+          console.warn(`Failed to decrypt name for user ${authUser.id}:`, error);
+        }
+      }
+
+      // 암호화된 이메일 복호화 시도 (필요한 경우)
+      let decryptedEmail = profile?.email || authUser.email || '';
+      if (profile?.email && profile.email !== authUser.email) {
+        try {
+          decryptedEmail = decrypt(profile.email);
+        } catch (error) {
+          // 복호화 실패 시 auth.users의 이메일 사용
+          console.warn(`Failed to decrypt email for user ${authUser.id}:`, error);
+          decryptedEmail = authUser.email || '';
+        }
+      }
+
+      // 전화번호 가져오기 (auth.users의 user_metadata에서 또는 v2_profiles에서)
+      let phone = authUser.user_metadata?.phone || profile?.phone_number || '';
+
+      // 성별 가져오기
+      const gender = profile?.gender || authUser.user_metadata?.gender || null;
+
+      // 연령대 가져오기
+      const ageGroup = profile?.age_group || authUser.user_metadata?.age_group || null;
+
       return {
         id: authUser.id,
-        email: authUser.email || '',
-        name: profile?.name || authUser.user_metadata?.name || '이름 없음',
+        email: decryptedEmail,
+        name: decryptedName,
+        gender: gender,
+        age_group: ageGroup,
+        phone: phone,
         role: authUser.role || 'user',
         status: authUser.banned_until ? 'inactive' : 'active',
-        joinDate: authUser.created_at,
+        created_at: authUser.created_at,
         analyses: analysisCount,
         lastSignIn: authUser.last_sign_in_at,
       };
     });
 
-    return NextResponse.json({ users });
+    return NextResponse.json({
+      users,
+      total: users.length
+    });
   } catch (error) {
     console.error('Error in admin users API:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

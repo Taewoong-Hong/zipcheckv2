@@ -3,10 +3,24 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Upload, Send, Search, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
 import { Message as MessageType } from "@/types/chat";
+import type { ContractType, RegistryMethod, AddressInfo, ChatState } from "@/types/analysis";
 import Message from "./Message";
 import ChatInput from "./ChatInput";
 import { chatStorage } from "@/lib/chatStorage";
 import { simulateTestResponse } from "@/lib/testScenario";
+import { ChatLoadingIndicator } from "@/components/common/LoadingSpinner";
+import { StateMachine } from "@/lib/stateMachine";
+import {
+  isAddressInput,
+  isAnalysisStartTrigger,
+  getStateResponseMessage,
+  createCase,
+  updateCase,
+  uploadRegistry,
+  runAnalysis,
+  getUserCredits,
+  type AnalysisContext,
+} from "@/lib/analysisFlow";
 
 interface ChatInterfaceProps {
   isSidebarExpanded: boolean;
@@ -28,6 +42,10 @@ export default function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Analysis flow state
+  const [stateMachine] = useState(() => new StateMachine('init'));
+  const [analysisContext, setAnalysisContext] = useState<AnalysisContext>({});
+
   // Reset chat function for new conversation
   const resetChat = () => {
     setMessages([]);
@@ -37,8 +55,176 @@ export default function ChatInterface({
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    // Reset analysis flow
+    stateMachine.reset();
+    setAnalysisContext({});
     // Create new session
     chatStorage.createSession();
+  };
+
+  // Handle contract type selection
+  const handleContractTypeSelect = async (contractType: ContractType) => {
+    if (!analysisContext.caseId) {
+      console.error('No case ID found');
+      return;
+    }
+
+    // Update context
+    setAnalysisContext(prev => ({ ...prev, contractType }));
+
+    // Update case in database
+    try {
+      await updateCase(analysisContext.caseId, { contractType });
+    } catch (error) {
+      console.error('Failed to update contract type:', error);
+    }
+
+    // Add user selection message
+    const userMessage: MessageType = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: `계약 유형: ${contractType}`,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    chatStorage.addMessage(userMessage);
+
+    // Transition to registry_choice state
+    stateMachine.transition('registry_choice');
+
+    // Get user credits
+    const credits = await getUserCredits();
+    setAnalysisContext(prev => ({ ...prev, userCredits: credits }));
+
+    // Add AI response with registry choice component
+    const aiMessage: MessageType = {
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content: getStateResponseMessage('registry_choice', { ...analysisContext, contractType, userCredits: credits }),
+      timestamp: new Date(),
+      componentType: 'registry_choice',
+      componentData: { userCredits: credits, registryCost: 10 },
+    };
+    setMessages(prev => [...prev, aiMessage]);
+    chatStorage.addMessage(aiMessage);
+  };
+
+  // Handle registry choice selection
+  const handleRegistryChoiceSelect = async (method: RegistryMethod, file?: File) => {
+    if (!analysisContext.caseId) {
+      console.error('No case ID found');
+      return;
+    }
+
+    setAnalysisContext(prev => ({ ...prev, registryMethod: method, registryFile: file }));
+
+    // Add user selection message
+    const userMessage: MessageType = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: method === 'issue' ? '등기부등본 발급 요청' : '등기부등본 업로드',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    chatStorage.addMessage(userMessage);
+
+    setIsLoading(true);
+
+    try {
+      if (method === 'upload' && file) {
+        // Upload file
+        await uploadRegistry(analysisContext.caseId, file);
+
+        // Transition to registry_ready
+        stateMachine.transition('registry_ready');
+
+        const aiMessage: MessageType = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: getStateResponseMessage('registry_ready'),
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        chatStorage.addMessage(aiMessage);
+
+        // Start analysis
+        await startAnalysis();
+      } else {
+        // Issue registry (not implemented yet)
+        const aiMessage: MessageType = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: '등기부등본 발급 기능은 아직 구현되지 않았습니다. PDF 파일을 업로드해주세요.',
+          timestamp: new Date(),
+          isError: true,
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        chatStorage.addMessage(aiMessage);
+      }
+    } catch (error) {
+      console.error('Registry handling error:', error);
+      const aiMessage: MessageType = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: '등기부 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
+        timestamp: new Date(),
+        isError: true,
+      };
+      setMessages(prev => [...prev, aiMessage]);
+      chatStorage.addMessage(aiMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Start analysis
+  const startAnalysis = async () => {
+    if (!analysisContext.caseId) {
+      console.error('No case ID found');
+      return;
+    }
+
+    // Transition to parse_enrich
+    stateMachine.transition('parse_enrich');
+
+    const processingMessage: MessageType = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: getStateResponseMessage('parse_enrich'),
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, processingMessage]);
+    chatStorage.addMessage(processingMessage);
+
+    try {
+      // Run analysis
+      await runAnalysis(analysisContext.caseId);
+
+      // Transition to report
+      stateMachine.transition('report');
+
+      const reportMessage: MessageType = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: getStateResponseMessage('report'),
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, reportMessage]);
+      chatStorage.addMessage(reportMessage);
+    } catch (error) {
+      console.error('Analysis error:', error);
+      stateMachine.transition('error');
+
+      const errorMessage: MessageType = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: '분석 중 오류가 발생했습니다. 다시 시도해주세요.',
+        timestamp: new Date(),
+        isError: true,
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      chatStorage.addMessage(errorMessage);
+    }
   };
 
   // Load session function
@@ -106,6 +292,48 @@ export default function ChatInterface({
       setMessages(prev => [...prev, userMessage]);
       chatStorage.addMessage(userMessage); // Save to storage
       setIsLoading(true);
+
+      // Check current state and detect analysis triggers
+      const currentState = stateMachine.getState();
+
+      // Handle based on current state
+      if (currentState === 'init' && isAddressInput(content)) {
+        // User entered an address - create case and ask for contract type
+        try {
+          // Create case with placeholder address
+          const address: AddressInfo = { road: content };
+          const caseId = await createCase(address);
+
+          setAnalysisContext({ caseId, address });
+
+          // Transition to contract_type state
+          stateMachine.transition('address_pick');
+          stateMachine.transition('contract_type');
+
+          const aiMessage: MessageType = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: getStateResponseMessage('contract_type', { address }),
+            timestamp: new Date(),
+            componentType: 'contract_selector',
+          };
+          setMessages(prev => [...prev, aiMessage]);
+          chatStorage.addMessage(aiMessage);
+        } catch (error) {
+          console.error('Case creation error:', error);
+          const errorMessage: MessageType = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: '케이스 생성 중 오류가 발생했습니다. 다시 시도해주세요.',
+            timestamp: new Date(),
+            isError: true,
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          chatStorage.addMessage(errorMessage);
+        }
+        setIsLoading(false);
+        return;
+      }
 
       // Prepare AI message placeholder
       const aiMessageId = (Date.now() + 1).toString();
@@ -415,8 +643,18 @@ export default function ChatInterface({
                 key={message.id}
                 message={message}
                 isTyping={index === messages.length - 1 && message.role === 'assistant'}
+                onContractTypeSelect={handleContractTypeSelect}
+                onRegistryChoiceSelect={handleRegistryChoiceSelect}
               />
             ))}
+
+            {/* AI 답변 생성 중 로딩 인디케이터 */}
+            {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
+              <div className="mb-6">
+                <ChatLoadingIndicator />
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
         </div>

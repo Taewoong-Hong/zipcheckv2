@@ -63,16 +63,18 @@ export async function GET(request: Request) {
     });
 
     // 민감한 필드 복호화 (이메일, 주소 등)
-    // 실제 암호화된 데이터가 있을 경우에만 복호화 수행
-    // const decryptedData = dataList.map(item => {
-    //   try {
-    //     return decryptFields(item, ['user', 'title']);
-    //   } catch (error) {
-    //     return item; // 복호화 실패 시 원본 반환
-    //   }
-    // });
+    const decryptedData = dataList.map(item => {
+      try {
+        // 암호화된 필드 복호화 시도
+        return decryptFields(item, ['user', 'title']);
+      } catch (error) {
+        // 복호화 실패 시 원본 반환 (평문 데이터 또는 마이그레이션 전)
+        console.warn('Decryption failed for item:', item.id, error);
+        return item;
+      }
+    });
 
-    return NextResponse.json({ data: dataList });
+    return NextResponse.json({ data: decryptedData });
   } catch (error) {
     console.error('Error in admin data API:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

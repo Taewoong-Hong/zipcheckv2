@@ -4,13 +4,18 @@ import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import { User, Copy, Check, RefreshCw, AlertCircle } from "lucide-react";
 import { Message as MessageType } from "@/types/chat";
+import ContractTypeSelector from "@/components/analysis/ContractTypeSelector";
+import RegistryChoiceSelector from "@/components/analysis/RegistryChoiceSelector";
+import type { ContractType, RegistryMethod } from "@/types/analysis";
 
 interface MessageProps {
   message: MessageType;
   isTyping?: boolean;
+  onContractTypeSelect?: (type: ContractType) => void;
+  onRegistryChoiceSelect?: (method: RegistryMethod, file?: File) => void;
 }
 
-export default function Message({ message, isTyping }: MessageProps) {
+export default function Message({ message, isTyping, onContractTypeSelect, onRegistryChoiceSelect }: MessageProps) {
   const [displayedContent, setDisplayedContent] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
@@ -73,9 +78,43 @@ export default function Message({ message, isTyping }: MessageProps) {
     );
   }
 
+  // 특수 컴포넌트 렌더링
+  const renderSpecialComponent = () => {
+    if (!message.componentType) return null;
+
+    switch (message.componentType) {
+      case 'contract_selector':
+        return (
+          <div className="mt-4">
+            <ContractTypeSelector
+              onSelect={(type) => {
+                onContractTypeSelect?.(type);
+              }}
+            />
+          </div>
+        );
+
+      case 'registry_choice':
+        return (
+          <div className="mt-4">
+            <RegistryChoiceSelector
+              userCredits={message.componentData?.userCredits || 0}
+              registryCost={message.componentData?.registryCost || 10}
+              onSelect={(method, file) => {
+                onRegistryChoiceSelect?.(method, file);
+              }}
+            />
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="flex justify-start mb-6 animate-fadeIn">
-      <div className="flex items-start gap-3 max-w-[70%]">
+      <div className="flex items-start gap-3 w-full max-w-full">
         <div className="w-8 h-8 flex items-center justify-center shrink-0">
           <Image
             src="/logo.png"
@@ -85,28 +124,33 @@ export default function Message({ message, isTyping }: MessageProps) {
             className="object-contain"
           />
         </div>
-        <div className="flex flex-col">
-          <div className={`bg-white rounded-2xl rounded-tl-sm px-4 py-3 ${
-            message.isError ? 'border border-red-300 bg-red-50' : ''
-          }`}>
-            {message.isError ? (
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
-                <p className="text-base md:text-lg text-red-700">
-                  {message.content}
-                </p>
-              </div>
-            ) : (
-              <div className="prose prose-sm md:prose-base prose-neutral max-w-none">
-                <p className="whitespace-pre-wrap break-words text-neutral-800 text-base md:text-lg">
-                  {displayedContent}
-                  {message.isStreaming && (
-                    <span className="inline-block w-1 h-4 ml-1 bg-neutral-400 animate-pulse" />
-                  )}
-                </p>
-              </div>
-            )}
-          </div>
+        <div className="flex flex-col flex-1 min-w-0">
+          {message.content && (
+            <div className={`bg-white rounded-2xl rounded-tl-sm px-4 py-3 ${
+              message.isError ? 'border border-red-300 bg-red-50' : ''
+            }`}>
+              {message.isError ? (
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+                  <p className="text-base md:text-lg text-red-700">
+                    {message.content}
+                  </p>
+                </div>
+              ) : (
+                <div className="prose prose-sm md:prose-base prose-neutral max-w-none">
+                  <p className="whitespace-pre-wrap break-words text-neutral-800 text-base md:text-lg">
+                    {displayedContent}
+                    {message.isStreaming && (
+                      <span className="inline-block w-1 h-4 ml-1 bg-neutral-400 animate-pulse" />
+                    )}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 특수 컴포넌트 렌더링 */}
+          {renderSpecialComponent()}
           <div className="flex items-center gap-2 mt-2">
             <span className="text-xs text-neutral-400">
               {formatTime(message.timestamp)}

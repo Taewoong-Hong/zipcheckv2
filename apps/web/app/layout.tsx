@@ -103,6 +103,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
+      <head>
+        {/* Cloudflare Turnstile */}
+        <script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+          async
+          defer
+        />
+      </head>
       <body className={inter.className}>{children}</body>
     </html>
   );

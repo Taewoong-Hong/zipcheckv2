@@ -124,7 +124,7 @@ function PasswordPageContent() {
           {/* 다른 이메일로 로그인 */}
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/?login=true")}
             className="w-full px-4 py-2.5 border border-neutral-300 text-neutral-700 rounded-md text-sm font-medium hover:bg-neutral-50 transition-colors"
           >
             다른 이메일로 로그인

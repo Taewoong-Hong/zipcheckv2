@@ -318,12 +318,12 @@ Cloudflare Turnstile을 통한 봇 차단 시스템 구현. 회원가입, 무료
 #### 프론트엔드 (Vercel)
 ```bash
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=YOUR_SITE_KEY_HERE  # Cloudflare Dashboard에서 발급
-TURNSTILE_SECRET_KEY=0x4AAAAAAB0i7GZiRbNMj2tuUHgMjicQYLA  # 서버 사이드 검증용
+TURNSTILE_SECRET_KEY=YOUR_SECRET_KEY_HERE  # 서버 사이드 검증용 (절대 노출 금지!)
 ```
 
 #### 백엔드 (Google Cloud Run - Secret Manager)
 ```bash
-TURNSTILE_SECRET_KEY=0x4AAAAAAB0i7GZiRbNMj2tuUHgMjicQYLA
+TURNSTILE_SECRET_KEY=YOUR_SECRET_KEY_HERE  # Cloudflare Dashboard에서 발급받은 Secret Key
 ```
 
 ### 📦 구현 파일

@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import SocialLoginButton from "./SocialLoginButton";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { OverlayLoader } from "@/components/common/LoadingSpinner";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -13,14 +14,66 @@ interface LoginModalProps {
 
 export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [email, setEmail] = useState("");
+
+  // 이메일 "계속" 버튼 핸들러
+  const handleEmailContinue = async () => {
+    if (!email) {
+      alert("이메일을 입력해주세요.");
+      return;
+    }
+    // 이메일 유효성 검사
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      alert("올바른 이메일 형식을 입력해주세요.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      // 로그인 시도로 기존 사용자 확인
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password: 'dummy_password_for_check', // 임시 비밀번호
+      });
+
+      if (signInError) {
+        // "Invalid login credentials" → 계정이 존재함 (비밀번호만 틀림)
+        if (signInError.message.includes("Invalid login credentials")) {
+          // 기존 사용자 → 비밀번호 입력 페이지
+          window.location.href = `/auth/password?email=${encodeURIComponent(email)}`;
+        }
+        // "Email not confirmed" → 계정 존재하지만 이메일 미인증
+        else if (signInError.message.includes("Email not confirmed")) {
+          alert("이메일 인증이 필요합니다. 이메일을 확인해주세요.");
+          setIsLoading(false);
+        }
+        // 그 외 에러 → 신규 사용자로 간주
+        else {
+          // 신규 사용자 → 회원가입 페이지
+          window.location.href = `/auth/signup?email=${encodeURIComponent(email)}`;
+        }
+      } else {
+        // 로그인 성공 (비밀번호가 'dummy_password_for_check'인 경우는 거의 없음)
+        window.location.href = "/";
+      }
+    } catch (error) {
+      console.error("이메일 확인 중 오류:", error);
+      // 에러 발생 시 회원가입 페이지로 이동
+      window.location.href = `/auth/signup?email=${encodeURIComponent(email)}`;
+    }
+  };
 
   const handleSocialLogin = async (provider: "kakao" | "google" | "naver") => {
+    // 소셜 로그인은 진행 시 약관 동의로 간주
+
     setIsLoading(true);
     console.log(`${provider} 로그인 시도`);
 
     try {
       if (provider === "google") {
-        const { error } = await supabase.auth.signInWithOAuth({
+        const { data, error } = await supabase.auth.signInWithOAuth({
           provider: "google",
           options: {
             redirectTo: `${window.location.origin}/auth/callback`,
@@ -34,10 +87,13 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
         if (error) {
           console.error("Google 로그인 오류:", error);
           alert(`로그인 실패: ${error.message}`);
+        } else if (data?.url) {
+          // OAuth URL로 리다이렉트
+          window.location.href = data.url;
         }
       } else if (provider === "kakao") {
         // Supabase Kakao OAuth
-        const { error } = await supabase.auth.signInWithOAuth({
+        const { data, error } = await supabase.auth.signInWithOAuth({
           provider: "kakao",
           options: {
             redirectTo: `${window.location.origin}/auth/callback`,
@@ -47,20 +103,15 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
         if (error) {
           console.error("Kakao 로그인 오류:", error);
           alert(`로그인 실패: ${error.message}`);
+        } else if (data?.url) {
+          // OAuth URL로 리다이렉트
+          window.location.href = data.url;
         }
       } else if (provider === "naver") {
-        // Naver OAuth (커스텀 구현)
-        // Generate CSRF token
-        const state = Math.random().toString(36).substring(2, 15);
-        sessionStorage.setItem("naver_oauth_state", state);
-
-        // Build Naver OAuth URL
-        const naverClientId = process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
-        const redirectUri = `${window.location.origin}/auth/naver/callback`;
-        const naverAuthUrl = `https://nid.naver.com/oauth2.0/authorize?response_type=code&client_id=${naverClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
-
-        // Redirect to Naver login
-        window.location.href = naverAuthUrl;
+        // Naver OAuth via Edge Function
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gsiismzchtgdklvdvggu.supabase.co';
+        const edgeFunctionUrl = `${supabaseUrl.replace('.supabase.co', '.functions.supabase.co')}/naver/authorize`;
+        window.location.href = edgeFunctionUrl;
       }
     } catch (err) {
       console.error("로그인 오류:", err);
@@ -96,20 +147,24 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-fadeIn"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="login-modal-title"
-    >
-      {/* 배경 오버레이 */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+    <>
+      {/* 로딩 오버레이 */}
+      {isLoading && <OverlayLoader text="로그인 중..." />}
 
-      {/* 모달 컨텐츠 - 컴팩트한 ChatGPT 스타일 */}
+      <div
+        className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-fadeIn"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="login-modal-title"
+      >
+        {/* 배경 오버레이 */}
+        <div
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+
+      {/* 모달 컨텐츠 */}
       <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-sm animate-slideUp">
         {/* 닫기 버튼 */}
         <button
@@ -129,7 +184,7 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
             로그인 또는 회원 가입
           </h2>
           <p className="text-sm text-neutral-600">
-            더 스마트한 홈딜, 파일 및 이미지 업로드를 이용할 수 있습니다.
+            계약서 분석, 파일 업로드 등 더 많은 기능을 이용할 수 있습니다.
           </p>
         </div>
 
@@ -167,38 +222,49 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
           <input
             type="email"
             placeholder="이메일 주소"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleEmailContinue();
+              }
+            }}
             className="w-full px-4 py-2.5 border border-neutral-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
           />
           <button
-            onClick={() => {
-              // TODO: 이메일 로그인 로직
-              console.log("이메일 로그인");
-            }}
-            className="w-full mt-3 px-4 py-2.5 bg-black text-white rounded-md text-sm font-medium hover:bg-neutral-800 transition-colors"
+            onClick={handleEmailContinue}
+            disabled={isLoading}
+            className="w-full mt-3 px-4 py-2.5 bg-black text-white rounded-md text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            계속
+            {isLoading ? "확인 중..." : "계속"}
           </button>
         </div>
 
-        {/* 이용약관 */}
-        <div className="px-6 pb-6 text-center text-xs text-neutral-500 leading-relaxed">
-          ChatGPT의 메시지를 보내므로써, 당사의{" "}
-          <Link
-            href="/terms"
-            className="text-neutral-700 hover:text-neutral-900 underline underline-offset-2"
-          >
-            이용약관
-          </Link>
-          과{" "}
-          <Link
-            href="/terms"
-            className="text-neutral-700 hover:text-neutral-900 underline underline-offset-2"
-          >
-            개인정보 보호 정책
-          </Link>
-          에 대해 알고 있으며 이에 따라 계속 진행합니다.
+        {/* 약관 안내 */}
+        <div className="px-6 pb-6">
+          <p className="text-xs text-neutral-500 text-center leading-relaxed">
+            계속 진행하면 집체크의{" "}
+            <Link
+              href="/terms?tab=terms"
+              target="_blank"
+              className="text-neutral-700 hover:text-neutral-900 underline underline-offset-2"
+            >
+              이용약관
+            </Link>
+            {" "}및{" "}
+            <Link
+              href="/terms?tab=privacy"
+              target="_blank"
+              className="text-neutral-700 hover:text-neutral-900 underline underline-offset-2"
+            >
+              개인정보 보호 정책
+            </Link>
+            에 동의하는 것으로 간주됩니다.
+          </p>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

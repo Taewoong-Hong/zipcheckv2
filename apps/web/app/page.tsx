@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Sidebar from "@/components/sidebar/Sidebar";
 import ChatInterface from "@/components/chat/ChatInterface";
 import LoginModal from "@/components/auth/LoginModal";
 import { supabase } from "@/lib/supabase";
 
-export default function HomePage() {
+function HomePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // 실제 Supabase 세션 상태로 로그인 확인
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -22,6 +23,14 @@ export default function HomePage() {
   useEffect(() => {
     // Hydration 완료 표시
     setIsHydrated(true);
+
+    // URL 쿼리 파라미터 확인 (?login=true)
+    const loginParam = searchParams.get('login');
+    if (loginParam === 'true') {
+      setIsLoginModalOpen(true);
+      // URL에서 쿼리 파라미터 제거 (선택사항)
+      router.replace('/', { scroll: false });
+    }
 
     // 로그인 상태 확인
     const checkAuth = async () => {
@@ -54,7 +63,7 @@ export default function HomePage() {
       window.removeEventListener('resize', handleResize);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [searchParams, router]);
 
   return (
     <div className="flex h-screen bg-neutral-50">
@@ -66,40 +75,34 @@ export default function HomePage() {
       {/* 비로그인 상태일 때 헤더 표시 */}
       {!isLoggedIn && (
         <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-neutral-200">
-          <div className="flex items-center justify-between h-16 px-6">
+          <div className="flex items-center justify-between h-14 md:h-16 px-4 md:px-6">
             {/* 좌측 로고 */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 md:gap-2">
               <img
                 src="/logo-black.png"
                 alt="집체크"
-                className="h-8 w-auto"
+                className="h-6 md:h-8 w-auto"
               />
-              <span className="text-xl font-bold text-gray-900">집체크</span>
+              <span className="text-base md:text-lg font-bold text-gray-900">집체크</span>
             </div>
 
             {/* 우측 네비게이션 */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsLoginModalOpen(true)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                className="px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm font-medium bg-black text-white rounded-lg hover:bg-gray-800 transition-colors"
               >
                 로그인
-              </button>
-              <button
-                onClick={() => setIsLoginModalOpen(true)}
-                className="px-4 py-2 text-sm font-medium bg-black text-white rounded-lg hover:bg-gray-800 transition-colors"
-              >
-                무료로 회원 가입
               </button>
 
               {/* 물음표 버튼 */}
               <div className="relative">
                 <button
                   onClick={() => setIsHelpMenuOpen(!isHelpMenuOpen)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full border border-neutral-300 hover:bg-neutral-50 transition-colors"
+                  className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center rounded-full border border-neutral-300 hover:bg-neutral-50 transition-colors"
                   aria-label="도움말 메뉴"
                 >
-                  <span className="text-neutral-700 text-sm font-medium">?</span>
+                  <span className="text-neutral-700 text-xs md:text-sm font-medium">?</span>
                 </button>
 
                 {/* 드롭다운 메뉴 */}
@@ -192,7 +195,7 @@ export default function HomePage() {
         className={`flex-1 sidebar-transition ${
           isLoggedIn
             ? (isSidebarExpanded ? "lg:ml-72" : "lg:ml-20")
-            : "pt-16" // 비로그인일 때 헤더 높이만큼 padding
+            : "pt-14 md:pt-16" // 비로그인일 때 헤더 높이만큼 padding
         }`}
       >
         <ChatInterface
@@ -209,5 +212,13 @@ export default function HomePage() {
         onClose={() => setIsLoginModalOpen(false)}
       />
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen bg-neutral-50 items-center justify-center">로딩 중...</div>}>
+      <HomePageContent />
+    </Suspense>
   );
 }
