@@ -57,23 +57,36 @@ CREATE TABLE IF NOT EXISTS v2_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     contract_id UUID NOT NULL REFERENCES v2_contracts(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    document_type TEXT DEFAULT 'registry' CHECK (document_type IN ('registry', 'contract')),
     file_path TEXT,
     file_name TEXT,
     file_size INTEGER,
     mime_type TEXT,
     text TEXT,
     text_length INTEGER,
+    property_address TEXT,
+    owner_info JSONB DEFAULT '{}'::jsonb,
+    registry_date DATE,
+    registry_type TEXT CHECK (registry_type IN ('land', 'building', 'collective')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-COMMENT ON TABLE v2_documents IS 'v2 문서 원본 및 추출된 텍스트';
+COMMENT ON TABLE v2_documents IS 'v2 문서 원본 및 추출된 텍스트 (등기부등본/계약서)';
+COMMENT ON COLUMN v2_documents.document_type IS '문서 유형: registry (등기부등본) 또는 contract (계약서)';
 COMMENT ON COLUMN v2_documents.file_path IS '파일 저장 경로 (Supabase Storage 또는 로컬)';
 COMMENT ON COLUMN v2_documents.text IS 'PDF에서 추출된 전체 텍스트';
 COMMENT ON COLUMN v2_documents.text_length IS '텍스트 길이 (문자 수)';
+COMMENT ON COLUMN v2_documents.property_address IS '등기부상 부동산 주소 (소재지)';
+COMMENT ON COLUMN v2_documents.owner_info IS '소유자 정보 (JSON): {name, share, acquisition_date, etc.}';
+COMMENT ON COLUMN v2_documents.registry_date IS '등기부등본 발급일자';
+COMMENT ON COLUMN v2_documents.registry_type IS '등기부 유형: land (토지), building (건물), collective (집합건물)';
 
 CREATE INDEX idx_v2_documents_contract_id ON v2_documents(contract_id);
 CREATE INDEX idx_v2_documents_user_id ON v2_documents(user_id);
 CREATE INDEX idx_v2_documents_created_at ON v2_documents(created_at DESC);
+CREATE INDEX idx_v2_documents_document_type ON v2_documents(document_type);
+CREATE INDEX idx_v2_documents_property_address ON v2_documents(property_address);
+CREATE INDEX idx_v2_documents_registry_date ON v2_documents(registry_date DESC);
 
 -- ============================================
 -- Table: v2_embeddings

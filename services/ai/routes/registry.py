@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from core.database import get_db_session, create_contract, create_document
+from core.encryption import encrypt
 from ingest.pdf_parse import parse_pdf_to_text
 from ingest.upsert_vector import upsert_document_embeddings
 
@@ -107,18 +108,22 @@ async def upload_registry(
                 detail="PDF에서 충분한 텍스트를 추출할 수 없습니다. 스캔 품질을 확인해주세요."
             )
 
-        # 5. 계약 레코드 생성
+        # 5. 민감한 데이터 암호화
+        encrypted_property_address = encrypt(property_address) if property_address else None
+        encrypted_owner_name = encrypt(owner_name) if owner_name else None
+
+        # 6. 계약 레코드 생성 (암호화된 주소)
         contract = create_contract(
             session=session,
             user_id=user_uuid,
             contract_id=contract_id,
-            addr=property_address or "등기부등본",
+            addr=encrypted_property_address or "등기부등본",
         )
 
-        # 6. 문서 레코드 생성 (document_type='registry')
+        # 7. 문서 레코드 생성 (document_type='registry', 암호화된 데이터)
         owner_info = {}
-        if owner_name:
-            owner_info["name"] = owner_name
+        if encrypted_owner_name:
+            owner_info["name"] = encrypted_owner_name
 
         registry_date_obj = None
         if registry_date:
@@ -137,8 +142,8 @@ async def upload_registry(
             file_size=file_size,
             mime_type=file.content_type,
             document_type="registry",
-            property_address=property_address,
-            owner_info=owner_info,
+            property_address=encrypted_property_address,  # 암호화된 주소
+            owner_info=owner_info,  # 암호화된 소유자 정보
             registry_date=registry_date_obj,
             registry_type=registry_type,
         )

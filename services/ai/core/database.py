@@ -278,3 +278,58 @@ def create_report(
     session.refresh(report)
     logger.info(f"리포트 생성: report_id={report.id}")
     return report
+
+
+def get_user_credits(session: Session, user_id: str) -> int:
+    """
+    사용자 크레딧 잔액 조회
+
+    Args:
+        session: DB 세션
+        user_id: 사용자 ID (UUID 문자열)
+
+    Returns:
+        크레딧 잔액 (기본값: 0)
+    """
+    # TODO: v2_profiles 테이블에 credits 컬럼이 추가되면 실제 조회
+    # profile = session.query(Profile).filter(Profile.user_id == UUID(user_id)).first()
+    # return profile.credits if profile else 0
+
+    # 임시: 모든 사용자에게 100 크레딧 제공
+    logger.warning(f"임시 크레딧 반환: user_id={user_id}, credits=100")
+    return 100
+
+
+def deduct_credits(
+    session: Session,
+    user_id: str,
+    amount: int,
+    reason: str,
+    metadata: Optional[dict] = None,
+) -> None:
+    """
+    사용자 크레딧 차감
+
+    Args:
+        session: DB 세션
+        user_id: 사용자 ID (UUID 문자열)
+        amount: 차감할 크레딧 수
+        reason: 차감 사유
+        metadata: 추가 메타데이터
+
+    Raises:
+        ValueError: 크레딧 부족 시
+    """
+    # TODO: v2_profiles 테이블 업데이트 및 v2_credit_transactions 레코드 생성
+    # current_credits = get_user_credits(session, user_id)
+    # if current_credits < amount:
+    #     raise ValueError(f"크레딧 부족: {current_credits} < {amount}")
+    #
+    # profile = session.query(Profile).filter(Profile.user_id == UUID(user_id)).first()
+    # profile.credits -= amount
+    # session.commit()
+
+    logger.warning(
+        f"임시 크레딧 차감 (DB 업데이트 생략): "
+        f"user_id={user_id}, amount={amount}, reason={reason}"
+    )

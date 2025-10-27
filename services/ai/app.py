@@ -34,12 +34,15 @@ from ingest.validators import (
     FileValidationError,
 )
 
-# Import auth router
+# Import routers
 from routes.auth import router as auth_router
 from routes.building import router as building_router
 from routes.registry import router as registry_router
+from routes.registry_issue import router as registry_issue_router  # RPA 발급
 from routes.land_price import router as land_price_router
 from routes.apt_trade import router as apt_trade_router
+from routes.sms import router as sms_router
+from routes.realestate import router as realestate_router
 
 # 로깅 설정
 logging.basicConfig(
@@ -104,9 +107,12 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(building_router)
 app.include_router(auth_router)
+app.include_router(sms_router)  # SMS 인증 라우터
 app.include_router(registry_router)
+app.include_router(registry_issue_router)  # 등기부등본 RPA 발급
 app.include_router(land_price_router)
 app.include_router(apt_trade_router)
+app.include_router(realestate_router)  # 부동산 크롤링 API
 
 
 # Pydantic 모델

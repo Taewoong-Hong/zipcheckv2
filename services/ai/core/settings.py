@@ -156,6 +156,10 @@ class Settings(BaseSettings):
         description="Langfuse host URL"
     )
 
+    # Internet Registry Service (IROS) Configuration
+    iros_user_id: str = Field(..., description="인터넷등기소 아이디")
+    iros_password: str = Field(..., description="인터넷등기소 비밀번호")
+
     # Application
     app_env: Literal["development", "staging", "production"] = Field(
         default="development",
