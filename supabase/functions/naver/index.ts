@@ -237,9 +237,10 @@ Deno.serve(async (req) => {
       // HttpOnly 쿠키에 저장
       const sbCookie = buildCookie("sb-access-token", jwt);
 
-      // 성공 후 프론트로 리디렉션
-      const next = new URL("/auth/naver/success", SUPABASE_URL!.replace(".supabase.co", ".vercel.app"));
-      next.searchParams.set("token", jwt);
+      // 성공 후 프론트로 리디렉션 (기존 /auth/callback 페이지 활용)
+      const frontendUrl = origin && ALLOWED_ORIGINS.includes(origin) ? origin : "https://zipcheck.kr";
+      const next = new URL("/auth/callback", frontendUrl);
+      next.searchParams.set("naver_token", jwt);
       return redirect(next.toString(), sbCookie);
     } catch (e) {
       console.error(e);
