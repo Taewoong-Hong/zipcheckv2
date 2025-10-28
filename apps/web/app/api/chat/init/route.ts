@@ -7,7 +7,7 @@ const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-871793445649.a
 export async function POST(request: NextRequest) {
   try {
     // Supabase 서버 클라이언트 생성 (cookies 사용)
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
