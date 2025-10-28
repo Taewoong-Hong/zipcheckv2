@@ -230,3 +230,23 @@ class SupabaseStorageClient:
 # Singleton instances
 supabase_auth = SupabaseAuthClient()
 supabase_storage = SupabaseStorageClient()
+
+
+def get_supabase_client(service_role: bool = False):
+    """Get Supabase client wrapper.
+
+    Args:
+        service_role: If True, returns client with service role privileges
+
+    Returns:
+        Dict with auth and storage clients
+
+    Note:
+        This is a compatibility function for routes that expect a unified client.
+        Real implementation should use supabase-py SDK, but for MVP we use httpx clients.
+    """
+    return {
+        "auth": supabase_auth,
+        "storage": supabase_storage,
+        "service_role": service_role,
+    }

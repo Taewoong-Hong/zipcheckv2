@@ -1,7 +1,7 @@
 """벡터 DB에 문서 업서트."""
 import logging
 from typing import Dict, List, Any
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from tenacity import (
     retry,

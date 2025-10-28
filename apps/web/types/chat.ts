@@ -7,7 +7,7 @@ export interface Message {
   isError?: boolean;
 
   // 분석 플로우용 확장
-  componentType?: 'address_search' | 'contract_selector' | 'registry_choice' | 'progress' | 'report';
+  componentType?: 'address_search' | 'contract_selector' | 'price_input' | 'registry_choice' | 'progress' | 'report';
   componentData?: Record<string, any>;
 }
 

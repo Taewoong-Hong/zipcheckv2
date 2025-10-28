@@ -94,6 +94,10 @@ app = FastAPI(
 )
 
 
+# 요청 로깅 미들웨어 (타임아웃 디버깅용)
+from middleware import RequestLoggingMiddleware
+app.add_middleware(RequestLoggingMiddleware)
+
 # CORS 미들웨어 설정
 app.add_middleware(
     CORSMiddleware,
@@ -166,10 +170,13 @@ class AnalyzeResponse(BaseModel):
 
 
 # 엔드포인트
-@app.get("/healthz", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)
 async def health_check():
     """
     헬스체크 엔드포인트.
+
+    Note:
+        `/healthz`는 Cloud Run의 예약된 경로이므로 `/health`를 사용합니다.
 
     Returns:
         서비스 상태 정보

@@ -27,7 +27,7 @@ env/
 .coverage
 htmlcov/
 test_*.py
-*_test.py
+# *_test.py  ← 주석 처리: routes/crawler_test.py 포함 필요
 
 # Environment files (use Secret Manager instead)
 .env

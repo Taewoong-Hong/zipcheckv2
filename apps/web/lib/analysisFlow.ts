@@ -20,6 +20,8 @@ export interface AnalysisContext {
   caseId?: string;
   address?: AddressInfo;
   contractType?: ContractType;
+  deposit?: number;           // 보증금 (만원) 또는 매매가 (매매 계약)
+  monthlyRent?: number;       // 월세 (만원, 월세/전월세만)
   registryMethod?: 'issue' | 'upload';
   registryFile?: File;
   userCredits?: number;
@@ -73,8 +75,18 @@ export function getStateResponseMessage(state: ChatState, context?: AnalysisCont
     case 'contract_type':
       return `주소가 확인되었습니다! 📍\n**${context?.address?.road || '주소'}**\n\n이제 계약 유형을 선택해주세요.`;
 
+    case 'price_input':
+      const contractType = context?.contractType;
+      if (contractType === '매매') {
+        return `계약 유형: **${contractType}** ✅\n\n매매가를 입력해주세요.`;
+      } else if (contractType === '전세') {
+        return `계약 유형: **${contractType}** ✅\n\n보증금을 입력해주세요.`;
+      } else {
+        return `계약 유형: **${contractType}** ✅\n\n보증금과 월세를 입력해주세요.`;
+      }
+
     case 'registry_choice':
-      return `계약 유형: **${context?.contractType}**\n\n등기부등본을 준비해야 합니다.\n발급하시거나 기존 PDF를 업로드해주세요.`;
+      return `가격 정보가 입력되었습니다! 💰\n\n등기부등본을 준비해야 합니다.\n발급하시거나 기존 PDF를 업로드해주세요.`;
 
     case 'registry_ready':
       return '등기부등본을 확인하고 있습니다...';
@@ -181,6 +193,29 @@ export async function runAnalysis(caseId: string): Promise<void> {
     }
   } catch (error) {
     console.error('Run analysis error:', error);
+    throw error;
+  }
+}
+
+/**
+ * 리포트 데이터 조회 API 호출
+ */
+export async function getReport(caseId: string): Promise<{
+  content: string;
+  contractType: string;
+  address: string;
+}> {
+  try {
+    const response = await fetch(`/api/report/${caseId}`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get report: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Get report error:', error);
     throw error;
   }
 }

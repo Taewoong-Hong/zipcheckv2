@@ -19,6 +19,7 @@ import {
   updateCase,
   uploadRegistry,
   runAnalysis,
+  getReport,
   getUserCredits,
   type AnalysisContext,
 } from "@/lib/analysisFlow";
@@ -120,6 +121,56 @@ export default function ChatInterface({
     }
   };
 
+  // Handle address selection
+  const handleAddressSelect = async (address: any) => {
+    // Add user selection message
+    const userMessage: MessageType = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: `선택한 주소: ${address.roadAddr}`,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    chatStorage.addMessage(userMessage);
+
+    try {
+      // Create case with selected address
+      const addressInfo: AddressInfo = {
+        road: address.roadAddr,
+        lot: address.jibunAddr,
+        zipCode: address.zipNo,
+        buildingName: address.bdNm,
+      };
+      const caseId = await createCase(addressInfo);
+
+      setAnalysisContext({ caseId, address: addressInfo });
+
+      // Transition to contract_type state
+      stateMachine.transition('contract_type');
+
+      const aiMessage: MessageType = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: getStateResponseMessage('contract_type', { address: addressInfo }),
+        timestamp: new Date(),
+        componentType: 'contract_selector',
+      };
+      setMessages(prev => [...prev, aiMessage]);
+      chatStorage.addMessage(aiMessage);
+    } catch (error) {
+      console.error('Case creation error:', error);
+      const errorMessage: MessageType = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: '케이스 생성 중 오류가 발생했습니다. 다시 시도해주세요.',
+        timestamp: new Date(),
+        isError: true,
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      chatStorage.addMessage(errorMessage);
+    }
+  };
+
   // Handle contract type selection
   const handleContractTypeSelect = async (contractType: ContractType) => {
     if (!analysisContext.caseId) {
@@ -146,6 +197,71 @@ export default function ChatInterface({
     };
     setMessages(prev => [...prev, userMessage]);
     chatStorage.addMessage(userMessage);
+
+    // Transition to price_input state
+    stateMachine.transition('price_input');
+
+    // Add AI response with price input component
+    const aiMessage: MessageType = {
+      id: (Date.now() + 1).toString(),
+      role: 'assistant',
+      content: getStateResponseMessage('price_input', { contractType }),
+      timestamp: new Date(),
+      componentType: 'price_input',
+      componentData: { contractType },
+    };
+    setMessages(prev => [...prev, aiMessage]);
+    chatStorage.addMessage(aiMessage);
+  };
+
+  // Handle price submit
+  const handlePriceSubmit = async (data: { deposit?: number; monthlyRent?: number }) => {
+    if (!analysisContext.caseId || !analysisContext.contractType) {
+      console.error('Missing case ID or contract type');
+      return;
+    }
+
+    const contractType = analysisContext.contractType;
+
+    // Format message based on contract type
+    let content = '';
+    if (contractType === '매매') {
+      content = `매매가: ${data.deposit?.toLocaleString('ko-KR')}만원`;
+    } else if (contractType === '전세') {
+      content = `보증금: ${data.deposit?.toLocaleString('ko-KR')}만원`;
+    } else {
+      content = `보증금: ${data.deposit?.toLocaleString('ko-KR')}만원, 월세: ${data.monthlyRent?.toLocaleString('ko-KR')}만원`;
+    }
+
+    // Add user selection message
+    const userMessage: MessageType = {
+      id: Date.now().toString(),
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    chatStorage.addMessage(userMessage);
+
+    // Update context with price data
+    setAnalysisContext(prev => ({ ...prev, deposit: data.deposit, monthlyRent: data.monthlyRent }));
+
+    // Update case metadata in database
+    try {
+      const updates: any = {
+        deposit: data.deposit,
+        monthlyRent: data.monthlyRent,
+      };
+
+      // For sale contracts, also set price field
+      if (contractType === '매매') {
+        updates.price = data.deposit;
+      }
+
+      await updateCase(analysisContext.caseId, updates);
+    } catch (error) {
+      console.error('Failed to update price:', error);
+    }
 
     // Transition to registry_choice state
     stateMachine.transition('registry_choice');
@@ -258,6 +374,9 @@ export default function ChatInterface({
       // Run analysis
       await runAnalysis(analysisContext.caseId);
 
+      // Get report data
+      const reportData = await getReport(analysisContext.caseId);
+
       // Transition to report
       stateMachine.transition('report');
 
@@ -266,6 +385,12 @@ export default function ChatInterface({
         role: 'assistant',
         content: getStateResponseMessage('report'),
         timestamp: new Date(),
+        componentType: 'report',
+        componentData: {
+          reportContent: reportData.content,
+          contractType: reportData.contractType || analysisContext.contractType,
+          address: reportData.address || analysisContext.address?.road,
+        },
       };
       setMessages(prev => [...prev, reportMessage]);
       chatStorage.addMessage(reportMessage);
@@ -356,39 +481,19 @@ export default function ChatInterface({
 
       // Handle based on current state
       if (currentState === 'init' && isAddressInput(content)) {
-        // User entered an address - create case and ask for contract type
-        try {
-          // Create case with placeholder address
-          const address: AddressInfo = { road: content };
-          const caseId = await createCase(address);
+        // User entered an address - show address search selector
+        stateMachine.transition('address_pick');
 
-          setAnalysisContext({ caseId, address });
-
-          // Transition to contract_type state
-          stateMachine.transition('address_pick');
-          stateMachine.transition('contract_type');
-
-          const aiMessage: MessageType = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: getStateResponseMessage('contract_type', { address }),
-            timestamp: new Date(),
-            componentType: 'contract_selector',
-          };
-          setMessages(prev => [...prev, aiMessage]);
-          chatStorage.addMessage(aiMessage);
-        } catch (error) {
-          console.error('Case creation error:', error);
-          const errorMessage: MessageType = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: '케이스 생성 중 오류가 발생했습니다. 다시 시도해주세요.',
-            timestamp: new Date(),
-            isError: true,
-          };
-          setMessages(prev => [...prev, errorMessage]);
-          chatStorage.addMessage(errorMessage);
-        }
+        const aiMessage: MessageType = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: '주소를 검색해주세요. 정확한 주소를 선택하면 분석이 더 정확해집니다.',
+          timestamp: new Date(),
+          componentType: 'address_search',
+          componentData: { initialAddress: content },
+        };
+        setMessages(prev => [...prev, aiMessage]);
+        chatStorage.addMessage(aiMessage);
         setIsLoading(false);
         return;
       }
@@ -711,7 +816,9 @@ export default function ChatInterface({
                 message={message}
                 isTyping={index === messages.length - 1 && message.role === 'assistant'}
                 onContractTypeSelect={handleContractTypeSelect}
+                onPriceSubmit={handlePriceSubmit}
                 onRegistryChoiceSelect={handleRegistryChoiceSelect}
+                onAddressSelect={handleAddressSelect}
               />
             ))}
 

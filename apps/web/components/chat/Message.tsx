@@ -6,16 +6,34 @@ import { User, Copy, Check, RefreshCw, AlertCircle } from "lucide-react";
 import { Message as MessageType } from "@/types/chat";
 import ContractTypeSelector from "@/components/analysis/ContractTypeSelector";
 import RegistryChoiceSelector from "@/components/analysis/RegistryChoiceSelector";
+import AddressSearchSelector from "@/components/chat/AddressSearchSelector";
+import PriceInput, { PriceData } from "@/components/chat/PriceInput";
+import AnalysisReport from "@/components/chat/AnalysisReport";
 import type { ContractType, RegistryMethod } from "@/types/analysis";
+
+interface AddressResult {
+  roadAddr: string;
+  jibunAddr: string;
+  zipNo: string;
+  bdNm: string;
+  admCd: string;
+  rnMgtSn: string;
+  udrtYn: string;
+  buldMnnm: string;
+  buldSlno: string;
+  detBdNmList: string;
+}
 
 interface MessageProps {
   message: MessageType;
   isTyping?: boolean;
   onContractTypeSelect?: (type: ContractType) => void;
+  onPriceSubmit?: (data: PriceData) => void;
   onRegistryChoiceSelect?: (method: RegistryMethod, file?: File) => void;
+  onAddressSelect?: (address: AddressResult) => void;
 }
 
-export default function Message({ message, isTyping, onContractTypeSelect, onRegistryChoiceSelect }: MessageProps) {
+export default function Message({ message, isTyping, onContractTypeSelect, onPriceSubmit, onRegistryChoiceSelect, onAddressSelect }: MessageProps) {
   const [displayedContent, setDisplayedContent] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
@@ -101,6 +119,41 @@ export default function Message({ message, isTyping, onContractTypeSelect, onReg
               onSelect={(file: File) => {
                 onRegistryChoiceSelect?.('upload', file);
               }}
+            />
+          </div>
+        );
+
+      case 'address_search':
+        return (
+          <div className="mt-4">
+            <AddressSearchSelector
+              initialAddress={message.componentData?.initialAddress}
+              onAddressSelect={(address) => {
+                onAddressSelect?.(address);
+              }}
+            />
+          </div>
+        );
+
+      case 'price_input':
+        return (
+          <div className="mt-4">
+            <PriceInput
+              contractType={message.componentData?.contractType || '전세'}
+              onPriceSubmit={(data) => {
+                onPriceSubmit?.(data);
+              }}
+            />
+          </div>
+        );
+
+      case 'report':
+        return (
+          <div className="mt-4">
+            <AnalysisReport
+              content={message.componentData?.reportContent || message.content}
+              contractType={message.componentData?.contractType}
+              address={message.componentData?.address}
             />
           </div>
         );

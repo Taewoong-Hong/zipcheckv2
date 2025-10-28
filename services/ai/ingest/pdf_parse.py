@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 import fitz  # PyMuPDF (import as fitz)
-from unstructured.partition.pdf import partition_pdf
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -33,19 +32,12 @@ def _parse_with_pymupdf(path: str) -> str:
         return ""
 
 
-def parse_pdf_to_text(
-    path: str,
-    strategy: str = "fast",
-    min_text_threshold: int = 100
-) -> str:
+def parse_pdf_to_text(path: str) -> str:
     """
-    PDF 파일을 텍스트로 파싱합니다.
-    PyMuPDF 우선 시도 → 실패 시 unstructured 폴백
+    PDF 파일을 텍스트로 파싱합니다 (PyMuPDF 사용).
 
     Args:
         path: PDF 파일 경로
-        strategy: unstructured 파싱 전략 ("fast", "hi_res", "ocr_only")
-        min_text_threshold: PyMuPDF 결과가 이 길이 미만이면 unstructured 사용
 
     Returns:
         추출된 전체 텍스트
@@ -55,58 +47,21 @@ def parse_pdf_to_text(
         ValueError: 파싱 실패 시
 
     Note:
-        - PyMuPDF: 빠른 추출 (1-2초/문서)
-        - unstructured: 레이아웃 인식, OCR 지원 (느림)
-        - 전략:
-          - "fast": 빠른 파싱, OCR 없음
-          - "hi_res": 고해상도 파싱, 레이아웃 인식
-          - "ocr_only": OCR만 사용 (스캔 문서용)
+        - PyMuPDF (fitz): 빠른 텍스트 추출 (1-2초/문서)
+        - 스캔 PDF의 경우 parse_scanned_pdf_with_vision() 사용
     """
     file_path = Path(path)
     if not file_path.exists():
         raise FileNotFoundError(f"PDF 파일을 찾을 수 없습니다: {path}")
 
-    # 1. PyMuPDF 우선 시도 (빠름)
     logger.info(f"PDF 파싱 시작 (PyMuPDF): {path}")
     text = _parse_with_pymupdf(str(file_path))
 
-    if len(text) >= min_text_threshold:
-        logger.info(
-            f"PDF 파싱 완료 (PyMuPDF): {len(text)} 글자"
-        )
+    if text:
+        logger.info(f"PDF 파싱 완료: {len(text)} 글자")
         return text
-
-    # 2. PyMuPDF 결과가 빈약하면 unstructured 폴백
-    logger.info(
-        f"PyMuPDF 결과 빈약 ({len(text)} < {min_text_threshold}), "
-        f"unstructured 폴백 (strategy={strategy})"
-    )
-
-    try:
-        elements = partition_pdf(filename=str(file_path), strategy=strategy)
-
-        # 텍스트 요소만 추출하여 결합
-        text_parts = [
-            element.text
-            for element in elements
-            if hasattr(element, "text") and element.text
-        ]
-
-        full_text = "\n".join(text_parts)
-        logger.info(
-            f"PDF 파싱 완료 (unstructured): {len(text_parts)}개 요소, "
-            f"{len(full_text)} 글자"
-        )
-
-        return full_text
-
-    except Exception as e:
-        logger.error(f"PDF 파싱 실패 (unstructured): {e}")
-        # unstructured도 실패하면 PyMuPDF 결과라도 반환
-        if text:
-            logger.warning("unstructured 실패, PyMuPDF 결과 반환")
-            return text
-        raise ValueError(f"PDF 파싱 중 오류 발생: {e}") from e
+    else:
+        raise ValueError(f"PDF에서 텍스트를 추출할 수 없습니다: {path}")
 
 
 def parse_pdf_with_metadata(path: str) -> List[Dict[str, Any]]:

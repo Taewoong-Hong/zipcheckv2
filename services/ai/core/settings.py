@@ -20,10 +20,10 @@ class Settings(BaseSettings):
         description="PostgreSQL connection URL with pgvector support"
     )
 
-    # LLM Providers (멀티 LLM 전략 - 모두 필수)
+    # LLM Providers (멀티 LLM 전략)
     openai_api_key: str = Field(..., description="OpenAI API key (gpt-4o, gpt-4o-mini)")
-    anthropic_api_key: str = Field(..., description="Anthropic Claude API key (컨센서스 Judge)")
-    gemini_api_key: str = Field(..., description="Google Gemini API key (Vision/OCR)")
+    anthropic_api_key: str | None = Field(default=None, description="Anthropic Claude API key (컨센서스 Judge)")
+    gemini_api_key: str | None = Field(default=None, description="Google Gemini API key (Vision/OCR)")
 
     # Public Data API Keys (MVP 선택사항)
     keyword_juso_api_key: str | None = Field(default=None, description="도로명주소 검색 API 키 (행안부)")

@@ -21,7 +21,8 @@ import { ChatState } from '@/types/analysis';
 const STATE_TRANSITIONS: Record<ChatState, ChatState[]> = {
   init: ['address_pick', 'error'],
   address_pick: ['contract_type', 'error'],
-  contract_type: ['registry_choice', 'error'],
+  contract_type: ['price_input', 'error'],
+  price_input: ['registry_choice', 'error'],
   registry_choice: ['registry_ready', 'error'],
   registry_ready: ['parse_enrich', 'error'],
   parse_enrich: ['report', 'error'],
@@ -36,6 +37,7 @@ const STATE_PROMPTS: Record<ChatState, string> = {
   init: '집 주소를 입력해주세요. 📍',
   address_pick: '주소를 선택해주세요.',
   contract_type: '계약 유형을 선택해주세요.',
+  price_input: '가격 정보를 입력해주세요.',
   registry_choice: '등기부등본을 발급하시겠습니까? (크레딧 차감)\n또는 등기부등본 PDF를 업로드해주세요.',
   registry_ready: '등기부등본을 확인하고 있습니다...',
   parse_enrich: '데이터를 분석하고 있습니다...',
@@ -106,10 +108,11 @@ export function getStatePrompt(state: ChatState): string {
 export function getStateProgress(state: ChatState): number {
   const progressMap: Record<ChatState, number> = {
     init: 0,
-    address_pick: 15,
-    contract_type: 30,
-    registry_choice: 45,
-    registry_ready: 60,
+    address_pick: 12,
+    contract_type: 25,
+    price_input: 40,
+    registry_choice: 50,
+    registry_ready: 65,
     parse_enrich: 80,
     report: 100,
     error: 0,
@@ -145,7 +148,7 @@ export function isErrorState(state: ChatState): boolean {
  * @returns 입력 대기 여부
  */
 export function isWaitingForInput(state: ChatState): boolean {
-  return ['init', 'address_pick', 'contract_type', 'registry_choice'].includes(state);
+  return ['init', 'address_pick', 'contract_type', 'price_input', 'registry_choice'].includes(state);
 }
 
 /**
@@ -169,6 +172,7 @@ export function validateState(state: string): ChatState | null {
     'init',
     'address_pick',
     'contract_type',
+    'price_input',
     'registry_choice',
     'registry_ready',
     'parse_enrich',

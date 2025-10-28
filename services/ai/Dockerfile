@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # 작업 디렉토리 설정
 WORKDIR /app
 
-# 시스템 의존성 설치 (gcc, libmagic, git 등)
+# 시스템 의존성 설치 (gcc, libmagic, git)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libmagic1 \
@@ -32,8 +32,6 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# Gunicorn + Uvicorn worker로 프로덕션 실행
-# --workers=1: 메모리 1Gi에 적합 (필요시 증가)
-# --timeout=120: 긴 요청 대비 타임아웃
-# --graceful-timeout=30: 우아한 종료
-CMD ["sh", "-c", "gunicorn app:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT} --workers 1 --timeout 120 --graceful-timeout 30 --access-logfile - --error-logfile -"]
+# Uvicorn 단독 실행 (Gunicorn 워커 타임아웃 이슈 제거)
+# Cloud Run 단일 인스턴스 환경에서는 Uvicorn 단독으로 충분
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1 --timeout-keep-alive 5 --log-level info"]

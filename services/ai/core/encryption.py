@@ -8,7 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # ✅ 올바른 import
 import base64
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ class EncryptionManager:
         if not encryption_key:
             raise ValueError("ENCRYPTION_KEY environment variable is not set")
 
-        # PBKDF2를 사용하여 키 파생 (32 bytes = 256 bits)
-        kdf = PBKDF2(
+        # PBKDF2HMAC을 사용하여 키 파생 (32 bytes = 256 bits)
+        kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=KEY_LENGTH,
             salt=b"zipcheck_salt_v2",  # 프로덕션에서는 랜덤 salt 사용 권장

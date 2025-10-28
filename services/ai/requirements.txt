@@ -3,7 +3,7 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 gunicorn==21.2.0  # 프로덕션 WSGI 서버
-python-multipart==0.0.6
+python-multipart==0.0.9  # File upload 지원
 
 # LLM Providers (직접 호출)
 openai>=1.58.1,<2.0.0
@@ -43,10 +43,10 @@ cryptography==42.0.0
 solapi==5.0.2
 
 # PDF & Image Processing
-PyMuPDF==1.23.8
+PyMuPDF==1.23.8  # PDF 파싱 (fitz)
 Pillow==10.2.0
 python-magic>=0.4.27  # Linux용 (libmagic1 시스템 패키지 필요)
-unstructured[pdf]>=0.10.0  # PDF 파싱 및 문서 처리
+# unstructured[pdf]>=0.10.0  # 제거: 불필요하게 무겁고 PyMuPDF로 충분
 
 # Observability
 sentry-sdk[fastapi]==1.39.2

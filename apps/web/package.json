@@ -26,8 +26,10 @@
     "postcss": "^8.5.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
     "react-pdf": "^10.2.0",
     "recharts": "^3.3.0",
+    "remark-gfm": "^4.0.1",
     "resend": "^6.2.2",
     "tailwindcss": "^3.4.18",
     "typescript": "^5.9.3"

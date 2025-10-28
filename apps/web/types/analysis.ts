@@ -23,10 +23,11 @@ export type ChatState =
   | 'init'              // S0. 초기화 - 주소 입력 안내
   | 'address_pick'      // S1. 주소 선택 - juso API 검색/선택
   | 'contract_type'     // S2. 계약 유형 선택 - 전세/전월세/월세/매매
-  | 'registry_choice'   // S3. 등기부 선택 - 발급(크레딧) vs 업로드
-  | 'registry_ready'    // S4. 등기부 준비 완료 - PDF 뷰어 표시
-  | 'parse_enrich'      // S5. 파싱 및 데이터 수집 - 공공 데이터 수집
-  | 'report'            // S6. 리포트 생성 완료 - 최종 결과 표시
+  | 'price_input'       // S3. 가격 입력 - 매매가/보증금/월세 (계약 유형별 차이)
+  | 'registry_choice'   // S4. 등기부 선택 - 발급(크레딧) vs 업로드
+  | 'registry_ready'    // S5. 등기부 준비 완료 - PDF 뷰어 표시
+  | 'parse_enrich'      // S6. 파싱 및 데이터 수집 - 공공 데이터 수집
+  | 'report'            // S7. 리포트 생성 완료 - 최종 결과 표시
   | 'error';            // 에러 상태
 
 /**
@@ -53,6 +54,7 @@ export interface AddressInfo {
   ho?: string;                     // 호
   zipCode?: string;                // 우편번호
   buildingCode?: string;           // 건물 코드
+  buildingName?: string;           // 건물명
 
   // juso API 응답 원본 (선택)
   jusoDetail?: JusoSearchResult;
