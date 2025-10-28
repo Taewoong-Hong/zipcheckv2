@@ -128,11 +128,12 @@ function SignupPageContent() {
       return;
     }
 
-    // 전화번호 인증 확인
-    if (!isPhoneVerified) {
-      setError("전화번호 인증을 완료해주세요.");
-      return;
-    }
+    // 전화번호 인증 확인 (선택사항으로 변경)
+    // TODO: 백엔드 SMS API 구현 후 필수로 변경
+    // if (!isPhoneVerified) {
+    //   setError("전화번호 인증을 완료해주세요.");
+    //   return;
+    // }
 
     // 이메일 형식 검사
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
