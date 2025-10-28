@@ -38,11 +38,12 @@ from ingest.validators import (
 from routes.auth import router as auth_router
 from routes.building import router as building_router
 from routes.registry import router as registry_router
-from routes.registry_issue import router as registry_issue_router  # RPA 발급
 from routes.land_price import router as land_price_router
 from routes.apt_trade import router as apt_trade_router
 from routes.sms import router as sms_router
-from routes.realestate import router as realestate_router
+# ❌ realestate 라우터 제거 (별도 패키지로 분리됨)
+# from routes.realestate import router as realestate_router
+from routes.chat import router as chat_router  # 채팅 라우터
 
 # 로깅 설정
 logging.basicConfig(
@@ -109,10 +110,11 @@ app.include_router(building_router)
 app.include_router(auth_router)
 app.include_router(sms_router)  # SMS 인증 라우터
 app.include_router(registry_router)
-app.include_router(registry_issue_router)  # 등기부등본 RPA 발급
 app.include_router(land_price_router)
 app.include_router(apt_trade_router)
-app.include_router(realestate_router)  # 부동산 크롤링 API
+# ❌ realestate_router 제거 (별도 크롤러 패키지로 분리)
+# 크롤러는 독립 서비스로 운영: https://github.com/Taewoong-Hong/zipcheck_rawl
+app.include_router(chat_router)  # 채팅 API
 
 
 # Pydantic 모델

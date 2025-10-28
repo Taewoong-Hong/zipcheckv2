@@ -20,17 +20,20 @@ SQLAlchemy==2.0.25
 pgvector==0.2.4
 supabase>=2.0.0  # Supabase 클라이언트
 
-# LangChain
-langchain>=0.3.19,<1.0.0
-langchain-community>=0.3.19,<0.4.0
-langchain-openai>=0.3.0,<1.0.0
-langchain-anthropic>=1.0.0,<2.0.0
+# LangChain (최신 버전으로 통일)
+langchain>=0.3.27
+langchain-community>=0.3.27
+langchain-openai>=0.3.35
+langchain-anthropic>=1.0.0
+langchain-core>=1.0.0  # anthropic 호환성을 위해 명시적 추가
 
 # Utilities
 tiktoken>=0.7.0,<1.0.0
 tenacity>=8.2.3
 httpx>=0.28.1,<0.29.0
 xmltodict>=0.13.0
+PyJWT>=2.8.0,<3.0.0  # JWT 인증
+requests>=2.31.0,<3.0.0  # HTTP 요청
 
 # Encryption
 cryptography==42.0.0
@@ -41,10 +44,11 @@ solapi==5.0.2
 # PDF & Image Processing
 PyMuPDF==1.23.8
 Pillow==10.2.0
-python-magic-bin==0.4.14
-
-# Browser Automation (RPA)
-playwright==1.55.0
+python-magic>=0.4.27  # Linux용 (libmagic1 시스템 패키지 필요)
+unstructured[pdf]>=0.10.0  # PDF 파싱 및 문서 처리
 
 # Observability
 sentry-sdk[fastapi]==1.39.2
+
+# 크롤러 패키지 (별도 레포지토리)
+zipcheck-crawler @ git+https://github.com/Taewoong-Hong/zipcheck_rawl.git@main
