@@ -35,7 +35,7 @@ export type ChatState =
 export type ContractType = '전세' | '전월세' | '월세' | '매매';
 
 /**
- * 등기부 처리 방법
+ * 등기부 선택 방법
  */
 export type RegistryMethod = 'issue' | 'upload';
 
@@ -552,19 +552,20 @@ export interface UpdateCaseRequest {
 }
 
 /**
- * 등기부 발급 요청
+ * 등기부 업로드 요청
  */
-export interface IssueRegistryRequest {
+export interface UploadRegistryRequest {
   case_id: string;
+  file: File;
 }
 
 /**
- * 등기부 발급 응답
+ * 등기부 업로드 응답
  */
-export interface IssueRegistryResponse {
-  pdf_url: string;                 // PDF 다운로드 URL
+export interface UploadRegistryResponse {
   artifact_id: string;
-  credit_deducted: number;         // 차감된 크레딧
+  file_size: number;
+  parse_confidence?: number;
 }
 
 /**

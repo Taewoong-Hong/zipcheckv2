@@ -20,16 +20,16 @@ class Settings(BaseSettings):
         description="PostgreSQL connection URL with pgvector support"
     )
 
-    # LLM Providers
-    openai_api_key: str = Field(..., description="OpenAI API key")
-    anthropic_api_key: str = Field(..., description="Anthropic API key")
-    gemini_api_key: str = Field(..., description="Google Gemini API key")
+    # LLM Providers (멀티 LLM 전략 - 모두 필수)
+    openai_api_key: str = Field(..., description="OpenAI API key (gpt-4o, gpt-4o-mini)")
+    anthropic_api_key: str = Field(..., description="Anthropic Claude API key (컨센서스 Judge)")
+    gemini_api_key: str = Field(..., description="Google Gemini API key (Vision/OCR)")
 
-    # Public Data API Keys
-    keyword_juso_api_key: str = Field(..., description="도로명주소 검색 API 키 (행안부)")
-    data_go_kr_api_key: str = Field(..., description="공공데이터포털 API 키 (국토부 실거래가)")
-    building_ledger_api_key: str = Field(..., description="건축물대장 + 아파트 매매 기본 API 키 (국토부)")
-    vworld_api_key: str = Field(..., description="VWorld 개별공시지가 API 키")
+    # Public Data API Keys (MVP 선택사항)
+    keyword_juso_api_key: str | None = Field(default=None, description="도로명주소 검색 API 키 (행안부)")
+    data_go_kr_api_key: str | None = Field(default=None, description="공공데이터포털 API 키 (국토부 실거래가)")
+    building_ledger_api_key: str | None = Field(default=None, description="건축물대장 + 아파트 매매 기본 API 키 (국토부)")
+    vworld_api_key: str | None = Field(default=None, description="VWorld 개별공시지가 API 키")
     vworld_domain: str | None = Field(default=None, description="VWorld API 도메인 (선택)")
 
     @property
@@ -37,34 +37,34 @@ class Settings(BaseSettings):
         """아파트 매매 기본 API 키 (data_go_kr_api_key와 동일 - 법정동과 함께 승인됨)."""
         return self.data_go_kr_api_key
 
-    # OAuth Configuration
+    # OAuth Configuration (MVP 선택사항)
     # Kakao OAuth
-    kakao_client_id: str = Field(..., description="카카오 클라이언트 ID")
+    kakao_client_id: str | None = Field(default=None, description="카카오 클라이언트 ID")
     kakao_redirect_uri: str = Field(
         default="http://localhost:8000/api/auth/kakao/callback",
         description="카카오 리다이렉트 URI"
     )
 
     # Google OAuth
-    google_client_id: str = Field(..., description="Google OAuth 클라이언트 ID")
-    google_client_secret: str = Field(..., description="Google OAuth 클라이언트 시크릿")
+    google_client_id: str | None = Field(default=None, description="Google OAuth 클라이언트 ID")
+    google_client_secret: str | None = Field(default=None, description="Google OAuth 클라이언트 시크릿")
     google_redirect_uri: str = Field(
         default="http://localhost:3000/auth/callback",
         description="Google OAuth 리다이렉트 URI"
     )
 
     # Naver OAuth
-    naver_client_id: str = Field(..., description="Naver OAuth 클라이언트 ID")
-    naver_client_secret: str = Field(..., description="Naver OAuth 클라이언트 시크릿")
+    naver_client_id: str | None = Field(default=None, description="Naver OAuth 클라이언트 ID")
+    naver_client_secret: str | None = Field(default=None, description="Naver OAuth 클라이언트 시크릿")
     naver_redirect_uri: str = Field(
         default="http://localhost:3000/auth/callback",
         description="Naver OAuth 리다이렉트 URI"
     )
 
-    # Supabase Configuration
-    supabase_url: str = Field(..., description="Supabase 프로젝트 URL")
-    supabase_anon_key: str = Field(..., description="Supabase Anonymous Key")
-    supabase_service_role_key: str = Field(..., description="Supabase Service Role Key (서버 전용)")
+    # Supabase Configuration (MVP 선택사항)
+    supabase_url: str | None = Field(default=None, description="Supabase 프로젝트 URL")
+    supabase_anon_key: str | None = Field(default=None, description="Supabase Anonymous Key")
+    supabase_service_role_key: str | None = Field(default=None, description="Supabase Service Role Key (서버 전용)")
 
     # LLM Configuration
     primary_llm: Literal["openai", "claude"] = Field(
@@ -156,9 +156,9 @@ class Settings(BaseSettings):
         description="Langfuse host URL"
     )
 
-    # Internet Registry Service (IROS) Configuration
-    iros_user_id: str = Field(..., description="인터넷등기소 아이디")
-    iros_password: str = Field(..., description="인터넷등기소 비밀번호")
+    # Internet Registry Service (IROS) Configuration - RPA 제거됨, 향후 사용 가능
+    iros_user_id: str | None = Field(default=None, description="인터넷등기소 아이디 (선택)")
+    iros_password: str | None = Field(default=None, description="인터넷등기소 비밀번호 (선택)")
 
     # Application
     app_env: Literal["development", "staging", "production"] = Field(

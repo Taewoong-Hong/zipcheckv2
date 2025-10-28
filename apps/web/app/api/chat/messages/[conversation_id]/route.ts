@@ -4,8 +4,9 @@ const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-871793445649.a
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { conversation_id: string } }
+  { params }: { params: Promise<{ conversation_id: string }> }
 ) {
+  const { conversation_id } = await params;
   try {
     const authHeader = request.headers.get('authorization');
 
@@ -18,7 +19,7 @@ export async function GET(
 
     // FastAPI /chat/messages/{conversation_id} 호출
     const response = await fetch(
-      `${AI_API_URL}/chat/messages/${params.conversation_id}`,
+      `${AI_API_URL}/chat/messages/${conversation_id}`,
       {
         method: 'GET',
         headers: {

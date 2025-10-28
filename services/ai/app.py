@@ -13,9 +13,7 @@ from sentry_sdk.integrations.fastapi import FastApiIntegration
 from uuid import UUID, uuid4
 
 # 보안 모듈 임포트
-from core.config import get_settings, validate_environment
 from core.auth import get_current_user, get_optional_user, require_admin
-
 from core.settings import settings
 from core.chains import build_contract_analysis_chain, single_model_analyze
 from core.database import (
@@ -45,6 +43,9 @@ from routes.sms import router as sms_router
 # from routes.realestate import router as realestate_router
 from routes.chat import router as chat_router  # 채팅 라우터
 from routes.crawler_test import router as crawler_test_router  # 크롤러 테스트 (관리자)
+from routes.case import router as case_router  # 케이스 관리 API
+from routes.analysis import router as analysis_router  # 분석 오케스트레이터
+from routes.report import router as report_router  # 리포트 API
 
 # 로깅 설정
 logging.basicConfig(
@@ -71,10 +72,7 @@ async def lifespan(app: FastAPI):
     # 시작 시
     logger.info("=== ZipCheck AI 서비스 시작 ===")
 
-    # 환경 변수 검증
-    logger.info("환경 변수 검증 중...")
-    validate_environment()
-
+    # 기본 설정 정보 로깅 (환경 변수 검증은 settings 초기화 시 자동 수행)
     logger.info(f"환경: {settings.app_env}")
     logger.info(f"Primary LLM: {settings.primary_llm}")
     logger.info(f"Judge LLM: {settings.judge_llm}")
@@ -117,6 +115,9 @@ app.include_router(apt_trade_router)
 # 크롤러는 독립 서비스로 운영: https://github.com/Taewoong-Hong/zipcheck_rawl
 app.include_router(chat_router)  # 채팅 API
 app.include_router(crawler_test_router)  # 크롤러 테스트 (관리자 전용)
+app.include_router(case_router)  # 케이스 관리 API
+app.include_router(analysis_router)  # 분석 오케스트레이터
+app.include_router(report_router)  # 리포트 API
 
 
 # Pydantic 모델

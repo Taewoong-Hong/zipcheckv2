@@ -98,10 +98,8 @@ export default function Message({ message, isTyping, onContractTypeSelect, onReg
         return (
           <div className="mt-4">
             <RegistryChoiceSelector
-              userCredits={message.componentData?.userCredits || 0}
-              registryCost={message.componentData?.registryCost || 10}
-              onSelect={(method, file) => {
-                onRegistryChoiceSelect?.(method, file);
+              onSelect={(file: File) => {
+                onRegistryChoiceSelect?.('upload', file);
               }}
             />
           </div>

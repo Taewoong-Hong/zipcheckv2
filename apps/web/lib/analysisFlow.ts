@@ -166,28 +166,6 @@ export async function uploadRegistry(caseId: string, file: File): Promise<void> 
   }
 }
 
-/**
- * 등기부 발급 API 호출
- */
-export async function issueRegistry(caseId: string): Promise<string> {
-  try {
-    const response = await fetch('/api/registry/issue', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ caseId }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to issue registry: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.pdfUrl;
-  } catch (error) {
-    console.error('Issue registry error:', error);
-    throw error;
-  }
-}
 
 /**
  * 분석 실행 API 호출

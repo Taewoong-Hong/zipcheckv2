@@ -2,6 +2,7 @@
 # FastAPI & Server
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
+gunicorn==21.2.0  # 프로덕션 WSGI 서버
 python-multipart==0.0.6
 
 # LLM Providers (직접 호출)
@@ -50,5 +51,5 @@ unstructured[pdf]>=0.10.0  # PDF 파싱 및 문서 처리
 # Observability
 sentry-sdk[fastapi]==1.39.2
 
-# 크롤러 패키지 (별도 레포지토리)
-zipcheck-crawler @ git+https://github.com/Taewoong-Hong/zipcheck_rawl.git@main
+# 크롤러 패키지 (별도 레포지토리 - Dockerfile에서 별도 설치)
+# zipcheck-crawler @ git+https://github.com/Taewoong-Hong/zipcheck_rawl.git@main

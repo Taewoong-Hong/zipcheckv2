@@ -203,6 +203,37 @@ async def analyze(body: AskBody):
 
 ---
 
+## 📝 작업 현황
+
+### ✅ 2025-01-28: RPA 등기부등본 자동 발급 기능 제거 (MVP 단순화)
+
+**제거 사유**: MVP 단계에서는 사용자 PDF 업로드만 지원하고, RPA 자동 발급은 2차 개발로 이연
+
+**백엔드 제거 항목**:
+1. ✅ `services/ai/rpa/` 디렉토리 전체 삭제
+   - Playwright 기반 IROS(인터넷등기소) 자동화 코드
+   - epagesafer 핸들러, PS to PDF 변환기
+2. ✅ `services/ai/routes/registry_issue.py` 삭제 (크레딧 차감 로직 포함)
+3. ✅ `services/ai/app.py` - RPA 라우터 임포트 제거
+4. ✅ `services/ai/requirements.txt` - Playwright 의존성 제거
+
+**프론트엔드 수정 항목**:
+1. ✅ `RegistryChoiceSelector.tsx` - 완전히 재작성 (업로드 전용 UI)
+   - 크레딧 관련 UI 제거
+   - "인터넷등기소 바로가기" 링크 추가
+2. ✅ `analysisFlow.ts` - RPA 함수 제거
+3. ✅ `types/analysis.ts` - RPA 관련 타입 정리
+
+**성능 개선**:
+- Playwright 의존성 제거로 Cloud Run 빌드 시간 약 30% 단축 예상
+- 컨테이너 이미지 크기 감소
+
+**향후 계획** (2차 개발):
+- 외부 등기부 API 연계 (공공 API 또는 파트너사)
+- 크레딧 시스템 재도입
+
+---
+
 ## 📝 작업 현황 (2025-10-20)
 
 ### ✅ 완료된 작업

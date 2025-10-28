@@ -60,3 +60,7 @@ docker-compose.yml
 README.md
 P*.md
 시작하기.md
+
+# Development files
+app_minimal.py
+check_database.py
