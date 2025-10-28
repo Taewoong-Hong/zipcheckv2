@@ -40,7 +40,13 @@ export default function ChatInterface({
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(() => {
+    // Restore conversation ID from localStorage on mount
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('chat_conversation_id');
+    }
+    return null;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -49,10 +55,21 @@ export default function ChatInterface({
   const [stateMachine] = useState(() => new StateMachine('init'));
   const [analysisContext, setAnalysisContext] = useState<AnalysisContext>({});
 
-  // Initialize conversation on first load
+  // Persist conversationId to localStorage when it changes
+  useEffect(() => {
+    if (conversationId) {
+      localStorage.setItem('chat_conversation_id', conversationId);
+      console.log('Conversation ID saved to localStorage:', conversationId);
+    } else {
+      localStorage.removeItem('chat_conversation_id');
+      console.log('Conversation ID removed from localStorage');
+    }
+  }, [conversationId]);
+
+  // Initialize conversation on first load (only if no existing conversationId)
   useEffect(() => {
     const initConversation = async () => {
-      if (!isLoggedIn) return;
+      if (!isLoggedIn || conversationId) return; // Skip if already have a conversation
 
       try {
         // Get Supabase session
@@ -79,7 +96,7 @@ export default function ChatInterface({
     };
 
     initConversation();
-  }, [isLoggedIn]);
+  }, [isLoggedIn, conversationId]);
 
   // Reset chat function for new conversation
   const resetChat = async () => {
