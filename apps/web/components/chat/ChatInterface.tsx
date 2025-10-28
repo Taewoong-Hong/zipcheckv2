@@ -10,6 +10,7 @@ import { chatStorage } from "@/lib/chatStorage";
 import { simulateTestResponse } from "@/lib/testScenario";
 import { ChatLoadingIndicator } from "@/components/common/LoadingSpinner";
 import { StateMachine } from "@/lib/stateMachine";
+import { supabase } from "@/lib/supabase";
 import {
   isAddressInput,
   isAnalysisStartTrigger,
@@ -38,6 +39,7 @@ export default function ChatInterface({
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -46,11 +48,44 @@ export default function ChatInterface({
   const [stateMachine] = useState(() => new StateMachine('init'));
   const [analysisContext, setAnalysisContext] = useState<AnalysisContext>({});
 
+  // Initialize conversation on first load
+  useEffect(() => {
+    const initConversation = async () => {
+      if (!isLoggedIn) return;
+
+      try {
+        // Get Supabase session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        // Create new conversation
+        const response = await fetch('/api/chat/init', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ session }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setConversationId(data.conversation_id);
+          console.log('New conversation created:', data.conversation_id);
+        }
+      } catch (error) {
+        console.error('Failed to initialize conversation:', error);
+      }
+    };
+
+    initConversation();
+  }, [isLoggedIn]);
+
   // Reset chat function for new conversation
-  const resetChat = () => {
+  const resetChat = async () => {
     setMessages([]);
     setInputValue("");
     setIsLoading(false);
+    setConversationId(null);
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -60,6 +95,29 @@ export default function ChatInterface({
     setAnalysisContext({});
     // Create new session
     chatStorage.createSession();
+
+    // Create new conversation
+    if (isLoggedIn) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const response = await fetch('/api/chat/init', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ session }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            setConversationId(data.conversation_id);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to create new conversation:', error);
+      }
+    }
   };
 
   // Handle contract type selection
@@ -399,6 +457,17 @@ export default function ChatInterface({
       }
 
       try {
+        // Ensure conversation ID exists
+        if (!conversationId) {
+          throw new Error('대화 세션이 없습니다. 페이지를 새로고침해주세요.');
+        }
+
+        // Get Supabase session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error('로그인 세션이 만료되었습니다.');
+        }
+
         // Create abort controller for cancellation
         abortControllerRef.current = new AbortController();
 
@@ -408,11 +477,9 @@ export default function ChatInterface({
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            messages: [...messages, userMessage].map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-            stream: true,
+            conversation_id: conversationId,
+            content,
+            session,
           }),
           signal: abortControllerRef.current.signal,
         });

@@ -44,6 +44,7 @@ from routes.sms import router as sms_router
 # ❌ realestate 라우터 제거 (별도 패키지로 분리됨)
 # from routes.realestate import router as realestate_router
 from routes.chat import router as chat_router  # 채팅 라우터
+from routes.crawler_test import router as crawler_test_router  # 크롤러 테스트 (관리자)
 
 # 로깅 설정
 logging.basicConfig(
@@ -115,6 +116,7 @@ app.include_router(apt_trade_router)
 # ❌ realestate_router 제거 (별도 크롤러 패키지로 분리)
 # 크롤러는 독립 서비스로 운영: https://github.com/Taewoong-Hong/zipcheck_rawl
 app.include_router(chat_router)  # 채팅 API
+app.include_router(crawler_test_router)  # 크롤러 테스트 (관리자 전용)
 
 
 # Pydantic 모델
