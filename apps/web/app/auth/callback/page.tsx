@@ -34,7 +34,20 @@ function AuthCallbackPageContent() {
           return;
         }
 
-        // Supabase가 자동으로 세션을 생성하므로, 세션만 확인
+        // 네이버 OAuth 처리: naver_token 파라미터가 있으면 네이버 로그인
+        const naverToken = searchParams?.get("naver_token");
+
+        if (naverToken) {
+          // 네이버 로그인 성공 - Edge Function이 이미 JWT를 발급하고 쿠키에 저장함
+          console.log("네이버 로그인 성공");
+          setStatus("success");
+          setTimeout(() => {
+            router.push("/");
+          }, 1000);
+          return;
+        }
+
+        // Supabase가 자동으로 세션을 생성하므로, 세션만 확인 (Google/Kakao)
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
         if (sessionError) {

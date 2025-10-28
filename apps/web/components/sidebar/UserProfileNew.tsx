@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { User, LogOut, Crown, ChevronDown, LogIn } from "lucide-react";
 import LoginModal from "@/components/auth/LoginModal";
@@ -96,10 +97,14 @@ export default function UserProfileNew({ isExpanded }: UserProfileNewProps) {
           )}
         </button>
 
-        <LoginModal
-          isOpen={isLoginModalOpen}
-          onClose={() => setIsLoginModalOpen(false)}
-        />
+        {/* Portal을 사용해서 body에 직접 렌더링 (사이드바 overflow 문제 해결) */}
+        {typeof document !== 'undefined' && createPortal(
+          <LoginModal
+            isOpen={isLoginModalOpen}
+            onClose={() => setIsLoginModalOpen(false)}
+          />,
+          document.body
+        )}
       </>
     );
   }

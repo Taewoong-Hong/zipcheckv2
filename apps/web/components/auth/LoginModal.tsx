@@ -108,9 +108,9 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
           window.location.href = data.url;
         }
       } else if (provider === "naver") {
-        // Naver OAuth via Edge Function
+        // Naver OAuth via Supabase Edge Function
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gsiismzchtgdklvdvggu.supabase.co';
-        const edgeFunctionUrl = `${supabaseUrl.replace('.supabase.co', '.functions.supabase.co')}/naver/authorize`;
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/naver`;
         window.location.href = edgeFunctionUrl;
       }
     } catch (err) {

@@ -147,28 +147,67 @@ function buildCookie(name: string, value: string) {
     `Path=/`,
     `HttpOnly`,
     `Secure`,
-    `SameSite=Lax`,
+    `SameSite=Strict`,  // CSRF 보호 강화
     COOKIE_DOMAIN ? `Domain=${COOKIE_DOMAIN}` : "",
     `Max-Age=3600`,
   ].filter(Boolean).join("; ");
   return `${name}=${value}; ${attrs}`;
 }
 
+// Allowed origins for CORS and security
+const ALLOWED_ORIGINS = [
+  "https://zipcheck.kr",
+  "http://localhost:3000",
+  "https://gsiismzchtgdklvdvggu.supabase.co",
+];
+
+function getCorsHeaders(origin: string | null) {
+  const allowedOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Credentials": "true",
+  };
+}
+
 // Router
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   const pathname = url.pathname;
+  const origin = req.headers.get("origin");
 
-  // 1) /naver/authorize → 네이버 로그인 화면으로 보냄
-  if (pathname.endsWith("/authorize")) {
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: getCorsHeaders(origin),
+    });
+  }
+
+  // Security: Referrer/Origin validation (OAuth 엔드포인트만)
+  if (pathname.includes("/authorize")) {
+    const referer = req.headers.get("referer");
+    const isValidOrigin = origin && ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
+    const isValidReferer = referer && ALLOWED_ORIGINS.some(allowed => referer.startsWith(allowed));
+
+    if (!isValidOrigin && !isValidReferer) {
+      return asJSON({ error: "invalid_origin" }, 403);
+    }
+  }
+
+  // 1) /authorize → 네이버 로그인 화면으로 보냄
+  // URL: https://gsiismzchtgdklvdvggu.supabase.co/functions/v1/naver/authorize
+  if (pathname === "/naver" || pathname === "/naver/authorize") {
     // CSRF 방지: state = 랜덤값(쿠키에도 저장)
     const state = crypto.randomUUID();
     const cookie = buildCookie("naver_oauth_state", state);
     return redirect(buildAuthorizeURL(state), cookie);
   }
 
-  // 2) /naver/callback → 코드 교환, 유저 생성, JWT 발급
-  if (pathname.endsWith("/callback")) {
+  // 2) /callback → 코드 교환, 유저 생성, JWT 발급
+  // URL: https://gsiismzchtgdklvdvggu.supabase.co/functions/v1/naver/callback
+  if (pathname === "/naver/callback") {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const cookieState = (req.headers.get("cookie") ?? "")
