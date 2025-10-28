@@ -38,8 +38,23 @@ function AuthCallbackPageContent() {
         const naverToken = searchParams?.get("naver_token");
 
         if (naverToken) {
-          // 네이버 로그인 성공 - Edge Function이 이미 JWT를 발급하고 쿠키에 저장함
-          console.log("네이버 로그인 성공");
+          // Edge Function이 발급한 JWT로 Supabase 세션 생성
+          console.log("네이버 로그인 토큰 수신, 세션 생성 중...");
+
+          // Supabase에 세션 설정 (Edge Function이 발급한 JWT 사용)
+          const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+            access_token: naverToken,
+            refresh_token: naverToken, // 네이버는 리프레시 토큰이 없으므로 동일한 토큰 사용
+          });
+
+          if (sessionError) {
+            console.error("네이버 세션 생성 실패:", sessionError);
+            setStatus("error");
+            setErrorMessage("네이버 로그인 세션 생성에 실패했습니다.");
+            return;
+          }
+
+          console.log("네이버 로그인 성공:", sessionData.user?.email);
           setStatus("success");
           setTimeout(() => {
             router.push("/");
