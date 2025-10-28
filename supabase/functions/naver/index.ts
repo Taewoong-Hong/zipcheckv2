@@ -147,7 +147,7 @@ function buildCookie(name: string, value: string) {
     `Path=/`,
     `HttpOnly`,
     `Secure`,
-    `SameSite=Strict`,  // CSRF 보호 강화
+    `SameSite=Lax`,  // OAuth 콜백을 위해 Lax 사용 (크로스사이트 GET 허용)
     COOKIE_DOMAIN ? `Domain=${COOKIE_DOMAIN}` : "",
     `Max-Age=3600`,
   ].filter(Boolean).join("; ");
@@ -210,14 +210,22 @@ Deno.serve(async (req) => {
   if (pathname === "/naver/callback") {
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
-    const cookieState = (req.headers.get("cookie") ?? "")
+    const cookies = req.headers.get("cookie") ?? "";
+    const cookieState = cookies
       .split(";")
       .map(v => v.trim())
       .find(v => v.startsWith("naver_oauth_state="))
       ?.split("=")[1];
 
+    // 디버깅 로그
+    console.log("[Naver Callback] code:", code?.substring(0, 10));
+    console.log("[Naver Callback] state:", state);
+    console.log("[Naver Callback] cookies:", cookies);
+    console.log("[Naver Callback] cookieState:", cookieState);
+
     if (!code || !state || state !== cookieState) {
-      return asJSON({ error: "invalid_state_or_code" }, 400);
+      console.error("[Naver Callback] Validation failed", { code: !!code, state: !!state, cookieState: !!cookieState, match: state === cookieState });
+      return asJSON({ error: "invalid_state_or_code", debug: { hasCode: !!code, hasState: !!state, hasCookieState: !!cookieState, stateMatch: state === cookieState } }, 400);
     }
 
     try {
