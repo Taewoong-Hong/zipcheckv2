@@ -100,7 +100,7 @@ def get_public_key(token: str) -> str:
 
 def verify_token(token: str) -> Dict[str, Any]:
     """
-    JWT 토큰 검증
+    JWT 토큰 검증 - Supabase API를 통한 검증
 
     Args:
         token: JWT 토큰
@@ -112,46 +112,45 @@ def verify_token(token: str) -> Dict[str, Any]:
         HTTPException: 토큰이 유효하지 않은 경우
     """
     try:
-        # Supabase는 HS256 (대칭키) 방식 사용
-        if not SUPABASE_JWT_SECRET:
-            logger.error("SUPABASE_JWT_SECRET not configured")
+        # Supabase auth API를 통해 토큰 검증
+        response = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5
+        )
+
+        if response.status_code == 401:
+            logger.warning("Token verification failed: Invalid or expired token")
             raise HTTPException(
-                status_code=500,
-                detail="Authentication not configured"
+                status_code=401,
+                detail="Invalid or expired token"
             )
 
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",  # Supabase 기본 audience
-            options={
-                "verify_signature": True,
-                "verify_exp": True,
-                "verify_aud": True,
-            }
-        )
+        if not response.ok:
+            logger.error(f"Token verification error: {response.status_code}")
+            raise HTTPException(
+                status_code=500,
+                detail="Token verification failed"
+            )
+
+        user_data = response.json()
+
+        # JWT 페이로드 형식으로 반환
+        payload = {
+            "sub": user_data.get("id"),
+            "email": user_data.get("email"),
+            "role": user_data.get("role", "authenticated"),
+            "aud": "authenticated"
+        }
 
         logger.info(f"Token verified for user: {payload.get('sub')}")
         return payload
 
-    except jwt.ExpiredSignatureError:
-        logger.warning("Token expired")
+    except requests.RequestException as e:
+        logger.error(f"Token verification request failed: {e}")
         raise HTTPException(
-            status_code=401,
-            detail="Token expired"
-        )
-    except jwt.InvalidAudienceError:
-        logger.warning("Invalid token audience")
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token audience"
-        )
-    except jwt.InvalidTokenError as e:
-        logger.error(f"Invalid token: {e}")
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token"
+            status_code=500,
+            detail="Token verification service unavailable"
         )
 
 
