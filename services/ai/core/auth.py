@@ -112,13 +112,18 @@ def verify_token(token: str) -> Dict[str, Any]:
         HTTPException: 토큰이 유효하지 않은 경우
     """
     try:
-        # RS256 알고리즘으로 검증 (Supabase 기본값)
-        public_key = get_public_key(token)
+        # Supabase는 HS256 (대칭키) 방식 사용
+        if not SUPABASE_JWT_SECRET:
+            logger.error("SUPABASE_JWT_SECRET not configured")
+            raise HTTPException(
+                status_code=500,
+                detail="Authentication not configured"
+            )
 
         payload = jwt.decode(
             token,
-            public_key,
-            algorithms=["RS256"],
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
             audience="authenticated",  # Supabase 기본 audience
             options={
                 "verify_signature": True,
