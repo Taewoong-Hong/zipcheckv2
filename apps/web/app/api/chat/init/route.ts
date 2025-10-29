@@ -80,28 +80,6 @@ export async function POST(request: NextRequest) {
       bearerToken = session.access_token;
     }
 
-    // 🔍 디버깅: 세션 상태 상세 로깅
-    console.log('[chat/init] Session retrieval result:', {
-      hasSession: !!session,
-      hasAccessToken: !!session?.access_token,
-      hasUser: !!session?.user,
-      userId: session?.user?.id || 'N/A',
-      tokenLength: session?.access_token?.length || 0,
-      sessionError: sessionError ? sessionError.message : 'none'
-    });
-
-    if (sessionError || !session?.access_token) {
-      console.error('[chat/init] ❌ Session validation failed:', {
-        sessionError,
-        hasSession: !!session,
-        hasAccessToken: !!session?.access_token
-      });
-      return NextResponse.json(
-        { error: 'NO_SESSION', message: '로그인이 필요합니다' },
-        { status: 401 }
-      );
-    }
-
     console.log('[chat/init] ✅ Auth ready, calling FastAPI with token...');
     console.log('[chat/init] Token preview:', bearerToken?.substring(0, 20) + '...');
 
