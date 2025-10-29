@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 // Google Cloud Run AI 서비스 URL
-const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-871793445649.asia-northeast3.run.app';
+const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-ov5n6pt46a-du.a.run.app';
 
 // Supabase 클라이언트
 const supabase = createClient(
