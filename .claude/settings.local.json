@@ -43,7 +43,11 @@
       "Bash(gcloud secrets add-iam-policy-binding:*)",
       "Bash(gcloud run services describe:*)",
       "Bash(gcloud secrets create:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(gcloud secrets list:*)",
+      "Bash(gcloud run services update:*)",
+      "Bash(gcloud secrets versions list:*)",
+      "Bash(gcloud secrets versions add:*)"
     ],
     "deny": [],
     "ask": []
