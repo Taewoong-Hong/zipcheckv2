@@ -1,4 +1,8 @@
-const AI_API_URL = process.env.NEXT_PUBLIC_AI_API_URL || 'http://localhost:8000';
+const AI_API_URL = process.env.NEXT_PUBLIC_AI_API_URL;
+
+if (!AI_API_URL) {
+  throw new Error('NEXT_PUBLIC_AI_API_URL 환경변수가 설정되어 있지 않습니다');
+}
 
 interface ApiError {
   message: string;

@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server';
 
-const AI_API_URL = process.env.AI_API_URL || 'http://localhost:8000';
+const AI_API_URL = process.env.AI_API_URL;
+
+if (!AI_API_URL) {
+  throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
+}
 
 export async function POST(
   request: NextRequest,

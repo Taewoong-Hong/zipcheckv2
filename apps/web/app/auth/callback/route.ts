@@ -56,35 +56,43 @@ export async function GET(request: NextRequest) {
 
   // Handle OAuth code exchange (Google/Kakao)
   if (code) {
-    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    console.log('[OAuth Callback] Exchanging code for session...');
+    const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
     if (exchangeError) {
-      console.error('Code exchange error:', exchangeError);
+      console.error('[OAuth Callback] ❌ Code exchange error:', exchangeError);
       return NextResponse.redirect(`${origin}/?error=auth_failed`);
     }
+    console.log('[OAuth Callback] ✅ Code exchange success, user:', data.session?.user.email);
   }
 
   // Handle Naver OAuth (custom token)
   if (naverToken) {
-    const { error: sessionError } = await supabase.auth.setSession({
+    console.log('[OAuth Callback] Setting Naver session...');
+    const { data, error: sessionError } = await supabase.auth.setSession({
       access_token: naverToken,
       refresh_token: naverToken, // 네이버는 리프레시 토큰이 없으므로 동일한 토큰 사용
     });
 
     if (sessionError) {
-      console.error('Naver session error:', sessionError);
+      console.error('[OAuth Callback] ❌ Naver session error:', sessionError);
       return NextResponse.redirect(`${origin}/?error=auth_failed`);
     }
+    console.log('[OAuth Callback] ✅ Naver session success, user:', data.session?.user.email);
   }
 
   // Verify session was created
+  console.log('[OAuth Callback] Verifying session...');
   const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
   if (sessionError || !session) {
-    console.error('Session verification failed:', sessionError);
+    console.error('[OAuth Callback] ❌ Session verification failed:', sessionError);
     return NextResponse.redirect(`${origin}/?error=no_session`);
   }
 
-  console.log('OAuth callback success, user:', session.user.email);
+  console.log('[OAuth Callback] ✅ Session verified');
+  console.log('[OAuth Callback] User:', session.user.email);
+  console.log('[OAuth Callback] Token preview:', session.access_token.substring(0, 20) + '...');
+  console.log('[OAuth Callback] Token expires at:', new Date(session.expires_at! * 1000).toISOString());
 
   // Success - redirect to home
   return NextResponse.redirect(`${origin}/`);

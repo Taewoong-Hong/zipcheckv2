@@ -4,7 +4,11 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-ov5n6pt46a-du.a.run.app';
+const AI_API_URL = process.env.AI_API_URL;
+
+if (!AI_API_URL) {
+  throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
+}
 
 /**
  * GET /api/chat/sessions

@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 // Google Cloud Run AI 서비스 URL
-const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-ov5n6pt46a-du.a.run.app';
+const AI_API_URL = process.env.AI_API_URL;
+
+if (!AI_API_URL) {
+  throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
+}
 
 // Supabase 클라이언트
 const supabase = createClient(
@@ -48,6 +52,7 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({
         question: content,

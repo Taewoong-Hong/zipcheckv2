@@ -20,7 +20,14 @@ export async function GET(
     }
 
     // FastAPI 백엔드에서 리포트 조회
-    const backendUrl = process.env.NEXT_PUBLIC_AI_API_URL || 'http://localhost:8000';
+    const backendUrl = process.env.NEXT_PUBLIC_AI_API_URL;
+
+    if (!backendUrl) {
+      return NextResponse.json(
+        { error: 'NEXT_PUBLIC_AI_API_URL 환경변수가 설정되어 있지 않습니다' },
+        { status: 500 }
+      );
+    }
     const response = await fetch(`${backendUrl}/reports/${caseId}`, {
       method: 'GET',
       headers: {
