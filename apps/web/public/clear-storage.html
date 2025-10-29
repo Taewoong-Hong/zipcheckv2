@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZipCheck - Storage 초기화</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #E91E63;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #E91E63;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #D32F2F;
+        }
+        .success {
+            color: #4CAF50;
+            margin-top: 20px;
+            padding: 10px;
+            background: #E8F5E9;
+            border-radius: 4px;
+        }
+        .info {
+            color: #666;
+            margin-top: 20px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        pre {
+            background: #263238;
+            color: #AED581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧹 Storage 초기화</h1>
+
+        <p>Supabase 세션 및 로컬 데이터를 초기화합니다.</p>
+
+        <button onclick="clearSupabaseOnly()">Supabase 세션만 삭제</button>
+        <button onclick="clearAll()">전체 Storage 삭제</button>
+        <button onclick="showStorage()">현재 데이터 보기</button>
+        <button onclick="goHome()">홈으로</button>
+
+        <div id="result"></div>
+        <div id="storage-view"></div>
+
+        <div class="info">
+            <strong>사용법:</strong><br>
+            1. "Supabase 세션만 삭제" 버튼 클릭<br>
+            2. 페이지 새로고침 (F5)<br>
+            3. 다시 로그인
+        </div>
+    </div>
+
+    <script>
+        function clearSupabaseOnly() {
+            let count = 0;
+            const keys = Object.keys(localStorage);
+
+            keys.forEach(key => {
+                if (key.includes('supabase') || key.includes('sb-')) {
+                    localStorage.removeItem(key);
+                    count++;
+                }
+            });
+
+            // SessionStorage도 정리
+            const sessionKeys = Object.keys(sessionStorage);
+            sessionKeys.forEach(key => {
+                if (key.includes('supabase') || key.includes('sb-')) {
+                    sessionStorage.removeItem(key);
+                    count++;
+                }
+            });
+
+            document.getElementById('result').innerHTML =
+                `<div class="success">✅ Supabase 관련 데이터 ${count}개 삭제 완료!<br>페이지를 새로고침하세요.</div>`;
+        }
+
+        function clearAll() {
+            const localCount = localStorage.length;
+            const sessionCount = sessionStorage.length;
+
+            localStorage.clear();
+            sessionStorage.clear();
+
+            document.getElementById('result').innerHTML =
+                `<div class="success">✅ 전체 Storage 삭제 완료!<br>
+                - localStorage: ${localCount}개<br>
+                - sessionStorage: ${sessionCount}개<br>
+                페이지를 새로고침하세요.</div>`;
+        }
+
+        function showStorage() {
+            const local = {};
+            const session = {};
+
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                local[key] = localStorage.getItem(key)?.substring(0, 100) + '...';
+            }
+
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                session[key] = sessionStorage.getItem(key)?.substring(0, 100) + '...';
+            }
+
+            document.getElementById('storage-view').innerHTML = `
+                <div class="info">
+                    <strong>LocalStorage (${Object.keys(local).length}개):</strong>
+                    <pre>${JSON.stringify(local, null, 2)}</pre>
+
+                    <strong>SessionStorage (${Object.keys(session).length}개):</strong>
+                    <pre>${JSON.stringify(session, null, 2)}</pre>
+                </div>
+            `;
+        }
+
+        function goHome() {
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>

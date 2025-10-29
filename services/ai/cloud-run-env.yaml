@@ -1,0 +1,5 @@
+# Environment variables for Cloud Run deployment (필수 키만)
+SUPABASE_URL: "https://gsiismzchtgdklvdvggu.supabase.co"
+AI_ALLOWED_ORIGINS: "https://zipcheck.kr,https://www.zipcheck.kr,http://localhost:3000"
+APP_ENV: "production"
+LOG_LEVEL: "INFO"

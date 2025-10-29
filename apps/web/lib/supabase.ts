@@ -26,7 +26,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * });
  * ```
  */
-export const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    // 토큰 만료 시 자동으로 localStorage에서 제거
+    storageKey: 'sb-gsiismzchtgdklvdvggu-auth-token',
+  },
+});
 
 /**
  * Create a new Supabase client instance for server-side operations

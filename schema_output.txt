@@ -1,0 +1,10 @@
+================================================================================
+ZipCheck v2 - Supabase Database Schema
+================================================================================
+
+Traceback (most recent call last):
+  File "C:\dev\zipcheckv2\db_schema_check.py", line 168, in <module>
+    main()
+  File "C:\dev\zipcheckv2\db_schema_check.py", line 114, in main
+    print("\U0001f4ca 테이블 목록:")
+UnicodeEncodeError: 'cp949' codec can't encode character '\U0001f4ca' in position 0: illegal multibyte sequence

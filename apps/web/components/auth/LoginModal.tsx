@@ -76,7 +76,8 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: "google",
           options: {
-            redirectTo: `${window.location.origin}/auth/callback`,
+            // Let the browser SDK handle the code exchange and persist session
+            redirectTo: `${window.location.origin}`,
             queryParams: {
               access_type: "offline",
               prompt: "consent",
@@ -96,7 +97,8 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: "kakao",
           options: {
-            redirectTo: `${window.location.origin}/auth/callback`,
+            // Let the browser SDK handle the code exchange and persist session
+            redirectTo: `${window.location.origin}`,
           },
         });
 

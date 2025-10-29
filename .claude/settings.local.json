@@ -34,7 +34,16 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git rm:*)",
-      "Read(//c/dev/zipcheck-crawler/**)"
+      "Read(//c/dev/zipcheck-crawler/**)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(docker:*)",
+      "Bash(for secret in anthropic-api-key openai-api-key supabase-database-url supabase-jwt-secret vworld-api-key-production)",
+      "Bash(do echo \"Granting access to $secret...\" gcloud secrets add-iam-policy-binding $secret --member=\"serviceAccount:871793445649-compute@developer.gserviceaccount.com\" --role=\"roles/secretmanager.secretAccessor\")",
+      "Bash(gcloud secrets add-iam-policy-binding:*)",
+      "Bash(gcloud run services describe:*)",
+      "Bash(gcloud secrets create:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

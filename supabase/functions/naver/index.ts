@@ -17,14 +17,14 @@ const supabaseAdmin = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false },
 });
 
-function redirect(url: string, setCookie?: string) {
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: url,
-      ...(setCookie ? { "Set-Cookie": setCookie } : {}),
-    },
-  });
+function redirect(url: string, setCookies?: string | string[]) {
+  const headers = new Headers({ Location: url });
+  if (Array.isArray(setCookies)) {
+    for (const c of setCookies) headers.append("Set-Cookie", c);
+  } else if (setCookies) {
+    headers.append("Set-Cookie", setCookies);
+  }
+  return new Response(null, { status: 302, headers });
 }
 
 function asJSON(data: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -157,9 +157,13 @@ function buildCookie(name: string, value: string) {
 // Allowed origins for CORS and security
 const ALLOWED_ORIGINS = [
   "https://zipcheck.kr",
+  "https://www.zipcheck.kr",
   "http://localhost:3000",
+  "http://127.0.0.1:3000",
   "https://gsiismzchtgdklvdvggu.supabase.co",
 ];
+
+const FRONTEND_ORIGIN_COOKIE = "naver_frontend_origin";
 
 function getCorsHeaders(origin: string | null) {
   const allowedOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
@@ -201,8 +205,16 @@ Deno.serve(async (req) => {
   if (pathname === "/naver" || pathname === "/naver/authorize") {
     // CSRF 방지: state = 랜덤값(쿠키에도 저장)
     const state = crypto.randomUUID();
-    const cookie = buildCookie("naver_oauth_state", state);
-    return redirect(buildAuthorizeURL(state), cookie);
+    const stateCookie = buildCookie("naver_oauth_state", state);
+    // Capture caller frontend origin for callback redirect
+    const referer = req.headers.get("referer");
+    const refererOrigin = referer ? new URL(referer).origin : null;
+    const chosenOrigin = refererOrigin && ALLOWED_ORIGINS.includes(refererOrigin)
+      ? refererOrigin
+      : (origin && ALLOWED_ORIGINS.includes(origin) ? origin : null);
+    const originCookie = chosenOrigin ? buildCookie(FRONTEND_ORIGIN_COOKIE, encodeURIComponent(chosenOrigin)) : "";
+    const cookies: string[] = originCookie ? [stateCookie, originCookie] : [stateCookie];
+    return redirect(buildAuthorizeURL(state), cookies);
   }
 
   // 2) /callback → 코드 교환, 유저 생성, JWT 발급
@@ -238,10 +250,19 @@ Deno.serve(async (req) => {
       const sbCookie = buildCookie("sb-access-token", jwt);
 
       // 성공 후 프론트로 리디렉션 (기존 /auth/callback 페이지 활용)
-      const frontendUrl = origin && ALLOWED_ORIGINS.includes(origin) ? origin : "https://zipcheck.kr";
+      const storedOrigin = cookies
+        .split(";")
+        .map(v => v.trim())
+        .find(v => v.startsWith(`${FRONTEND_ORIGIN_COOKIE}=`))
+        ?.split("=")[1];
+      const decodedStored = storedOrigin ? decodeURIComponent(storedOrigin) : null;
+      const frontendUrl = decodedStored && ALLOWED_ORIGINS.includes(decodedStored)
+        ? decodedStored
+        : (origin && ALLOWED_ORIGINS.includes(origin) ? origin : "https://zipcheck.kr");
       const next = new URL("/auth/callback", frontendUrl);
       next.searchParams.set("naver_token", jwt);
-      return redirect(next.toString(), sbCookie);
+      const clearOriginCookie = `${FRONTEND_ORIGIN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax; ${COOKIE_DOMAIN ? `Domain=${COOKIE_DOMAIN};` : ""} Secure`;
+      return redirect(next.toString(), [sbCookie, clearOriginCookie]);
     } catch (e) {
       console.error(e);
       return asJSON({ error: "oauth_failed", detail: String(e) }, 500);

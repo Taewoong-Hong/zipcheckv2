@@ -76,13 +76,15 @@ export default function ChatInterface({
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
 
-        // Create new conversation
+        // Create new conversation (send auth for server to forward)
         const response = await fetch('/api/chat/init', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
           },
-          body: JSON.stringify({ session }),
+          // Body not required by backend; keep minimal to avoid double parsing issues
+          body: JSON.stringify({}),
         });
 
         if (response.ok) {
@@ -123,8 +125,9 @@ export default function ChatInterface({
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
             },
-            body: JSON.stringify({ session }),
+            body: JSON.stringify({}),
           });
 
           if (response.ok) {
