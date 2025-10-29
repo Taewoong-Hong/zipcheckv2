@@ -1,6 +1,9 @@
 """Supabase client for ZipCheck backend integration."""
 import httpx
 from typing import Dict, Any, Optional
+
+from supabase import Client, create_client
+
 from .settings import settings
 
 
@@ -232,21 +235,61 @@ supabase_auth = SupabaseAuthClient()
 supabase_storage = SupabaseStorageClient()
 
 
-def get_supabase_client(service_role: bool = False):
-    """Get Supabase client wrapper.
+# 🔧 New: Supabase Python SDK client (싱글톤 패턴)
+_service_role_client: Client | None = None
+_anon_client: Client | None = None
+
+
+def _create_supabase_client(key: str) -> Client:
+    """Create a Supabase client with the given key."""
+    if not settings.supabase_url:
+        raise ValueError("SUPABASE_URL environment variable is required")
+    return create_client(settings.supabase_url, key)
+
+
+def get_supabase_client(service_role: bool = False) -> Client:
+    """Return a cached Supabase client.
+
+    ⚠️ BREAKING CHANGE: Now returns official supabase-py Client, not dict.
 
     Args:
-        service_role: If True, returns client with service role privileges
+        service_role: If True, return a client initialized with the service role key.
 
     Returns:
-        Dict with auth and storage clients
+        Supabase Python client instance.
 
-    Note:
-        This is a compatibility function for routes that expect a unified client.
-        Real implementation should use supabase-py SDK, but for MVP we use httpx clients.
+    Raises:
+        ValueError: If the required Supabase credentials are not configured.
+
+    Example:
+        >>> supabase = get_supabase_client(service_role=True)
+        >>> result = supabase.table("conversations").insert({"user_id": "123"}).execute()
     """
-    return {
-        "auth": supabase_auth,
-        "storage": supabase_storage,
-        "service_role": service_role,
-    }
+
+    global _service_role_client, _anon_client
+
+    if service_role:
+        if _service_role_client is None:
+            if not settings.supabase_service_role_key:
+                raise ValueError(
+                    "SUPABASE_SERVICE_ROLE_KEY environment variable is required"
+                )
+            _service_role_client = _create_supabase_client(
+                settings.supabase_service_role_key
+            )
+        return _service_role_client
+
+    # Prefer anon key for non-privileged access when available
+    if settings.supabase_anon_key:
+        if _anon_client is None:
+            _anon_client = _create_supabase_client(settings.supabase_anon_key)
+        return _anon_client
+
+    # Fallback to service role client when anon key is not configured
+    if _service_role_client is None:
+        if not settings.supabase_service_role_key:
+            raise ValueError(
+                "SUPABASE_SERVICE_ROLE_KEY environment variable is required"
+            )
+        _service_role_client = _create_supabase_client(settings.supabase_service_role_key)
+    return _service_role_client
