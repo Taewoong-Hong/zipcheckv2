@@ -18,6 +18,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
   const [helpExpanded, setHelpExpanded] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
+  const [myReports, setMyReports] = useState<any[]>([]);
 
   // Load recent sessions when Recent section is expanded
   useEffect(() => {
@@ -38,6 +39,37 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
 
     return () => clearInterval(interval);
   }, [recentExpanded]);
+
+  // Load my reports when My Knowledge section is expanded
+  useEffect(() => {
+    if (myKnowledgeExpanded) {
+      loadMyReports();
+    }
+  }, [myKnowledgeExpanded]);
+
+  // Load reports from backend
+  const loadMyReports = async () => {
+    try {
+      const response = await fetch('/api/reports/list', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include cookies for authentication
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMyReports(data.reports || []);
+      } else {
+        console.error('Failed to load reports:', response.status);
+        setMyReports([]);
+      }
+    } catch (error) {
+      console.error('Error loading reports:', error);
+      setMyReports([]);
+    }
+  };
 
   // Format date for display
   const formatDate = (date: Date) => {
@@ -289,10 +321,30 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
 
             {isExpanded && myKnowledgeExpanded && (
               <div className="ml-8 mt-1 space-y-1">
-                {/* My knowledge items - will show saved analyses */}
-                <div className="px-3 py-2 text-sm text-neutral-500">
-                  저장된 분석이 없습니다
-                </div>
+                {myReports.length > 0 ? (
+                  myReports.map((report) => (
+                    <button
+                      key={report.id}
+                      onClick={() => {
+                        // Navigate to report view
+                        window.location.href = `/report/${report.case_id}`;
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors group"
+                    >
+                      <FolderOpen className="w-4 h-4 text-neutral-400 shrink-0" />
+                      <span className="flex-1 text-left text-sm truncate">
+                        {report.metadata?.address || '부동산 분석'}
+                      </span>
+                      <span className="text-xs text-neutral-400 opacity-0 group-hover:opacity-100">
+                        {formatDate(new Date(report.created_at))}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-3 py-2 text-sm text-neutral-500">
+                    저장된 분석이 없습니다
+                  </div>
+                )}
               </div>
             )}
           </div>
