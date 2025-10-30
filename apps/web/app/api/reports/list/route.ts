@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
 
 const AI_API_URL = process.env.AI_API_URL;
 
@@ -13,27 +11,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get user session from cookies
-    const cookieStore = await cookies();
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-        },
-      }
-    );
+    const authHeader = request.headers.get('authorization');
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: 'UNAUTHORIZED', message: '로그인이 필요합니다' },
+        { error: '로그인이 필요합니다' },
         { status: 401 }
       );
     }
@@ -46,8 +28,7 @@ export async function GET(request: NextRequest) {
     const response = await fetch(`${AI_API_URL}/reports?limit=${limit}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
+        'Authorization': authHeader,
       },
     });
 

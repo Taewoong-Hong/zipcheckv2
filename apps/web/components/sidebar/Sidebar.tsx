@@ -50,12 +50,27 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
   // Load reports from backend
   const loadMyReports = async () => {
     try {
+      // Get Supabase session token
+      const { createBrowserClient } = await import('@supabase/ssr');
+      const supabase = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        console.log('No session found, skipping report load');
+        setMyReports([]);
+        return;
+      }
+
       const response = await fetch('/api/reports/list', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
         },
-        credentials: 'include', // Include cookies for authentication
       });
 
       if (response.ok) {
