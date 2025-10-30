@@ -213,8 +213,8 @@ class Settings(BaseSettings):
     iros_password: str | None = Field(default=None, description="인터넷등기소 비밀번호 (선택)")
 
     # Encryption
-    encryption_key: str = Field(
-        ...,
+    encryption_key: str | None = Field(
+        default=None,
         description="Data encryption key (AES-256)"
     )
 
