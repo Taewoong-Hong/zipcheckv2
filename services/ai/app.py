@@ -449,17 +449,38 @@ async def analyze_contract(
 
     try:
         if request.mode == "single":
-            # 단일 모델 분석 (sources 포함)
-            result = single_model_analyze(
-                question=request.question,
-                provider=request.provider
-            )
+            # 단일 모델 분석 (sources 포함) - 3회 재시도 + 타임아웃
+            import asyncio
 
-            return AnalyzeResponse(
-                answer=result["answer"],
-                mode="single",
-                provider=request.provider or settings.primary_llm,
-                sources=[SourceInfo(**s) for s in result["sources"]],
+            async def run_once():
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(
+                    None,
+                    lambda: single_model_analyze(
+                        question=request.question,
+                        provider=request.provider,
+                    ),
+                )
+
+            last_err = None
+            for attempt in range(1, 4):
+                try:
+                    result = await asyncio.wait_for(run_once(), timeout=40)
+                    return AnalyzeResponse(
+                        answer=result["answer"],
+                        mode="single",
+                        provider=request.provider or settings.primary_llm,
+                        sources=[SourceInfo(**s) for s in result.get("sources", [])],
+                    )
+                except Exception as e:
+                    last_err = e
+                    logger.warning(f"LLM analyze attempt {attempt} failed: {e}")
+                    await asyncio.sleep(min(1 * attempt, 3))
+
+            # 최종 실패: 프론트에서 새로고침/재시도 버튼을 노출할 수 있도록 503 반환
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="분석이 지연되고 있습니다. 잠시 후 새로고침하여 다시 시도해주세요 (최대 3회 재시도 실패)",
             )
 
         elif request.mode == "consensus":

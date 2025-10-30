@@ -562,15 +562,27 @@ async def execute_analysis_pipeline(case_id: str):
 {chr(10).join([f'- {r}' for r in risk_result.recommendations]) if risk_result else 'N/A'}
 """
 
-        # 단일 모델로 간단히 테스트
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=4096)
+        # 단일 모델로 간단히 테스트 (타임아웃/재시도)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=4096, max_retries=0, timeout=30)
         messages = [
             SystemMessage(content="너는 부동산 계약 리스크 점검 전문가이다. 위 정보를 바탕으로 종합 분석 리포트를 작성하라."),
             HumanMessage(content=f"{context}\n\n위 부동산 계약의 종합 분석 리포트를 작성해주세요.")
         ]
-        response = llm.invoke(messages)
-        final_answer = response.content
-        logger.info(f"LLM 분석 완료 (단일 모델)")
+        import asyncio
+        final_answer = None
+        last_err = None
+        for attempt in range(1, 4):
+            try:
+                response = llm.invoke(messages)
+                final_answer = response.content
+                logger.info(f"LLM 분석 완료 (시도 {attempt})")
+                break
+            except Exception as e:
+                last_err = e
+                logger.warning(f"LLM 분석 시도 {attempt} 실패: {e}")
+                await asyncio.sleep(min(1 * attempt, 3))
+        if final_answer is None:
+            raise HTTPException(503, "분석이 지연됩니다. 잠시 후 다시 시도해주세요.")
 
         # 6️⃣ 리포트 저장 (v2_reports 테이블)
         report_response = supabase.table("v2_reports").insert({

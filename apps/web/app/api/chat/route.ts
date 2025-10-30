@@ -27,21 +27,52 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. 사용자 메시지 저장 (FastAPI /chat/message 호출)
-    const saveResponse = await fetch(`${AI_API_URL}/chat/message`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        conversation_id,
-        content,
-      }),
-    });
+    // 1. 사용자 메시지 저장 (FastAPI /chat/message 호출) + 필요 시 대화 생성/재시도
+    let currentConversationId = conversation_id as string | undefined;
+    let newConversationId: string | undefined;
+
+    async function saveMessage(convId: string) {
+      const res = await fetch(`${AI_API_URL}/chat/message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ conversation_id: convId, content }),
+      });
+      return res;
+    }
+
+    let saveResponse: Response;
+    if (!currentConversationId) {
+      // 대화 ID가 없으면 초기화
+      const initRes = await fetch(`${AI_API_URL}/chat/init`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+      if (!initRes.ok) throw new Error(`대화 초기화 실패: ${initRes.status}`);
+      const initData = await initRes.json();
+      currentConversationId = initData.conversation_id;
+      newConversationId = currentConversationId;
+    }
+
+    saveResponse = await saveMessage(currentConversationId);
+    if (saveResponse.status === 404) {
+      // 소유권/유효성 문제 → 신규 대화 생성 후 재시도
+      const initRes = await fetch(`${AI_API_URL}/chat/init`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+      if (!initRes.ok) throw new Error(`대화 재초기화 실패: ${initRes.status}`);
+      const initData = await initRes.json();
+      currentConversationId = initData.conversation_id;
+      newConversationId = currentConversationId;
+      saveResponse = await saveMessage(currentConversationId);
+    }
 
     if (!saveResponse.ok) {
-      throw new Error(`메시지 저장 실패: ${saveResponse.status}`);
+      const text = await saveResponse.text();
+      throw new Error(`메시지 저장 실패: ${saveResponse.status} ${text}`);
     }
 
     const saveResult = await saveResponse.json();
@@ -60,7 +91,8 @@ export async function POST(request: NextRequest) {
     });
 
     if (!analyzeResponse.ok) {
-      throw new Error(`분석 실패: ${analyzeResponse.status}`);
+      const text = await analyzeResponse.text();
+      throw new Error(`분석 실패: ${analyzeResponse.status} ${text}`);
     }
 
     const analyzeData = await analyzeResponse.json();
@@ -68,17 +100,21 @@ export async function POST(request: NextRequest) {
 
     // 3. AI 응답 메시지 저장
     await supabase.from('messages').insert({
-      conversation_id,
+      conversation_id: currentConversationId,
       role: 'assistant',
       content: answer,
-      topic: 'contract_analysis',
-      extension: 'chat',
+      meta: { topic: 'contract_analysis', extension: 'chat' },
     });
 
     // 4. 스트리밍 응답 반환
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
+        // Send meta event first (e.g., newConversationId)
+        if (newConversationId) {
+          const meta = JSON.stringify({ newConversationId, done: false, meta: true });
+          controller.enqueue(encoder.encode(`data: ${meta}\n\n`));
+        }
         const chunks = answer.split(' ');
         chunks.forEach((chunk: string, index: number) => {
           setTimeout(() => {
@@ -98,11 +134,18 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    };
+    if (newConversationId) {
+      headers['X-New-Conversation-Id'] = newConversationId;
+    }
+
     return new NextResponse(stream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        ...headers,
       },
     });
   } catch (error) {

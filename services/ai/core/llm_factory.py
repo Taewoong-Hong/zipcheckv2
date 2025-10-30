@@ -64,6 +64,8 @@ def create_llm(
             temperature=temperature,
             max_tokens=max_tokens,
             api_key=settings.openai_api_key,
+            max_retries=0,
+            timeout=30,
         )
     elif provider == "claude":
         return ChatAnthropic(
@@ -71,6 +73,8 @@ def create_llm(
             temperature=temperature,
             max_tokens=max_tokens,
             api_key=settings.anthropic_api_key,
+            max_retries=0,
+            timeout=30,
         )
     else:
         raise ValueError(f"Unsupported provider: {provider}")

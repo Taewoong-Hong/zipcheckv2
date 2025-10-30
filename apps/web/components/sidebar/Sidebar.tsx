@@ -50,12 +50,9 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
   // Load reports from backend
   const loadMyReports = async () => {
     try {
-      // Get Supabase session token
-      const { createBrowserClient } = await import('@supabase/ssr');
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
+      // Get Supabase session token via singleton client
+      const { getBrowserSupabase } = await import('../../lib/supabaseBrowser');
+      const supabase = getBrowserSupabase();
 
       const { data: { session } } = await supabase.auth.getSession();
 
