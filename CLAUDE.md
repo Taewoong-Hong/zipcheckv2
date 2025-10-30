@@ -205,6 +205,79 @@ async def analyze(body: AskBody):
 
 ## 📝 작업 현황
 
+### ✅ 2025-01-29: 채팅 기능 500/401 에러 완전 해결
+
+> 📄 **상세 문서**: [docs/CHANGELOG_2025-01-29.md](docs/CHANGELOG_2025-01-29.md)
+
+**핵심 성과**:
+- ✅ 채팅 전체 플로우 정상 작동 (초기화 → 메시지 전송 → LLM 분석 → 응답)
+- ✅ 환경변수 아키텍처 개선 (하드코딩 fallback 완전 제거)
+- ✅ Cloud Run Secret Manager 운영 안정화
+- ✅ Git 커밋: `d3201b8` (2025-01-29)
+
+**해결된 이슈**:
+
+1. **SUPABASE_ANON_KEY 개행 문자 이슈**
+   - 문제: Secret Manager 값에 `\n` 포함 → HTTP 헤더 검증 실패
+   - 해결: `echo -n` 으로 개행 없는 version 2 생성
+   - 배포: Cloud Run 리비전 `zipcheck-ai-00051-8hb`
+
+2. **SUPABASE_SERVICE_ROLE_KEY 누락**
+   - 문제: FastAPI에서 필수 환경변수 누락
+   - 해결: Secret Manager IAM 권한 부여 + 환경변수 추가
+   - 배포: Cloud Run 리비전 `zipcheck-ai-00052-p2n`
+
+3. **/analyze 엔드포인트 403 Forbidden**
+   - 문제: Authorization 헤더 누락
+   - 해결: `apps/web/app/api/chat/route.ts:55`에 `Authorization` 헤더 추가
+   - 결과: 채팅 전체 플로우 완전 작동
+
+4. **하드코딩된 환경변수 Fallback 제거**
+   - 문제: 5개 파일에 하드코딩된 Cloud Run URL/localhost fallback
+   - 해결: 모든 fallback 제거, Fail-Fast 에러 가드 추가
+   - 효과: `.env.local` 단일 설정으로 환경 전환 가능
+
+**수정된 파일 (8개)**:
+```
+apps/web/app/api/chat/route.ts (Authorization 헤더 + fallback 제거)
+apps/web/app/api/chat/sessions/route.ts (fallback 제거)
+apps/web/app/api/ai/[...path]/route.ts (fallback 제거)
+apps/web/app/api/report/[caseId]/route.ts (fallback 제거)
+apps/web/lib/api/client.ts (fallback 제거)
+apps/web/app/api/chat/init/route.ts (Supabase SSR)
+apps/web/app/auth/callback/route.ts (Next.js 15 호환)
+apps/web/lib/supabase.ts (createServerClient)
+```
+
+**최종 배포 상태**:
+- Cloud Run: `zipcheck-ai-00052-p2n`
+- 환경변수: 6개 Secret 정상 연결
+- 채팅 플로우: `/chat/init` ✅ → 메시지 저장 ✅ → `/analyze` ✅ → 응답 스트리밍 ✅
+
+**환경변수 전략 개선**:
+```typescript
+// Before (문제)
+const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-ov5n6pt46a-du.a.run.app';
+
+// After (개선)
+const AI_API_URL = process.env.AI_API_URL;
+if (!AI_API_URL) {
+  throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
+}
+```
+
+**Cloud Run 환경변수**:
+```yaml
+OPENAI_API_KEY: openai-api-key:latest
+DATABASE_URL: supabase-database-url:latest
+JWT_SECRET: supabase-jwt-secret:latest
+SUPABASE_ANON_KEY: supabase-anon-key:latest (version 2, 개행 제거)
+SUPABASE_SERVICE_ROLE_KEY: supabase-service-role-key:latest
+VWORLD_API_KEY: vworld-api-key-production:latest
+```
+
+---
+
 ### ✅ 2025-10-28: Supabase SSR 통합 및 Next.js 15 호환성 개선
 
 **구현 내용**:

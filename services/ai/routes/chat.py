@@ -109,12 +109,15 @@ async def init_chat(user: dict = Depends(get_current_user)):
 먼저 **분석하고 싶은 부동산의 주소**를 입력해주세요.
 (도로명 주소 또는 지번 주소 모두 가능합니다)"""
 
+        # Store extended info in 'meta' JSON to match DB schema
         supabase.table("messages").insert({
             "conversation_id": conversation_id,
             "role": "assistant",
             "content": welcome_msg,
-            "topic": "contract_analysis",
-            "extension": "chat"
+            "meta": {
+                "topic": "contract_analysis",
+                "extension": "chat"
+            }
         }).execute()
 
         logger.info(f"새 대화 생성: conversation_id={conversation_id}")
@@ -157,17 +160,14 @@ async def send_message(request: SendMessageRequest, user: dict = Depends(get_cur
             "conversation_id": request.conversation_id,
             "role": "user",
             "content": request.content,
-            "topic": "contract_analysis",
-            "extension": "chat",
-            "payload": {}
+            "meta": { "topic": "contract_analysis", "extension": "chat" }
         }
 
         # payload에 컴포넌트 정보 저장
         if request.component_type or request.component_data:
-            message_data["payload"] = {
-                "component_type": request.component_type,
-                "component_data": request.component_data or {}
-            }
+            message_data["meta"] = message_data.get("meta", {})
+            message_data["meta"]["component_type"] = request.component_type
+            message_data["meta"]["component_data"] = request.component_data or {}
 
         result = supabase.table("messages").insert(message_data).execute()
 
@@ -218,7 +218,7 @@ async def get_messages(
 
         # 2. 메시지 조회
         result = supabase.table("messages") \
-            .select("id, role, content, payload, created_at") \
+            .select("id, role, content, meta, created_at") \
             .eq("conversation_id", conversation_id) \
             .order("created_at", desc=False) \
             .limit(limit) \
@@ -226,16 +226,16 @@ async def get_messages(
 
         messages = result.data or []
 
-        # payload에서 컴포넌트 정보 추출
+        # meta에서 컴포넌트/확장 정보 추출
         formatted_messages = []
         for m in messages:
-            payload = m.get("payload") or {}
+            meta = m.get("meta") or {}
             formatted_messages.append(Message(
                 id=m["id"],
                 role=m["role"],
                 content=m["content"],
-                component_type=payload.get("component_type"),
-                component_data=payload.get("component_data"),
+                component_type=meta.get("component_type"),
+                component_data=meta.get("component_data"),
                 created_at=m["created_at"]
             ))
 

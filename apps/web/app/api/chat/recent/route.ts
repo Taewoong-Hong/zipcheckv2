@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const AI_API_URL = process.env.AI_API_URL || 'https://zipcheck-ai-ov5n6pt46a-du.a.run.app';
+const AI_API_URL = process.env.AI_API_URL;
 
 export async function GET(request: NextRequest) {
   try {
+    if (!AI_API_URL) {
+      return NextResponse.json(
+        { error: 'CONFIG_MISSING', message: 'AI_API_URL 환경변수가 설정되어 있지 않습니다' },
+        { status: 500 }
+      );
+    }
     const authHeader = request.headers.get('authorization');
 
     if (!authHeader?.startsWith('Bearer ')) {

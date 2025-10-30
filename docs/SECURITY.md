@@ -236,7 +236,7 @@ async def download_document(
 # Supabase
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJ...  # ⚠️ 백엔드 전용
-SUPABASE_JWT_SECRET=your-jwt-secret  # 선택적
+JWT_SECRET=your-jwt-secret  # Edge Function과 공통 사용
 DATABASE_URL=postgresql://...
 
 # OpenAI

@@ -112,7 +112,8 @@ export default function LoginModal({ isOpen, onClose }: LoginModalProps) {
       } else if (provider === "naver") {
         // Naver OAuth via Supabase Edge Function
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gsiismzchtgdklvdvggu.supabase.co';
-        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/naver`;
+        const currentOrigin = window.location.origin; // localhost:3000 또는 zipcheck.kr
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/naver?return_url=${encodeURIComponent(currentOrigin)}`;
         window.location.href = edgeFunctionUrl;
       }
     } catch (err) {

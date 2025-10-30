@@ -20,8 +20,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Supabase 설정
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://gsiismzchtgdklvdvggu.supabase.co")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")  # JWT 시크릿 (HS256 사용 시)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+# JWT Secret (Supabase와 Edge Function에서 공통 사용)
+JWT_SECRET = os.getenv("JWT_SECRET")
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/keys"
 
 # HTTP Bearer 스키마
@@ -113,14 +115,23 @@ def verify_token(token: str) -> Dict[str, Any]:
     """
     try:
         # Supabase auth API를 통해 토큰 검증
+        logger.info(f"Verifying token with Supabase Auth API: {SUPABASE_URL}/auth/v1/user")
+        logger.info(f"Token (first 50 chars): {token[:50]}...")
+
         response = requests.get(
             f"{SUPABASE_URL}/auth/v1/user",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": SUPABASE_ANON_KEY
+            },
             timeout=5
         )
 
+        logger.info(f"Supabase Auth API response status: {response.status_code}")
+
         if response.status_code == 401:
-            logger.warning("Token verification failed: Invalid or expired token")
+            logger.warning(f"Token verification failed: Invalid or expired token")
+            logger.warning(f"Response body: {response.text}")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid or expired token"
@@ -154,6 +165,87 @@ def verify_token(token: str) -> Dict[str, Any]:
         )
 
 
+def verify_token_with_fallback(token: str) -> Dict[str, Any]:
+    """
+    Supabase 검증을 우선 시도하고, 401이면 Edge Function(issuer=edge:naver)에서
+    HS256(JWT_SECRET)으로 서명한 토큰을 로컬에서 검증한다.
+    """
+    # 토큰 디버깅 정보
+    logger.info(f"Token length: {len(token)}, preview: {token[:30]}...")
+
+    # JWT 디코드 (검증 없이 페이로드만 확인)
+    try:
+        unverified = jwt.decode(token, options={"verify_signature": False})
+        logger.info(f"Token payload (unverified): iss={unverified.get('iss')}, sub={unverified.get('sub')}, exp={unverified.get('exp')}")
+    except Exception as e:
+        logger.warning(f"Failed to decode token payload: {e}")
+
+    # 1) Supabase Auth API 검증 시도
+    try:
+        logger.info(f"Verifying token with Supabase Auth API: {SUPABASE_URL}/auth/v1/user")
+        response = requests.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": SUPABASE_ANON_KEY
+            },
+            timeout=5,
+        )
+        logger.info(f"Supabase Auth API response status: {response.status_code}")
+
+        if response.ok:
+            user_data = response.json()
+            payload = {
+                "sub": user_data.get("id"),
+                "email": user_data.get("email"),
+                "role": user_data.get("role", "authenticated"),
+                "aud": "authenticated",
+            }
+            logger.info(f"Token verified via Supabase for user: {payload.get('sub')}")
+            return payload
+
+        if response.status_code != 401:
+            logger.error(
+                f"Token verification error: {response.status_code} body={response.text[:200]}"
+            )
+            raise HTTPException(status_code=500, detail="Token verification failed")
+
+        logger.warning("Supabase returned 401. Trying local HS256 verification for edge tokens...")
+    except requests.RequestException as e:
+        logger.error(f"Token verification request failed: {e}")
+        # 네트워크 오류 시에도 로컬 폴백 시도
+
+    # 2) Edge HS256 로컬 검증 (issuer=edge:naver)
+    if not JWT_SECRET:
+        logger.warning("JWT_SECRET not configured; cannot verify edge-signed token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    try:
+        decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+        iss = decoded.get("iss")
+        sub = decoded.get("sub")
+        if not sub:
+            raise HTTPException(status_code=401, detail="Invalid token: missing subject")
+        if iss not in {"edge:naver"}:
+            logger.warning(f"Local HS256 token with unexpected issuer: {iss}")
+            raise HTTPException(status_code=401, detail="Invalid token issuer")
+
+        payload = {
+            "sub": sub,
+            "email": decoded.get("email"),
+            "role": decoded.get("role", "authenticated"),
+            "aud": decoded.get("aud", "authenticated"),
+            "app_metadata": decoded.get("app_metadata", {}),
+        }
+        logger.info(f"Token verified via local HS256 for user: {sub}")
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Local token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> Dict[str, Any]:
@@ -172,8 +264,11 @@ async def get_current_user(
     Returns:
         사용자 정보 (JWT 페이로드)
     """
+    logger.info(f"get_current_user() called")
+    logger.info(f"Credentials received: scheme={credentials.scheme}, token_preview={credentials.credentials[:20]}...")
+
     token = credentials.credentials
-    return verify_token(token)
+    return verify_token_with_fallback(token)
 
 
 async def get_optional_user(
@@ -203,7 +298,7 @@ async def get_optional_user(
     token = auth_header.replace("Bearer ", "")
 
     try:
-        return verify_token(token)
+        return verify_token_with_fallback(token)
     except HTTPException:
         return None
 

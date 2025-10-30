@@ -53,9 +53,9 @@ class Settings(BaseModel):
         ...,  # 필수
         description="Supabase Service Role Key (백엔드 전용)"
     )
-    SUPABASE_JWT_SECRET: Optional[str] = Field(
+    JWT_SECRET: Optional[str] = Field(
         default=None,
-        description="Supabase JWT Secret (HS256 검증용, 선택적)"
+        description="JWT Secret (HS256 검증용, Edge Function과 공통 사용)"
     )
 
     # ============================================
