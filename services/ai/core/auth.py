@@ -169,8 +169,8 @@ def verify_token_with_fallback(token: str) -> Dict[str, Any]:
     HS256(JWT_SECRET)으로 서명한 토큰을 로컬에서 검증한다.
     """
     # 토큰 디버깅 정보
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(f"Token received (length only): {len(token)}")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(f"Token received (length only): {len(token)}")
 
     # JWT 디코드 (검증 없이 페이로드만 확인)
     try:
