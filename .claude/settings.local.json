@@ -47,7 +47,12 @@
       "Bash(gcloud secrets list:*)",
       "Bash(gcloud run services update:*)",
       "Bash(gcloud secrets versions list:*)",
-      "Bash(gcloud secrets versions add:*)"
+      "Bash(gcloud secrets versions add:*)",
+      "Bash(echo:*)",
+      "Bash(supabase functions deploy:*)",
+      "Bash(gcloud logging read:*)",
+      "Bash(gcloud secrets versions access:*)",
+      "Bash(powershell -Command:*)"
     ],
     "deny": [],
     "ask": []

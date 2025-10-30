@@ -46,6 +46,9 @@ from routes.crawler_test import router as crawler_test_router  # 크롤러 테�
 from routes.case import router as case_router  # 케이스 관리 API
 from routes.analysis import router as analysis_router  # 분석 오케스트레이터
 from routes.report import router as report_router  # 리포트 API
+from routes.report import router_single as report_router_single  # 단수 경로 호환
+from routes.parse import router as parse_router  # 파서 API (가이드 호환)
+from routes.public_data import router as public_data_router  # 공공 데이터 수집 API
 
 # 로깅 설정
 logging.basicConfig(
@@ -122,6 +125,9 @@ app.include_router(crawler_test_router)  # 크롤러 테스트 (관리자 전용
 app.include_router(case_router)  # 케이스 관리 API
 app.include_router(analysis_router)  # 분석 오케스트레이터
 app.include_router(report_router)  # 리포트 API
+app.include_router(report_router_single)  # /report/:id 호환 라우트
+app.include_router(parse_router)  # /parse/*
+app.include_router(public_data_router)  # /fetch/public
 
 
 # Pydantic 모델
@@ -420,26 +426,26 @@ async def analyze_contract(
         f"question={request.question[:50]}..."
     )
 
-    # 가드레일: 부동산 관련 질문인지 확인
-    guardrail_result = check_question(request.question, strict=True)
-
-    if not guardrail_result["allowed"]:
-        logger.warning(
-            f"가드레일 차단: category={guardrail_result['category']}, "
-            f"confidence={guardrail_result['confidence']}"
-        )
-        # 거부 메시지를 정상 응답으로 반환 (사용자 친화적)
-        return AnalyzeResponse(
-            answer=guardrail_result["message"],
-            mode="guardrail",
-            provider="system",
-            sources=[],
-        )
-
-    logger.info(
-        f"가드레일 통과: category={guardrail_result['category']}, "
-        f"confidence={guardrail_result['confidence']}"
-    )
+    # 가드레일 비활성화 (너무 엄격하여 정상 질문도 차단함)
+    # guardrail_result = check_question(request.question, strict=True)
+    #
+    # if not guardrail_result["allowed"]:
+    #     logger.warning(
+    #         f"가드레일 차단: category={guardrail_result['category']}, "
+    #         f"confidence={guardrail_result['confidence']}"
+    #     )
+    #     # 거부 메시지를 정상 응답으로 반환 (사용자 친화적)
+    #     return AnalyzeResponse(
+    #         answer=guardrail_result["message"],
+    #         mode="guardrail",
+    #         provider="system",
+    #         sources=[],
+    #     )
+    #
+    # logger.info(
+    #     f"가드레일 통과: category={guardrail_result['category']}, "
+    #     f"confidence={guardrail_result['confidence']}"
+    # )
 
     try:
         if request.mode == "single":

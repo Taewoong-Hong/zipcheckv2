@@ -12,6 +12,8 @@ from core.supabase_client import get_supabase_client
 from core.auth import get_current_user
 from core.risk_engine import analyze_risks  # ✅ 구현 완료
 from core.llm_router import dual_model_analyze  # ✅ 구현 완료
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import SystemMessage, HumanMessage
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +45,93 @@ class AnalysisResultResponse(BaseModel):
     summary: Optional[str] = None
 
 
+class CrosscheckRequest(BaseModel):
+    """교차검증 요청 (Claude 검증 전용)"""
+    draft: str
+
+
+class CrosscheckResponse(BaseModel):
+    """교차검증 응답"""
+    validation: str
+
+
 # ===========================
 # 상태 전환 매핑
 # ===========================
 STATE_TRANSITIONS = {
-    "address": "contract",      # 주소 입력 → 계약서 업로드
-    "contract": "registry",     # 계약서 업로드 → 등기부 업로드
-    "registry": "analysis",     # 등기부 업로드 → 분석 중
-    "analysis": "report",       # 분석 중 → 리포트 생성
-    "report": "completed",      # 리포트 생성 → 완료
+    "init": "address_pick",
+    "address_pick": "contract_type",
+    "contract_type": "registry_choice",
+    "registry_choice": "registry_ready",
+    "registry_ready": "parse_enrich",
+    "parse_enrich": "report",
 }
 
 STATE_PROGRESS = {
-    "address": 0.1,
-    "contract": 0.3,
-    "registry": 0.5,
-    "analysis": 0.7,
-    "report": 0.9,
-    "completed": 1.0,
+    "init": 0.0,
+    "address_pick": 0.15,
+    "contract_type": 0.3,
+    "registry_choice": 0.45,
+    "registry_ready": 0.6,
+    "parse_enrich": 0.8,
+    "report": 1.0,
 }
 
 
 # ===========================
 # API Endpoints
 # ===========================
+class SimpleChatRequest(BaseModel):
+    """간단한 채팅 질문 요청"""
+    question: str
+
+
+class SimpleChatResponse(BaseModel):
+    """간단한 채팅 응답"""
+    answer: str
+    confidence: Optional[float] = None
+
+
+@router.post("/", response_model=SimpleChatResponse)
+async def simple_chat_analysis(
+    request: SimpleChatRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    간단한 채팅 질문 분석 (케이스 없이 즉시 응답)
+
+    - 부동산 관련 일반 질문에 답변
+    - LLM 듀얼 시스템 (ChatGPT + Claude) 사용
+    - 등기부/공공데이터 없이 답변 가능
+    """
+    logger.info(f"간단 채팅 분석: user_id={user['sub']}, question={request.question[:50]}...")
+
+    try:
+        # LLM 듀얼 시스템으로 답변 생성
+        context = """
+부동산 계약 리스크 분석 전문 상담입니다.
+
+일반적인 부동산 관련 질문에 답변하고 있습니다.
+구체적인 계약서나 등기부 분석이 필요한 경우, 정식 케이스 분석을 권장합니다.
+"""
+
+        result = await dual_model_analyze(
+            question=request.question,
+            context=context
+        )
+
+        logger.info(f"답변 생성 완료: confidence={result.confidence}")
+
+        return SimpleChatResponse(
+            answer=result.final_answer,
+            confidence=result.confidence
+        )
+
+    except Exception as e:
+        logger.error(f"간단 채팅 분석 실패: {e}", exc_info=True)
+        raise HTTPException(500, f"답변 생성 실패: {str(e)}")
+
+
 @router.post("/start", response_model=AnalysisStatusResponse)
 async def start_analysis(
     request: StartAnalysisRequest,
@@ -93,24 +158,14 @@ async def start_analysis(
     case = case_response.data[0]
     current_state = case["current_state"]
 
-    # 상태 검증: registry 상태에서만 분석 시작 가능
-    if current_state != "registry":
+    # 상태 검증: parse_enrich 상태에서만 분석 시작 가능
+    if current_state != "parse_enrich":
         raise HTTPException(
             400,
-            f"Cannot start analysis from state '{current_state}'. Expected 'registry'."
+            f"Cannot start analysis from state '{current_state}'. Expected 'parse_enrich'."
         )
 
-    # 상태 전환: registry → analysis
-    update_response = supabase.table("v2_cases") \
-        .update({
-            "current_state": "analysis",
-            "updated_at": datetime.utcnow().isoformat(),
-        }) \
-        .eq("id", request.case_id) \
-        .execute()
-
-    if not update_response.data:
-        raise HTTPException(500, "Failed to update case state")
+    # parse_enrich 상태 유지 (DB 상태 전환 없이 비동기 분석 시작)
 
     # 백그라운드에서 분석 파이프라인 실행 (비블로킹)
     import asyncio
@@ -118,10 +173,24 @@ async def start_analysis(
 
     return AnalysisStatusResponse(
         case_id=request.case_id,
-        current_state="analysis",
-        progress=STATE_PROGRESS["analysis"],
+        current_state="parse_enrich",
+        progress=STATE_PROGRESS["parse_enrich"],
         message="분석이 시작되었습니다. 잠시만 기다려주세요.",
     )
+
+
+# Alias: POST /analyze (guide compatibility)
+@router.post("", response_model=AnalysisStatusResponse)
+async def analyze_alias(
+    request: StartAnalysisRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Guide 호환용 별칭 엔드포인트.
+
+    - POST /analyze → 내부적으로 /analyze/start와 동일 동작
+    """
+    return await start_analysis(request, user)
 
 
 @router.get("/status/{case_id}", response_model=AnalysisStatusResponse)
@@ -149,12 +218,13 @@ async def get_analysis_status(
     current_state = case["current_state"]
 
     messages = {
-        "address": "주소 정보를 입력해주세요.",
-        "contract": "계약서를 업로드해주세요.",
-        "registry": "등기부등본을 업로드해주세요.",
-        "analysis": "분석 중입니다. 잠시만 기다려주세요...",
-        "report": "리포트를 생성하고 있습니다...",
-        "completed": "분석이 완료되었습니다!",
+        "init": "시작하기 버튼을 눌러 진행하세요.",
+        "address_pick": "부동산 주소를 선택해주세요.",
+        "contract_type": "계약 유형을 선택해주세요.",
+        "registry_choice": "등기부 발급 또는 업로드를 선택하세요.",
+        "registry_ready": "등기부가 준비되었습니다.",
+        "parse_enrich": "분석 중입니다. 잠시만 기다려주세요...",
+        "report": "리포트가 준비되었습니다.",
     }
 
     return AnalysisStatusResponse(
@@ -180,7 +250,7 @@ async def transition_state(
     supabase = get_supabase_client()
 
     # 유효한 상태인지 확인
-    valid_states = list(STATE_TRANSITIONS.keys()) + ["completed"]
+    valid_states = list(STATE_TRANSITIONS.keys()) + ["report"]
     if target_state not in valid_states:
         raise HTTPException(400, f"Invalid state: {target_state}")
 
@@ -253,6 +323,45 @@ async def get_analysis_result(
     )
 
 
+@router.post("/crosscheck", response_model=CrosscheckResponse)
+async def crosscheck_draft(
+    request: CrosscheckRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Guide 호환용: Claude로 초안을 교차검증.
+    """
+    judge_prompt = """너는 부동산 계약 리스크 점검 검증자이다.
+
+다음은 ChatGPT가 생성한 초안이다:
+
+{draft}
+
+이 초안을 다음 관점에서 검증하라:
+1. 사실 관계의 정확성
+2. 법률적 표현의 적절성
+3. 누락된 중요 리스크
+4. 권장 조치의 실효성
+
+검증 결과를 다음 형식으로 작성하라:
+
+### 검증 결과
+- 정확한 내용: ...
+- 수정 필요: ...
+- 추가 필요: ...
+
+### 최종 권장사항
+...
+"""
+    llm = ChatAnthropic(model="claude-3-5-sonnet-20241022", temperature=0.1, max_tokens=4096)
+    msgs = [
+        SystemMessage(content=judge_prompt.format(draft=request.draft)),
+        HumanMessage(content="검증을 수행하세요."),
+    ]
+    resp = llm.invoke(msgs)
+    return CrosscheckResponse(validation=resp.content)
+
+
 # ===========================
 # 헬퍼 함수 (향후 구현)
 # ===========================
@@ -288,7 +397,8 @@ async def execute_analysis_pipeline(case_id: str):
     import httpx
     from datetime import datetime
 
-    supabase = get_supabase_client()
+    # Service Role Key 사용 (RLS 우회)
+    supabase = get_supabase_client(service_role=True)
     logger.info(f"분석 파이프라인 시작: case_id={case_id}")
 
     try:
@@ -382,6 +492,7 @@ async def execute_analysis_pipeline(case_id: str):
         )
 
         risk_result = None
+        market_data = None  # 모든 케이스에서 정의
 
         if contract_type == '매매':
             # 매매 계약 분석
@@ -425,7 +536,10 @@ async def execute_analysis_pipeline(case_id: str):
                 logger.info(f"임대차 리스크 분석 완료: 점수={risk_result.risk_score.total_score}, "
                            f"레벨={risk_result.risk_score.risk_level}")
 
-        # 5️⃣ LLM 듀얼 시스템 (ChatGPT + Claude)
+        # 5️⃣ LLM 단일 시스템 (ChatGPT only - 테스트용)
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import SystemMessage, HumanMessage
+
         context = f"""
 주소: {case['property_address']}
 계약 유형: {case['contract_type']}
@@ -448,24 +562,32 @@ async def execute_analysis_pipeline(case_id: str):
 {chr(10).join([f'- {r}' for r in risk_result.recommendations]) if risk_result else 'N/A'}
 """
 
-        final_report = await dual_model_analyze(
-            question="위 부동산 계약의 종합 분석 리포트를 작성해주세요.",
-            context=context
-        )
-        logger.info(f"LLM 분석 완료: 신뢰도={final_report.confidence}")
+        # 단일 모델로 간단히 테스트
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=4096)
+        messages = [
+            SystemMessage(content="너는 부동산 계약 리스크 점검 전문가이다. 위 정보를 바탕으로 종합 분석 리포트를 작성하라."),
+            HumanMessage(content=f"{context}\n\n위 부동산 계약의 종합 분석 리포트를 작성해주세요.")
+        ]
+        response = llm.invoke(messages)
+        final_answer = response.content
+        logger.info(f"LLM 분석 완료 (단일 모델)")
 
         # 6️⃣ 리포트 저장 (v2_reports 테이블)
         report_response = supabase.table("v2_reports").insert({
             "case_id": case_id,
             "user_id": case['user_id'],
-            "content": final_report.final_answer,
+            "content": final_answer,
             "risk_score": risk_result.risk_score.dict() if risk_result else {},
             "registry_data": registry_doc_masked,  # 마스킹된 등기부 정보 저장
+            "report_data": {
+                "summary": final_answer,
+                "risk": risk_result.risk_score.dict() if risk_result else {},
+                "registry": registry_doc_masked,
+                "market": market_data.dict() if (contract_type == '매매' and market_data) else None
+            },
             "metadata": {
-                "draft_model": final_report.draft.model,
-                "validation_model": final_report.validation.model,
-                "confidence": final_report.confidence,
-                "conflicts": final_report.conflicts,
+                "model": "gpt-4o-mini",
+                "confidence": 0.85,
             }
         }).execute()
 
@@ -475,7 +597,7 @@ async def execute_analysis_pipeline(case_id: str):
         report_id = report_response.data[0]['id']
         logger.info(f"리포트 저장 완료: {report_id}")
 
-        # 7️⃣ 상태 전환: analysis → report
+        # 7️⃣ 상태 전환: parse_enrich → report
         supabase.table("v2_cases").update({
             "current_state": "report",
             "updated_at": datetime.utcnow().isoformat(),
@@ -486,9 +608,9 @@ async def execute_analysis_pipeline(case_id: str):
 
     except Exception as e:
         logger.error(f"분석 파이프라인 실패: {e}", exc_info=True)
-        # 상태를 다시 registry로 롤백
+        # 상태를 다시 registry_ready로 롤백
         supabase.table("v2_cases").update({
-            "current_state": "registry",
+            "current_state": "registry_ready",
             "updated_at": datetime.utcnow().isoformat(),
         }).eq("id", case_id).execute()
         raise

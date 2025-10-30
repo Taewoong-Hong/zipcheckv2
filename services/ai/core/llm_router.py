@@ -50,7 +50,7 @@ def get_openai_client(model: str = "gpt-4o-mini", temperature: float = 0.2) -> C
     )
 
 
-def get_claude_client(model: str = "claude-3-5-sonnet-20241022", temperature: float = 0.1) -> ChatAnthropic:
+def get_claude_client(model: str = "claude-3-5-sonnet-20240620", temperature: float = 0.1) -> ChatAnthropic:
     """
     Claude 클라이언트 생성
 
@@ -117,7 +117,7 @@ def dual_model_analyze(
     question: str,
     context: str,
     draft_model: str = "gpt-4o-mini",
-    judge_model: str = "claude-3-5-sonnet-20241022"
+    judge_model: str = "claude-3-5-sonnet-20240620"
 ) -> DualAnalysisResult:
     """
     듀얼 시스템 분석

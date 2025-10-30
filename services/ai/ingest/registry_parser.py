@@ -573,7 +573,7 @@ def structure_registry_with_llm(raw_text: str) -> RegistryDocument:
 # ===========================
 # 메인 파싱 함수 (리팩토링 완료)
 # ===========================
-def parse_registry_pdf(pdf_path: str) -> RegistryDocument:
+async def parse_registry_pdf(pdf_path: str) -> RegistryDocument:
     """
     등기부 PDF 파싱 및 구조화
 
@@ -589,8 +589,7 @@ def parse_registry_pdf(pdf_path: str) -> RegistryDocument:
     # Step 2: 이미지 PDF면 Gemini Vision OCR
     if not is_text_pdf:
         logger.info("이미지 PDF 감지 → Gemini Vision OCR 시작")
-        import asyncio
-        raw_text = asyncio.run(ocr_with_gemini_vision(pdf_path))
+        raw_text = await ocr_with_gemini_vision(pdf_path)
 
         if not raw_text or len(raw_text) < 100:
             logger.error("OCR 실패 또는 텍스트 없음")
@@ -609,25 +608,59 @@ async def parse_registry_from_url(file_url: str) -> RegistryDocument:
 
     TODO: URL에서 다운로드 후 파싱
     """
-    # 임시로 파일 경로로 처리 (향후 httpx로 다운로드)
     import tempfile
     import httpx
+    from urllib.parse import urlparse
+    import socket, ipaddress, os
+    from core.settings import settings
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(file_url)
-        response.raise_for_status()
+    # 1) URL 검증: 기본적으로 Supabase public storage만 허용 (설정 기반)
+    parsed = urlparse(file_url)
+    if parsed.scheme != "https":
+        raise ValueError("Only HTTPS URLs are allowed")
 
-        # 임시 파일에 저장
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(response.content)
-            tmp_path = tmp.name
+    if settings.allow_parse_public_supabase_only:
+        allowed_prefix = settings.supabase_public_storage_prefix
+        if not allowed_prefix or not file_url.startswith(allowed_prefix):
+            raise ValueError("URL is not allowed. Only Supabase public storage URLs are permitted")
 
-        # 파싱
+    # 2) SSRF 방지: 호스트 IP가 내부망/로컬/메타데이터 주소인지 확인
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+        for family, _, _, _, sockaddr in infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+                raise ValueError("URL host resolves to a private or disallowed IP")
+    except Exception as e:
+        raise ValueError(f"Failed to resolve host for security checks: {e}")
+
+    # 3) 제한된 스트리밍 다운로드 (크기 제한, 리다이렉트 금지)
+    limits = httpx.Limits(max_connections=5, max_keepalive_connections=5)
+    timeout = httpx.Timeout(10.0, connect=5.0, read=10.0)
+    max_bytes = settings.parse_max_download_mb * 1024 * 1024
+
+    async with httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=False) as client:
+        async with client.stream("GET", file_url, headers={"Accept": "application/pdf"}) as resp:
+            resp.raise_for_status()
+            total = 0
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp_path = tmp.name
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        tmp.close()
+                        os.unlink(tmp_path)
+                        raise ValueError("Downloaded file exceeds size limit")
+                    tmp.write(chunk)
+
+        # 4) 파싱
         registry = parse_registry_pdf(tmp_path)
 
-        # 임시 파일 삭제
-        import os
-        os.unlink(tmp_path)
+        # 5) 임시 파일 삭제
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
         return registry
 

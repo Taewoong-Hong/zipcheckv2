@@ -116,7 +116,6 @@ def verify_token(token: str) -> Dict[str, Any]:
     try:
         # Supabase auth API를 통해 토큰 검증
         logger.info(f"Verifying token with Supabase Auth API: {SUPABASE_URL}/auth/v1/user")
-        logger.info(f"Token (first 50 chars): {token[:50]}...")
 
         response = requests.get(
             f"{SUPABASE_URL}/auth/v1/user",
@@ -130,8 +129,7 @@ def verify_token(token: str) -> Dict[str, Any]:
         logger.info(f"Supabase Auth API response status: {response.status_code}")
 
         if response.status_code == 401:
-            logger.warning(f"Token verification failed: Invalid or expired token")
-            logger.warning(f"Response body: {response.text}")
+            logger.warning("Token verification failed: Invalid or expired token")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid or expired token"
@@ -171,12 +169,16 @@ def verify_token_with_fallback(token: str) -> Dict[str, Any]:
     HS256(JWT_SECRET)으로 서명한 토큰을 로컬에서 검증한다.
     """
     # 토큰 디버깅 정보
-    logger.info(f"Token length: {len(token)}, preview: {token[:30]}...")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Token received (length only): {len(token)}")
 
     # JWT 디코드 (검증 없이 페이로드만 확인)
     try:
         unverified = jwt.decode(token, options={"verify_signature": False})
-        logger.info(f"Token payload (unverified): iss={unverified.get('iss')}, sub={unverified.get('sub')}, exp={unverified.get('exp')}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                f"Token payload (unverified minimal): iss={unverified.get('iss')}, exp={unverified.get('exp')}"
+            )
     except Exception as e:
         logger.warning(f"Failed to decode token payload: {e}")
 

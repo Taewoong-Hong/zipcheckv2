@@ -226,8 +226,43 @@ class SupabaseStorageClient:
                     "Authorization": f"Bearer {self.service_role_key}",
                 },
             )
-            response.raise_for_status()
-            return response.json()
+        response.raise_for_status()
+        return response.json()
+
+    async def get_signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str:
+        """Generate a signed URL for a private object.
+
+        Args:
+            bucket: Storage bucket name
+            path: Object path in bucket
+            expires_in: Expiry in seconds (default: 1 hour)
+
+        Returns:
+            Signed URL string
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.storage_url}/object/sign/{bucket}/{path}",
+                json={"expiresIn": expires_in},
+                headers={
+                    "apikey": self.service_role_key,
+                    "Authorization": f"Bearer {self.service_role_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # Response includes 'signedURL' or 'signedUrl' depending on versions
+            url = data.get("signedURL") or data.get("signedUrl")
+            if not url:
+                # Some deployments return 'url'
+                url = data.get("url")
+            if not url:
+                raise ValueError("Failed to generate signed URL")
+            # If returned URL is relative, prefix host
+            if url.startswith("/"):
+                return f"{self.storage_url}{url}"
+            return url
 
 
 # Singleton instances

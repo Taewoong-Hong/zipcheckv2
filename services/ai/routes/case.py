@@ -65,7 +65,7 @@ async def create_case(
         "user_id": user["id"],
         "property_address": request.property_address,
         "contract_type": request.contract_type,
-        "current_state": "address",  # 초기 상태
+        "current_state": "init",  # 초기 상태 (스키마와 일치)
         "metadata": request.metadata or {},
     }).execute()
 

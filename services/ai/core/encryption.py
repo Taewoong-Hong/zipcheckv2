@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # ✅ 올바른 import
 import base64
+from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class EncryptionManager:
 
     def _get_encryption_key(self) -> bytes:
         """환경변수에서 암호화 키 가져오기 및 파생"""
-        encryption_key = os.getenv("ENCRYPTION_KEY")
+        encryption_key = settings.encryption_key
         if not encryption_key:
             raise ValueError("ENCRYPTION_KEY environment variable is not set")
 

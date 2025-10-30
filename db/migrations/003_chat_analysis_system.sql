@@ -487,44 +487,12 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================
--- 12. 초기 데이터 - 테스트 크레딧 지급
--- ============================================
--- 주의: 프로덕션에서는 제거하거나 수정 필요
--- 새 사용자에게 자동으로 100 크레딧 지급
-CREATE OR REPLACE FUNCTION grant_welcome_credits()
-RETURNS TRIGGER AS $$
-BEGIN
-    INSERT INTO v2_credit_transactions (
-        user_id,
-        transaction_type,
-        amount,
-        balance_after,
-        reason,
-        reason_code
-    ) VALUES (
-        NEW.id,
-        'bonus',
-        100,
-        100,
-        '회원가입 환영 크레딧',
-        'WELCOME_BONUS'
-    );
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- 트리거 생성 (프로필 생성 시)
-CREATE TRIGGER grant_welcome_credits_on_signup
-    AFTER INSERT ON v2_profiles
-    FOR EACH ROW
-    EXECUTE FUNCTION grant_welcome_credits();
-
--- ============================================
 -- 완료!
 -- ============================================
 -- 실행 순서:
 -- 1. 이 파일을 Supabase SQL Editor에서 실행
 -- 2. 또는 migration 도구로 적용:
 --    supabase db push
+--
+-- Note: 웰컴 크레딧 트리거는 migration 006에서 추가됩니다
 -- ============================================

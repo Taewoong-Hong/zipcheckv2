@@ -176,7 +176,19 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
           />
         </div>
         <div className="flex flex-col flex-1 min-w-0">
-          {message.content && (
+          {/* 로딩 중 (content 없고 streaming 중) → 회전 스피너 */}
+          {!message.content && message.isStreaming ? (
+            <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                  <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                  <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce"></span>
+                </div>
+                <span className="text-sm text-neutral-600">답변 생성 중</span>
+              </div>
+            </div>
+          ) : message.content ? (
             <div className={`bg-white rounded-2xl rounded-tl-sm px-4 py-3 ${
               message.isError ? 'border border-red-300 bg-red-50' : ''
             }`}>
@@ -198,7 +210,7 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* 특수 컴포넌트 렌더링 */}
           {renderSpecialComponent()}

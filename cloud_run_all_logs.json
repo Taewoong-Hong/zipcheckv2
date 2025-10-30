@@ -1,0 +1,690 @@
+[
+  {
+    "insertId": "6902bd15000ebdc2f8becc26",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2025-10-30T01:19:17.969760492Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO:     169.254.169.126:43470 - \"POST /chat/message HTTP/1.1\" 401 Unauthorized",
+    "timestamp": "2025-10-30T01:19:17.966082Z"
+  },
+  {
+    "insertId": "6902bd15000ebc85eca1c582",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,966 - middleware - INFO - [REQ END] POST /chat/message -> 401 (4ms)",
+    "timestamp": "2025-10-30T01:19:17.965765Z"
+  },
+  {
+    "insertId": "6902bd15000ebb4c5242dce6",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,966 - core.auth - WARNING - Local token verification failed: Signature verification failed",
+    "timestamp": "2025-10-30T01:19:17.965452Z"
+  },
+  {
+    "insertId": "6902bd15000eba51bab21ab3",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,965 - core.auth - ERROR - Token verification request failed: Invalid URL 'None/auth/v1/user': No scheme supplied. Perhaps you meant https://None/auth/v1/user?",
+    "timestamp": "2025-10-30T01:19:17.965201Z"
+  },
+  {
+    "insertId": "6902bd15000eb1ba265a3588",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,963 - core.auth - INFO - Verifying token with Supabase Auth API: None/auth/v1/user",
+    "timestamp": "2025-10-30T01:19:17.963002Z"
+  },
+  {
+    "insertId": "6902bd15000eb171fdcbaa68",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,963 - core.auth - INFO - Token payload (unverified): iss=https://gsiismzchtgdklvdvggu.supabase.co/auth/v1, sub=259154b5-e294-4dd5-a0c6-1f80ea6d462e, exp=1761790752",
+    "timestamp": "2025-10-30T01:19:17.962929Z"
+  },
+  {
+    "insertId": "6902bd15000eb0663ba81a53",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,963 - core.auth - INFO - Token length: 1234, preview: eyJhbGciOiJIUzI1NiIsImtpZCI6In...",
+    "timestamp": "2025-10-30T01:19:17.962662Z"
+  },
+  {
+    "insertId": "6902bd15000eb0100bd7e764",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,963 - core.auth - INFO - Credentials received: scheme=Bearer, token_preview=eyJhbGciOiJIUzI1NiIs...",
+    "timestamp": "2025-10-30T01:19:17.962576Z"
+  },
+  {
+    "insertId": "6902bd15000eafccb3cf6dd8",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:18.297021980Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,963 - core.auth - INFO - get_current_user() called",
+    "timestamp": "2025-10-30T01:19:17.962508Z"
+  },
+  {
+    "insertId": "6902bd15000ea9dedb410446",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:19:17.963428413Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:19:17,961 - middleware - INFO - [REQ START] POST /chat/message",
+    "timestamp": "2025-10-30T01:19:17.960990Z"
+  },
+  {
+    "httpRequest": {
+      "latency": "0.020556201s",
+      "protocol": "HTTP/1.1",
+      "remoteIp": "13.217.226.238",
+      "requestMethod": "POST",
+      "requestSize": "1802",
+      "requestUrl": "https://zipcheck-ai-871793445649.asia-northeast3.run.app/chat/message",
+      "responseSize": "137",
+      "serverIp": "34.143.77.2",
+      "status": 401,
+      "userAgent": "node"
+    },
+    "insertId": "6902bd15000ec1952dc84ffb",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Frequests",
+    "receiveTimestamp": "2025-10-30T01:19:17.970385927Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "WARNING",
+    "spanId": "1cecd7dfbd653a4b",
+    "timestamp": "2025-10-30T01:19:17.941059Z",
+    "trace": "projects/advance-vector-475706-a5/traces/3e8049558d0905fbbb461b5abe967e0e",
+    "traceSampled": true
+  },
+  {
+    "insertId": "jpf01nc9fw",
+    "logName": "projects/advance-vector-475706-a5/logs/cloudaudit.googleapis.com%2Fsystem_event",
+    "protoPayload": {
+      "@type": "type.googleapis.com/google.cloud.audit.AuditLog",
+      "methodName": "/Services.ReplaceService",
+      "resourceName": "namespaces/advance-vector-475706-a5/revisions/zipcheck-ai-00053-dmt",
+      "response": {
+        "@type": "type.googleapis.com/google.cloud.run.v1.Revision",
+        "apiVersion": "serving.knative.dev/v1",
+        "kind": "Revision",
+        "metadata": {
+          "annotations": {
+            "autoscaling.knative.dev/maxScale": "3",
+            "autoscaling.knative.dev/minScale": "1",
+            "run.googleapis.com/build-source-location": "{\"zipcheck-ai-1\":\"gs://run-sources-advance-vector-475706-a5-asia-northeast3/services/zipcheck-ai/1761786223.41326-978113a278754786a2e40f76ebaf2a70.zip#1761786224136336\"}",
+            "run.googleapis.com/client-name": "gcloud",
+            "run.googleapis.com/client-version": "543.0.0",
+            "run.googleapis.com/operation-id": "1d2a471d-11c3-4b3f-9e06-c4de3423ba9b",
+            "run.googleapis.com/startup-cpu-boost": "true",
+            "serving.knative.dev/creator": "ghdxodnd@gmail.com"
+          },
+          "creationTimestamp": "2025-10-30T01:05:33.852524Z",
+          "generation": 1,
+          "labels": {
+            "client.knative.dev/nonce": "rihxrsizhk",
+            "cloud.googleapis.com/location": "asia-northeast3",
+            "run.googleapis.com/satisfiesPzs": "true",
+            "run.googleapis.com/startupProbeType": "Default",
+            "serving.knative.dev/configuration": "zipcheck-ai",
+            "serving.knative.dev/configurationGeneration": "53",
+            "serving.knative.dev/route": "zipcheck-ai",
+            "serving.knative.dev/service": "zipcheck-ai",
+            "serving.knative.dev/serviceUid": "2883ad39-1154-426a-acab-8161fb6c5163"
+          },
+          "name": "zipcheck-ai-00053-dmt",
+          "namespace": "871793445649",
+          "ownerReferences": [
+            {
+              "apiVersion": "serving.knative.dev/v1",
+              "blockOwnerDeletion": true,
+              "controller": true,
+              "kind": "Configuration",
+              "name": "zipcheck-ai",
+              "uid": "94cd0705-5018-4999-ac7d-45536f23e970"
+            }
+          ],
+          "resourceVersion": "AAZCVdniAhY",
+          "selfLink": "/apis/serving.knative.dev/v1/namespaces/871793445649/revisions/zipcheck-ai-00053-dmt",
+          "uid": "422725e9-66de-4f75-9dc8-c241013dc58d"
+        },
+        "spec": {
+          "containerConcurrency": 10,
+          "containers": [
+            {
+              "env": [
+                {
+                  "name": "APP_ENV",
+                  "value": "production"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "INFO"
+                },
+                {
+                  "name": "OPENAI_API_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "openai-api-key"
+                    }
+                  }
+                },
+                {
+                  "name": "DATABASE_URL",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "supabase-database-url"
+                    }
+                  }
+                },
+                {
+                  "name": "JWT_SECRET",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "supabase-jwt-secret"
+                    }
+                  }
+                },
+                {
+                  "name": "SUPABASE_ANON_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "2",
+                      "name": "supabase-anon-key"
+                    }
+                  }
+                },
+                {
+                  "name": "SUPABASE_SERVICE_ROLE_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "supabase-service-role-key"
+                    }
+                  }
+                },
+                {
+                  "name": "VWORLD_API_KEY",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "latest",
+                      "name": "vworld-api-key-production"
+                    }
+                  }
+                }
+              ],
+              "image": "asia-northeast3-docker.pkg.dev/advance-vector-475706-a5/cloud-run-source-deploy/zipcheck-ai@sha256:56bca43c4966ac405a501a637e3e60fa30eb7221146ef6ac8fa274040483b880",
+              "name": "zipcheck-ai-1",
+              "ports": [
+                {
+                  "containerPort": 8080,
+                  "name": "http1"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": "1",
+                  "memory": "1Gi"
+                }
+              },
+              "startupProbe": {
+                "failureThreshold": 1,
+                "periodSeconds": 240,
+                "tcpSocket": {
+                  "port": 8080
+                },
+                "timeoutSeconds": 240
+              }
+            }
+          ],
+          "serviceAccountName": "871793445649-compute@developer.gserviceaccount.com",
+          "timeoutSeconds": 300
+        },
+        "status": {
+          "conditions": [
+            {
+              "lastTransitionTime": "2025-10-30T01:05:55.384854Z",
+              "message": "Deploying revision succeeded in 21.53s.",
+              "status": "True",
+              "type": "Ready"
+            },
+            {
+              "lastTransitionTime": "2025-10-30T01:05:54.171225Z",
+              "message": "Containers became healthy.",
+              "status": "True",
+              "type": "ContainerHealthy"
+            },
+            {
+              "lastTransitionTime": "2025-10-30T01:05:43.524976Z",
+              "message": "Container image import completed in 9.18s.",
+              "status": "True",
+              "type": "ContainerReady"
+            },
+            {
+              "lastTransitionTime": "2025-10-30T01:05:55.338944Z",
+              "message": "Min instances provisioned successfully  in 11.68s.",
+              "status": "True",
+              "type": "MinInstancesProvisioned"
+            },
+            {
+              "lastTransitionTime": "2025-10-30T01:05:45.143101Z",
+              "message": "Provisioning imported containers completed in 1.62s. Checking container health. This will wait for up to 4m for the configured startup probe, including an initial delay of 0s.",
+              "status": "True",
+              "type": "ResourcesAvailable"
+            }
+          ],
+          "containerStatuses": [
+            {
+              "imageDigest": "asia-northeast3-docker.pkg.dev/advance-vector-475706-a5/cloud-run-source-deploy/zipcheck-ai@sha256:56bca43c4966ac405a501a637e3e60fa30eb7221146ef6ac8fa274040483b880",
+              "name": "zipcheck-ai-1"
+            }
+          ],
+          "desiredReplicas": 1,
+          "imageDigest": "asia-northeast3-docker.pkg.dev/advance-vector-475706-a5/cloud-run-source-deploy/zipcheck-ai@sha256:56bca43c4966ac405a501a637e3e60fa30eb7221146ef6ac8fa274040483b880",
+          "logUrl": "https://console.cloud.google.com/logs/viewer?project=advance-vector-475706-a5&resource=cloud_run_revision/service_name/zipcheck-ai/revision_name/zipcheck-ai-00053-dmt&advancedFilter=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22zipcheck-ai%22%0Aresource.labels.revision_name%3D%22zipcheck-ai-00053-dmt%22",
+          "observedGeneration": 1
+        }
+      },
+      "serviceName": "run.googleapis.com",
+      "status": {
+        "message": "Ready condition status changed to True for Revision zipcheck-ai-00053-dmt with message: Deploying revision succeeded in 21.53s."
+      }
+    },
+    "receiveTimestamp": "2025-10-30T01:05:55.442726810Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "timestamp": "2025-10-30T01:05:55.394676Z"
+  },
+  {
+    "insertId": "6902b9f2000273ba1cd19f98",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2025-10-30T01:05:54.473384985Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Default STARTUP TCP probe succeeded after 1 attempt for container \"zipcheck-ai-1\" on port 8080.",
+    "timestamp": "2025-10-30T01:05:54.160698Z"
+  },
+  {
+    "insertId": "6902b9f2000271c01d89de6b",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)",
+    "timestamp": "2025-10-30T01:05:54.160192Z"
+  },
+  {
+    "insertId": "6902b9f2000267903a7a8a52",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO:     Application startup complete.",
+    "timestamp": "2025-10-30T01:05:54.157584Z"
+  },
+  {
+    "insertId": "6902b9f2000266bc00ce8e4e",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:05:54,158 - app - INFO - === 서비스 준비 완료 ===",
+    "timestamp": "2025-10-30T01:05:54.157372Z"
+  },
+  {
+    "insertId": "6902b9f20002665e591197a6",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:05:54,158 - app - INFO - Embedding Model: text-embedding-3-small",
+    "timestamp": "2025-10-30T01:05:54.157278Z"
+  },
+  {
+    "insertId": "6902b9f200026611eab1a019",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:05:54,158 - app - INFO - Judge LLM: claude",
+    "timestamp": "2025-10-30T01:05:54.157201Z"
+  },
+  {
+    "insertId": "6902b9f2000265c53eb76f64",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:05:54,158 - app - INFO - Primary LLM: openai",
+    "timestamp": "2025-10-30T01:05:54.157125Z"
+  },
+  {
+    "insertId": "6902b9f20002657551766087",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:05:54,158 - app - INFO - 환경: production",
+    "timestamp": "2025-10-30T01:05:54.157045Z"
+  },
+  {
+    "insertId": "6902b9f2000265150a8f9648",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.491868548Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "2025-10-30 01:05:54,158 - app - INFO - === ZipCheck AI 서비스 시작 ===",
+    "timestamp": "2025-10-30T01:05:54.156949Z"
+  },
+  {
+    "insertId": "6902b9f2000262da10e8360f",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.158244745Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO:     Waiting for application startup.",
+    "timestamp": "2025-10-30T01:05:54.156378Z"
+  },
+  {
+    "insertId": "6902b9f20002629820403291",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fstderr",
+    "receiveTimestamp": "2025-10-30T01:05:54.158244745Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "textPayload": "INFO:     Started server process [2]",
+    "timestamp": "2025-10-30T01:05:54.156312Z"
+  },
+  {
+    "insertId": "6902b9e900023d3616537774",
+    "labels": {
+      "instanceId": "0014778296035aa052a75ce25890b7f73943d10a4ea9e5e1b663f32cdb4b2ea08b5fb047373df99ba389c648bc0c560103677536a62459b9770448b352af4942bdf3d5697a06c14fa89a60768fdf0c6ac8",
+      "scaling_reason": "MANUAL_OR_CUSTOMER_MIN_INSTANCE"
+    },
+    "logName": "projects/advance-vector-475706-a5/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+    "receiveTimestamp": "2025-10-30T01:05:45.149002695Z",
+    "resource": {
+      "labels": {
+        "configuration_name": "zipcheck-ai",
+        "location": "asia-northeast3",
+        "project_id": "advance-vector-475706-a5",
+        "revision_name": "zipcheck-ai-00053-dmt",
+        "service_name": "zipcheck-ai"
+      },
+      "type": "cloud_run_revision"
+    },
+    "severity": "INFO",
+    "textPayload": "Starting new instance. Reason: MANUAL_OR_CUSTOMER_MIN_INSTANCE - Instance started because of customer-configured min-instances or manual scaling.",
+    "timestamp": "2025-10-30T01:05:45.146742Z"
+  }
+]

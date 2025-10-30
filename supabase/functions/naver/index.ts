@@ -148,7 +148,7 @@ function buildCookie(name: string, value: string) {
     `HttpOnly`,
     `Secure`,
     `SameSite=Lax`,  // OAuth 콜백을 위해 Lax 사용 (크로스사이트 GET 허용)
-    COOKIE_DOMAIN ? `Domain=${COOKIE_DOMAIN}` : "",
+    // Domain 속성 제거: supabase.co에서 쿠키 설정 시 브라우저 차단 방지
     `Max-Age=3600`,
   ].filter(Boolean).join("; ");
   return `${name}=${value}; ${attrs}`;
@@ -206,14 +206,35 @@ Deno.serve(async (req) => {
     // CSRF 방지: state = 랜덤값(쿠키에도 저장)
     const state = crypto.randomUUID();
     const stateCookie = buildCookie("naver_oauth_state", state);
+
+    // ✅ return_url query parameter (최우선 순위)
+    const returnUrl = url.searchParams.get("return_url");
+
     // Capture caller frontend origin for callback redirect
     const referer = req.headers.get("referer");
     const refererOrigin = referer ? new URL(referer).origin : null;
-    const chosenOrigin = refererOrigin && ALLOWED_ORIGINS.includes(refererOrigin)
-      ? refererOrigin
-      : (origin && ALLOWED_ORIGINS.includes(origin) ? origin : null);
+
+    // 🔍 디버깅 로그 추가
+    console.log("[Naver Authorize] return_url:", returnUrl);
+    console.log("[Naver Authorize] referer:", referer);
+    console.log("[Naver Authorize] refererOrigin:", refererOrigin);
+    console.log("[Naver Authorize] origin header:", origin);
+    console.log("[Naver Authorize] ALLOWED_ORIGINS:", ALLOWED_ORIGINS);
+
+    // ✅ 우선순위: return_url > refererOrigin > origin > null
+    const chosenOrigin = returnUrl && ALLOWED_ORIGINS.includes(returnUrl)
+      ? returnUrl
+      : (refererOrigin && ALLOWED_ORIGINS.includes(refererOrigin)
+        ? refererOrigin
+        : (origin && ALLOWED_ORIGINS.includes(origin) ? origin : null));
+
+    console.log("[Naver Authorize] chosenOrigin:", chosenOrigin);
+
     const originCookie = chosenOrigin ? buildCookie(FRONTEND_ORIGIN_COOKIE, encodeURIComponent(chosenOrigin)) : "";
     const cookies: string[] = originCookie ? [stateCookie, originCookie] : [stateCookie];
+
+    console.log("[Naver Authorize] Cookies to set:", cookies);
+
     return redirect(buildAuthorizeURL(state), cookies);
   }
 
@@ -256,12 +277,24 @@ Deno.serve(async (req) => {
         .find(v => v.startsWith(`${FRONTEND_ORIGIN_COOKIE}=`))
         ?.split("=")[1];
       const decodedStored = storedOrigin ? decodeURIComponent(storedOrigin) : null;
+
+      // 🔍 디버깅 로그 추가
+      console.log("[Naver Callback] storedOrigin:", storedOrigin);
+      console.log("[Naver Callback] decodedStored:", decodedStored);
+      console.log("[Naver Callback] origin header:", origin);
+
       const frontendUrl = decodedStored && ALLOWED_ORIGINS.includes(decodedStored)
         ? decodedStored
         : (origin && ALLOWED_ORIGINS.includes(origin) ? origin : "https://zipcheck.kr");
+
+      console.log("[Naver Callback] Final frontendUrl:", frontendUrl);
+
       const next = new URL("/auth/callback", frontendUrl);
       next.searchParams.set("naver_token", jwt);
-      const clearOriginCookie = `${FRONTEND_ORIGIN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax; ${COOKIE_DOMAIN ? `Domain=${COOKIE_DOMAIN};` : ""} Secure`;
+      const clearOriginCookie = `${FRONTEND_ORIGIN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax; Secure`;
+
+      console.log("[Naver Callback] Redirect to:", next.toString());
+
       return redirect(next.toString(), [sbCookie, clearOriginCookie]);
     } catch (e) {
       console.error(e);

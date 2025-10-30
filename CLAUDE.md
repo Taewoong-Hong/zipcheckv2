@@ -1652,3 +1652,40 @@ decrypted_users = decrypt_list_fields(users, ['name'])
 
 ---
 
+### ✅ 2025-01-30: 보안 강화 적용 (SSRF/업로드/CORS/봇방어)
+
+핵심 강화 사항:
+- CORS 정책: 운영 도메인만 허용하도록 `.env`의 `AI_ALLOWED_ORIGINS` 사용. `allow_credentials`와 `*` 조합 제거 권장.
+- Storage 접근: 등기부 원본은 Supabase Storage private 버킷에 저장하고, 클라이언트에는 만료형 서명 URL만 제공.
+- SSRF 방지: URL 기반 등기부 파싱은 HTTPS + (기본) Supabase 공개 스토리지 URL만 허용, 내부망 IP 차단, 스트리밍 크기 제한.
+- 파일 업로드 방어: PDF 확장자/MIME/시그니처 검사, 파일명 정제, 용량 제한(기본 20MB), 임시파일 정리.
+- 토큰 로그 최소화: 액세스 토큰/페이로드 로그 제거(운영에서 노출 방지).
+- 봇 방어: Cloudflare Turnstile + Google reCAPTCHA 동시 지원. SMS 발송/검증 시 최소 하나의 토큰 필수.
+
+관련 코드 변경:
+- 업로드 보강: `services/ai/routes/registry.py`
+  - 파일명 정제, 용량 제한, MIME/시그니처 검사, 처리 후 임시파일 삭제
+  - Storage 업로드 후 private 버킷 서명 URL 반환(`file_url`)
+- URL 파싱 SSRF 방지: `services/ai/ingest/registry_parser.py`
+  - HTTPS, 도메인 제한, 내부 IP 차단, 20MB 스트리밍 제한
+- 토큰 로그 축소: `services/ai/core/auth.py`
+  - 토큰 프리뷰/페이로드 로그 제거(필요 시 DEBUG 최소 출력)
+- Storage 서명 URL: `services/ai/core/supabase_client.py`
+  - `get_signed_url()` 추가 (기본 만료 1시간)
+- 봇 방어
+  - Turnstile 유틸: `services/ai/core/security/turnstile.py`
+  - reCAPTCHA 유틸: `services/ai/core/security/recaptcha.py`
+  - SMS 라우트 보호: `services/ai/routes/sms.py` (토큰 검증 필수)
+
+환경 변수(.env) 업데이트:
+- CORS: `AI_ALLOWED_ORIGINS=https://your-domain.com,https://admin.your-domain.com`
+- Storage: `STORAGE_BUCKET_ARTIFACTS=artifacts`, `STORAGE_ARTIFACTS_PATH_TEMPLATE={user_id}/{contract_id}/{filename}`
+- 업로드/파싱 제한: `UPLOAD_MAX_PDF_MB=20`, `PARSE_MAX_DOWNLOAD_MB=20`, `ALLOW_PARSE_PUBLIC_SUPABASE_ONLY=true`
+- reCAPTCHA: `RECAPTCHA_SITE_KEY=...`, `RECAPTCHA_SECRET_KEY=...`
+- Turnstile: `TURNSTILE_SECRET_KEY=...`
+
+운영 권장:
+- Storage 버킷은 private로 운영하고, 다운로드는 서명 URL로만 제공
+- CORS는 운영 도메인만 허용(개발/스테이징은 별도 값)
+- SMS 레이트리밋/캡차 병행 운용(현재 토큰 필수, 필요 시 추가 레이트리밋 도입)
+

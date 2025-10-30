@@ -33,15 +33,17 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      throw new Error(`리포트 조회 실패: ${response.status}`);
+      const text = await response.text();
+      return NextResponse.json(
+        { error: '리포트 조회 실패', status: response.status, details: text },
+        { status: response.status }
+      );
     }
 
     const reports = await response.json();
+    const total = Array.isArray(reports) ? reports.length : (reports?.length ?? 0);
 
-    return NextResponse.json({
-      reports,
-      total: reports.length,
-    });
+    return NextResponse.json({ reports, total });
   } catch (error) {
     console.error('Reports list error:', error);
     return NextResponse.json(

@@ -177,6 +177,68 @@ async def send_message(request: SendMessageRequest, user: dict = Depends(get_cur
         saved_message = result.data[0]
         logger.info(f"메시지 저장 완료: message_id={saved_message['id']}")
 
+        # ========== 간단한 상태 진행 유도 ==========
+        # 대화 메타(주소/유형) 확인 후, 적절한 다음 단계 안내 메시지를 보냅니다.
+        try:
+            conv_resp = supabase.table("conversations").select("id, property_address, contract_type").eq("id", request.conversation_id).single().execute()
+            conv = conv_resp.data if hasattr(conv_resp, 'data') else (conv_resp or {})
+            property_address = (conv or {}).get("property_address")
+            contract_type = (conv or {}).get("contract_type")
+
+            # 주소 추출 시도
+            from core.address_extractor import extract_address_from_text
+            addr_extracted = extract_address_from_text(request.content)
+
+            # 계약유형 판별
+            content_lower = request.content.strip()
+            detected_contract = None
+            for ct in ["전세", "전월세", "월세", "매매"]:
+                if ct in content_lower:
+                    detected_contract = ct
+                    break
+
+            assistant_msg = None
+
+            if not property_address:
+                if addr_extracted.found and addr_extracted.confidence >= 0.6:
+                    # 주소 업데이트 후 계약 유형 선택 안내
+                    supabase.table("conversations").update({
+                        "property_address": addr_extracted.address
+                    }).eq("id", request.conversation_id).execute()
+                    assistant_msg = (
+                        f"주소를 확인했습니다: {addr_extracted.address}\n\n"
+                        "계약 유형을 선택해주세요. (전세/전월세/월세/매매)"
+                    )
+                else:
+                    # 주소 요청 안내
+                    assistant_msg = (
+                        "부동산 주소를 입력해주세요.\n"
+                        "예: 서울특별시 강남구 테헤란로 123, 또는 '서울 강남구 역삼동 123-45'"
+                    )
+            elif not contract_type:
+                if detected_contract:
+                    # 계약 유형 저장 후 등기부 단계 안내
+                    supabase.table("conversations").update({
+                        "contract_type": detected_contract
+                    }).eq("id", request.conversation_id).execute()
+                    assistant_msg = (
+                        f"계약 유형을 '{detected_contract}'로 설정했습니다.\n\n"
+                        "등기부를 발급(크레딧 차감)하시겠어요, 아니면 PDF를 업로드하시겠어요?"
+                    )
+                else:
+                    assistant_msg = "계약 유형을 선택해주세요. (전세/전월세/월세/매매)"
+            # else: 나머지 단계는 프론트 UI/다음 API가 안내함
+
+            if assistant_msg:
+                supabase.table("messages").insert({
+                    "conversation_id": request.conversation_id,
+                    "role": "assistant",
+                    "content": assistant_msg,
+                    "meta": {"topic": "contract_analysis", "extension": "chat"}
+                }).execute()
+        except Exception as guide_err:
+            logger.warning(f"다음 단계 안내 메시지 생성 실패(무시): {guide_err}")
+
         return {
             "ok": True,
             "message_id": saved_message["id"],

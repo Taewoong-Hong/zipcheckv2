@@ -11,6 +11,7 @@ from core.auth import get_current_user
 from core.report_generator import generate_markdown_report
 
 router = APIRouter(prefix="/reports", tags=["report"])
+router_single = APIRouter(prefix="/report", tags=["report"])
 
 
 # ===========================
@@ -57,7 +58,7 @@ async def get_report(
     case = case_response.data[0]
 
     # 분석 완료 여부 확인
-    if case["current_state"] not in ["report", "completed"]:
+    if case["current_state"] not in ["report"]:
         raise HTTPException(400, f"Report not available. Current state: {case['current_state']}")
 
     # 리포트 조회
@@ -97,6 +98,15 @@ async def get_report(
         "risk_score": report.get("risk_score"),
         "created_at": report.get("created_at"),
     }
+
+
+# Guide compatibility: GET /report/:case_id
+@router_single.get("/{case_id}")
+async def get_report_single(
+    case_id: str,
+    user: dict = Depends(get_current_user)
+):
+    return await get_report(case_id, user)
 
 
 @router.get("", response_model=list[ReportResponse])

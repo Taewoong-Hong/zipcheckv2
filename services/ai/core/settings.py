@@ -132,6 +132,18 @@ class Settings(BaseSettings):
         description="CORS allowed origins (comma-separated)"
     )
 
+    # Chat guardrail configuration
+    chat_guardrail_mode: Literal["off", "soft", "hard"] = Field(
+        default="soft",
+        description="Guardrail mode: off (disabled), soft (nudge only), hard (block)"
+    )
+    guardrail_min_confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold used in hard/soft modes"
+    )
+
     # Redis (Optional)
     redis_url: str | None = Field(
         default=None,
@@ -156,9 +168,55 @@ class Settings(BaseSettings):
         description="Langfuse host URL"
     )
 
+    # Storage (Supabase)
+    storage_bucket_artifacts: str = Field(
+        default="artifacts",
+        description="Supabase Storage bucket for artifacts"
+    )
+    storage_artifacts_path_template: str = Field(
+        default="{user_id}/{contract_id}/{filename}",
+        description="Path template for artifact uploads"
+    )
+
+    # Upload/Parse Security Limits
+    upload_max_pdf_mb: int = Field(
+        default=20,
+        description="Maximum allowed PDF upload size in MB"
+    )
+    parse_max_download_mb: int = Field(
+        default=20,
+        description="Maximum allowed size for URL-based registry PDF download (MB)"
+    )
+    allow_parse_public_supabase_only: bool = Field(
+        default=True,
+        description="Restrict /parse/registry to Supabase public storage URLs only"
+    )
+
+    # Google reCAPTCHA
+    recaptcha_site_key: str | None = Field(
+        default=None,
+        description="Google reCAPTCHA site key"
+    )
+    recaptcha_secret_key: str | None = Field(
+        default=None,
+        description="Google reCAPTCHA secret key"
+    )
+
+    @property
+    def supabase_public_storage_prefix(self) -> str | None:
+        if not self.supabase_url:
+            return None
+        return f"{self.supabase_url}/storage/v1/object/public/"
+
     # Internet Registry Service (IROS) Configuration - RPA 제거됨, 향후 사용 가능
     iros_user_id: str | None = Field(default=None, description="인터넷등기소 아이디 (선택)")
     iros_password: str | None = Field(default=None, description="인터넷등기소 비밀번호 (선택)")
+
+    # Encryption
+    encryption_key: str = Field(
+        ...,
+        description="Data encryption key (AES-256)"
+    )
 
     # Application
     app_env: Literal["development", "staging", "production"] = Field(
