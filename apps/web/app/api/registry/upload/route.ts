@@ -1,23 +1,34 @@
-/**
- * 등기부 PDF 업로드 API
+﻿/**
+ * Registry PDF upload API
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+
+function getBearer(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  return authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient();
+    const bearer = getBearer(request);
+    if (!bearer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // 인증 확인
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: { headers: { Authorization: `Bearer ${bearer}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      }
+    );
+    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    if (userErr || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const caseId = formData.get('caseId') as string;
+    const file = formData.get('file') as File | null;
+    const caseId = formData.get('caseId') as string | null;
 
     if (!file || !caseId) {
       return NextResponse.json(
@@ -26,7 +37,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 파일 크기 제한 (10MB)
+    // Size limit: 10MB
     if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
         { error: 'File size must be less than 10MB' },
@@ -34,24 +45,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // PDF 파일만 허용
-    if (file.type !== 'application/pdf') {
+    // MIME check (allow common fallback)
+    const mime = file.type || '';
+    if (!(mime === 'application/pdf' || mime === 'application/octet-stream')) {
       return NextResponse.json(
         { error: 'Only PDF files are allowed' },
         { status: 400 }
       );
     }
 
-    // Supabase Storage에 업로드
-    const fileName = `${caseId}/${Date.now()}-${file.name}`;
+    // Upload to Supabase Storage (bucket: artifacts, path: user_id/caseId/filename)
+    const bucket = 'artifacts';
+    // Sanitize filename: remove Korean characters and special chars
+    const sanitizedName = file.name
+      .replace(/[^\x00-\x7F]/g, '') // Remove non-ASCII (Korean)
+      .replace(/[^a-zA-Z0-9._-]/g, '_'); // Replace special chars with underscore
+    const finalName = sanitizedName || 'registry.pdf'; // Fallback if all chars removed
+    const fileName = `${user.id}/${caseId}/${Date.now()}-${finalName}`;
     const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('zipcheck-documents')
+      .from(bucket)
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
       });
 
-    if (uploadError) {
+    if (uploadError || !uploadData) {
       console.error('Upload error:', uploadError);
       return NextResponse.json(
         { error: 'Failed to upload file' },
@@ -59,16 +77,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // artifact 레코드 생성
+    // Create artifact record
     const { data: artifactData, error: artifactError } = await supabase
       .from('v2_artifacts')
       .insert({
         case_id: caseId,
+        user_id: user.id,
         artifact_type: 'registry_pdf',
         file_path: uploadData.path,
         file_name: file.name,
         file_size: file.size,
-        mime_type: file.type,
+        mime_type: mime || 'application/pdf',
       })
       .select()
       .single();
@@ -81,11 +100,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 케이스 상태 업데이트
-    await supabase
-      .from('v2_cases')
-      .update({ state: 'registry_ready' })
-      .eq('id', caseId);
+    // Update case state (new/legacy schema compatibility)
+    const updateNew = await supabase.from('v2_cases')
+      .update({ current_state: 'registry' })
+      .eq('id', caseId)
+      .eq('user_id', user.id);
+    if (updateNew.error) {
+      await supabase
+        .from('v2_cases')
+        .update({ state: 'registry_ready' })
+        .eq('id', caseId)
+        .eq('user_id', user.id);
+    }
+
+    // Trigger AI parse asynchronously with signed URL
+    try {
+      const { data: signed, error: signErr } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(uploadData.path, 600);
+      if (!signErr && signed?.signedUrl) {
+        const aiUrl = process.env.AI_API_URL || process.env.NEXT_PUBLIC_AI_API_URL;
+        if (aiUrl) {
+          fetch(`${aiUrl}/parse/registry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_url: signed.signedUrl }),
+          }).catch(() => {});
+        }
+      }
+    } catch {}
 
     return NextResponse.json({
       artifactId: artifactData.id,

@@ -19,12 +19,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Supabase 설정
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+# Supabase 설정 (settings.py를 통해 로드)
+from .settings import settings
+
+SUPABASE_URL = settings.supabase_url or os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = settings.supabase_anon_key or os.getenv("SUPABASE_ANON_KEY")
 # JWT Secret (Supabase와 Edge Function에서 공통 사용)
-JWT_SECRET = os.getenv("JWT_SECRET")
-JWKS_URL = f"{SUPABASE_URL}/auth/v1/keys"
+JWT_SECRET = settings.jwt_secret if hasattr(settings, 'jwt_secret') else os.getenv("JWT_SECRET")
+JWKS_URL = f"{SUPABASE_URL}/auth/v1/keys" if SUPABASE_URL else None
 
 # HTTP Bearer 스키마
 security = HTTPBearer()
@@ -165,8 +167,10 @@ def verify_token(token: str) -> Dict[str, Any]:
 
 def verify_token_with_fallback(token: str) -> Dict[str, Any]:
     """
-    Supabase 검증을 우선 시도하고, 401이면 Edge Function(issuer=edge:naver)에서
-    HS256(JWT_SECRET)으로 서명한 토큰을 로컬에서 검증한다.
+    토큰 검증 전략 (내결함성):
+    1) JWKS 공개키로 RS256 서명 검증 (권장, apikey 불필요)
+    2) Supabase Auth API(/auth/v1/user) 호출로 검증 (apikey 필요)
+    3) 실패 시, Edge Function이 서명한 HS256 토큰(issuer=edge:naver) 로컬 검증
     """
     # 토큰 디버깅 정보
     if logger.isEnabledFor(logging.DEBUG):
@@ -182,7 +186,28 @@ def verify_token_with_fallback(token: str) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Failed to decode token payload: {e}")
 
-    # 1) Supabase Auth API 검증 시도
+    # 1) JWKS 공개키로 서명 검증 (apikey 불필요)
+    try:
+        public_key = get_public_key(token)
+        decoded = jwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
+        payload = {
+            "sub": decoded.get("sub"),
+            "email": decoded.get("email"),
+            "role": decoded.get("role", "authenticated"),
+            "aud": decoded.get("aud", "authenticated"),
+            "app_metadata": decoded.get("app_metadata", {}),
+        }
+        logger.info(f"Token verified via JWKS for user: {payload.get('sub')}")
+        return payload
+    except Exception as e:
+        logger.warning(f"JWKS verification failed, falling back to Auth API: {e}")
+
+    # 2) Supabase Auth API 검증 시도
     try:
         logger.info(f"Verifying token with Supabase Auth API: {SUPABASE_URL}/auth/v1/user")
         response = requests.get(
@@ -217,7 +242,7 @@ def verify_token_with_fallback(token: str) -> Dict[str, Any]:
         logger.error(f"Token verification request failed: {e}")
         # 네트워크 오류 시에도 로컬 폴백 시도
 
-    # 2) Edge HS256 로컬 검증 (issuer=edge:naver)
+    # 3) Edge HS256 로컬 검증 (issuer=edge:naver)
     if not JWT_SECRET:
         logger.warning("JWT_SECRET not configured; cannot verify edge-signed token")
         raise HTTPException(status_code=401, detail="Invalid or expired token")

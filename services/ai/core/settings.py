@@ -2,6 +2,17 @@
 from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Proactively load .env to os.environ to avoid CWD-related misses
+for _candidate in [Path(__file__).resolve().parents[1] / ".env", Path.cwd() / ".env"]:
+    try:
+        if _candidate.exists():
+            load_dotenv(dotenv_path=_candidate, override=False)
+            break
+    except Exception:
+        pass
 
 
 class Settings(BaseSettings):
@@ -216,6 +227,12 @@ class Settings(BaseSettings):
     encryption_key: str | None = Field(
         default=None,
         description="Data encryption key (AES-256)"
+    )
+
+    # JWT/Edge tokens (optional)
+    jwt_secret: str | None = Field(
+        default=None,
+        description="JWT secret for HS256 edge tokens (optional)"
     )
 
     # Application

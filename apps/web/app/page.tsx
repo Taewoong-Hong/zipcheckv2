@@ -13,6 +13,7 @@ function HomePageContent() {
 
   // 실제 Supabase 세션 상태로 로그인 확인
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [session, setSession] = useState<any>(null); // 세션 객체 저장
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
 
@@ -36,14 +37,16 @@ function HomePageContent() {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setIsLoggedIn(!!session);
+      setSession(session);
     };
     checkAuth();
 
     // 로그인 상태 변경 감지
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsLoggedIn(!!session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setIsLoggedIn(!!newSession);
+      setSession(newSession);
       // 로그인 성공 시 모달 닫기
-      if (session) {
+      if (newSession) {
         setIsLoginModalOpen(false);
       }
     });
@@ -202,6 +205,7 @@ function HomePageContent() {
           isSidebarExpanded={isSidebarExpanded}
           onToggleSidebar={() => setIsSidebarExpanded(!isSidebarExpanded)}
           isLoggedIn={isLoggedIn}
+          session={session}
           onLoginRequired={() => setIsLoginModalOpen(true)}
         />
       </main>

@@ -69,7 +69,7 @@ def create_llm(
         )
     elif provider == "claude":
         return ChatAnthropic(
-            model=model_name or "claude-3-5-sonnet-20241022",
+            model=model_name or "claude-3-5-sonnet-latest",
             temperature=temperature,
             max_tokens=max_tokens,
             api_key=settings.anthropic_api_key,

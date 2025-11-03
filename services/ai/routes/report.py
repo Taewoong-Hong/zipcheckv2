@@ -49,7 +49,7 @@ async def get_report(
     case_response = supabase.table("v2_cases") \
         .select("id, user_id, current_state, contract_type, property_address, metadata") \
         .eq("id", case_id) \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .execute()
 
     if not case_response.data:
@@ -125,7 +125,7 @@ async def list_reports(
 
     response = supabase.table("v2_reports") \
         .select("*") \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .order("created_at", desc=True) \
         .range(offset, offset + limit - 1) \
         .execute()
@@ -151,7 +151,7 @@ async def delete_report(
     report_response = supabase.table("v2_reports") \
         .select("id, user_id") \
         .eq("case_id", case_id) \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .execute()
 
     if not report_response.data:
@@ -161,7 +161,7 @@ async def delete_report(
     supabase.table("v2_reports") \
         .delete() \
         .eq("case_id", case_id) \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .execute()
 
     return {"ok": True, "deleted_case_id": case_id}

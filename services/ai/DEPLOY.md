@@ -61,7 +61,7 @@ gcloud run deploy zipcheck-ai \
 gcloud run services describe zipcheck-ai --region asia-northeast3 --format="value(status.url)"
 ```
 
-**예상 결과**: `https://zipcheck-ai-871793445649.asia-northeast3.run.app`
+**예상 결과**: `https://zipcheck-ai-ov5n6pt46a-du.a.run.app`
 
 ### 2. 환경변수 확인
 ```bash
@@ -72,7 +72,7 @@ gcloud run services describe zipcheck-ai --region asia-northeast3 --format="yaml
 
 ### 3. API 문서 접근
 ```
-https://zipcheck-ai-871793445649.asia-northeast3.run.app/docs
+https://zipcheck-ai-ov5n6pt46a-du.a.run.app/docs
 ```
 
 **예상 결과**: FastAPI Swagger UI 표시됨

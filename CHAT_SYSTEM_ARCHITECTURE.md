@@ -559,7 +559,7 @@ export default function Message({ message, onCopy, onRegenerate }: MessageProps)
 import { NextRequest, NextResponse } from 'next/server';
 
 const AI_API_URL = process.env.AI_API_URL ||
-  'https://zipcheck-ai-871793445649.asia-northeast3.run.app';
+  'https://zipcheck-ai-ov5n6pt46a-du.a.run.app';
 
 export async function POST(request: NextRequest) {
   try {

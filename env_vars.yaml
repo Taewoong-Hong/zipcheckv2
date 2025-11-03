@@ -1,0 +1,4 @@
+APP_ENV: production
+LOG_LEVEL: INFO
+SUPABASE_URL: https://gsiismzchtgdklvdvggu.supabase.co
+AI_ALLOWED_ORIGINS: "https://zipcheck.kr,https://www.zipcheck.kr,http://localhost:3000"

@@ -1,165 +1,77 @@
-/**
- * 주소 검색 API
- *
- * @description
- * 행정안전부 도로명주소 API (juso-proxy)를 통해 주소 검색
- *
- * @author 집체크 개발팀
- * @version 1.0.0
- * @date 2025-01-27
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 
-// 행정안전부 도로명주소 API
-const JUSO_API_URL = 'https://business.juso.go.kr/addrlink/addrLinkApi.do';
-const JUSO_API_KEY = process.env.JUSO_API_KEY || 'devU01TX0FVVEgyMDI1MDEyNzEzMTA0NTExNTE1MzA=';
+// Back-compat alias for legacy AddressSearchSelector
+// Proxies to JUSO, but in local/dev returns a mock result using the query itself.
 
-/**
- * GET /api/address/search
- *
- * @param request - Next.js 요청
- * @returns 주소 검색 결과
- */
+function isLocal() {
+  if (process.env.NODE_ENV === 'development') return true;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+  return appUrl.includes('localhost') || appUrl.includes('127.0.0.1');
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const query = searchParams.get('q');
+    const url = new URL(request.url);
+    const q = url.searchParams.get('q') || url.searchParams.get('query') || '';
+    const size = url.searchParams.get('size') || '10';
 
-    // 검색어 검증
-    if (!query || query.trim().length < 2) {
-      return NextResponse.json(
-        { error: '검색어는 최소 2자 이상이어야 합니다.' },
-        { status: 400 }
-      );
+    if (!q) return NextResponse.json({ results: [] });
+
+    if (isLocal()) {
+      // Local environment: pretend the user's query is a valid single result
+      return NextResponse.json({
+        results: [
+          {
+            roadAddr: q,
+            jibunAddr: q,
+            zipNo: '',
+            bdNm: '',
+            admCd: '',
+            rnMgtSn: '',
+            udrtYn: 'N',
+            buldMnnm: '',
+            buldSlno: '',
+            detBdNmList: '',
+          },
+        ],
+      });
     }
 
-    // 행정안전부 API 호출
-    const params = new URLSearchParams({
-      confmKey: JUSO_API_KEY,
-      currentPage: '1',
-      countPerPage: '20',
-      keyword: query.trim(),
-      resultType: 'json',
-    });
+    const key = process.env.JUSO_API_KEY;
+    if (!key) return NextResponse.json({ error: 'MISSING_JUSO_API_KEY' }, { status: 500 });
 
-    const response = await fetch(`${JUSO_API_URL}?${params}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const api = new URL('https://www.juso.go.kr/addrlink/addrLinkApi.do');
+    api.searchParams.set('confmKey', key);
+    api.searchParams.set('currentPage', '1');
+    api.searchParams.set('countPerPage', size);
+    api.searchParams.set('keyword', q);
+    api.searchParams.set('resultType', 'json');
 
-    if (!response.ok) {
-      throw new Error(`Juso API returned ${response.status}`);
+    const res = await fetch(api.toString());
+    if (!res.ok) {
+      const text = await res.text();
+      return NextResponse.json({ error: 'JUSO_FAILED', details: text }, { status: 502 });
     }
-
-    const data = await response.json();
-
-    // API 응답 형식 확인
-    if (!data.results || !data.results.common) {
-      throw new Error('Invalid API response format');
-    }
-
-    // 오류 코드 체크
-    const errorCode = data.results.common.errorCode;
-    if (errorCode !== '0') {
-      const errorMessage = data.results.common.errorMessage || 'Unknown error';
-      throw new Error(`Juso API error: ${errorCode} - ${errorMessage}`);
-    }
-
-    // 검색 결과 반환
-    const results = data.results.juso || [];
-
-    return NextResponse.json({
-      results: results,
-      count: results.length,
-      totalCount: parseInt(data.results.common.totalCount || '0', 10),
-    });
+    const data = await res.json();
+    const list = data?.results?.juso || [];
+    const results = list.map((j: any) => ({
+      roadAddr: j.roadAddr,
+      jibunAddr: j.jibunAddr,
+      zipNo: j.zipNo,
+      bdNm: j.bdNm,
+      admCd: j.admCd,
+      rnMgtSn: j.rnMgtSn,
+      udrtYn: j.udrtYn,
+      buldMnnm: j.buldMnnm,
+      buldSlno: j.buldSlno,
+      detBdNmList: j.detBdNmList,
+    }));
+    return NextResponse.json({ results });
   } catch (error) {
-    console.error('Address search error:', error);
-
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : '주소 검색 중 오류가 발생했습니다.',
-        results: [],
-        count: 0,
-      },
+      { error: 'SERVER_ERROR', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
 }
 
-/**
- * POST /api/address/search
- *
- * @param request - Next.js 요청 (JSON body: { query: string })
- * @returns 주소 검색 결과
- */
-export async function POST(request: NextRequest) {
-  try {
-    const { query } = await request.json();
-
-    // 검색어 검증
-    if (!query || query.trim().length < 2) {
-      return NextResponse.json(
-        { error: '검색어는 최소 2자 이상이어야 합니다.' },
-        { status: 400 }
-      );
-    }
-
-    // 행정안전부 API 호출
-    const params = new URLSearchParams({
-      confmKey: JUSO_API_KEY,
-      currentPage: '1',
-      countPerPage: '20',
-      keyword: query.trim(),
-      resultType: 'json',
-    });
-
-    const response = await fetch(`${JUSO_API_URL}?${params}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Juso API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    // API 응답 형식 확인
-    if (!data.results || !data.results.common) {
-      throw new Error('Invalid API response format');
-    }
-
-    // 오류 코드 체크
-    const errorCode = data.results.common.errorCode;
-    if (errorCode !== '0') {
-      const errorMessage = data.results.common.errorMessage || 'Unknown error';
-      throw new Error(`Juso API error: ${errorCode} - ${errorMessage}`);
-    }
-
-    // 검색 결과 반환
-    const results = data.results.juso || [];
-
-    return NextResponse.json({
-      results: results,
-      count: results.length,
-      totalCount: parseInt(data.results.common.totalCount || '0', 10),
-    });
-  } catch (error) {
-    console.error('Address search error:', error);
-
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : '주소 검색 중 오류가 발생했습니다.',
-        results: [],
-        count: 0,
-      },
-      { status: 500 }
-    );
-  }
-}

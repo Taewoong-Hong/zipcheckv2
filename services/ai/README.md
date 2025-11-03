@@ -1,59 +1,57 @@
-# ZipCheck AI Service
+﻿# ZipCheck AI Service
 
-부동산 계약서 리스크 분석 AI 서비스 백엔드
+遺?숈궛 怨꾩빟??由ъ뒪??遺꾩꽍 AI ?쒕퉬??諛깆뿏??
+## ?? 鍮좊Ⅸ ?쒖옉
 
-## 🚀 빠른 시작
-
-### 1. 환경 설정
+### 1. ?섍꼍 ?ㅼ젙
 
 ```bash
-# Python 가상환경 생성 (Python 3.11+ 권장)
+# Python 媛?곹솚寃??앹꽦 (Python 3.11+ 沅뚯옣)
 python -m venv venv
 
-# 가상환경 활성화
-# Windows
+# 媛?곹솚寃??쒖꽦??# Windows
 venv\Scripts\activate
 # Linux/Mac
 source venv/bin/activate
 
-# 의존성 설치
+# ?섏〈???ㅼ튂
 pip install -r requirements.txt
 ```
 
-### 2. 환경 변수 설정
+### 2. ?섍꼍 蹂???ㅼ젙
 
 ```bash
-# .env.example을 복사하여 .env 생성
+# .env.example??蹂듭궗?섏뿬 .env ?앹꽦
 cp .env.example .env
 
-# .env 파일을 편집하여 필수 값 입력
+# .env ?뚯씪???몄쭛?섏뿬 ?꾩닔 媛??낅젰
 # - DATABASE_URL
 # - OPENAI_API_KEY
 # - ANTHROPIC_API_KEY
 ```
 
-### 3. 서버 실행
+### 3. ?쒕쾭 ?ㅽ뻾
 
 ```bash
-# 개발 모드 (자동 재시작)
+# 媛쒕컻 紐⑤뱶 (?먮룞 ?ъ떆??
 uvicorn app:app --reload --port 8000
 
-# 또는
+# ?먮뒗
 python app.py
 ```
 
-서버가 시작되면 다음 URL에서 확인:
+?쒕쾭媛 ?쒖옉?섎㈃ ?ㅼ쓬 URL?먯꽌 ?뺤씤:
 - API: http://localhost:8000
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
-### 4. 헬스체크
+### 4. ?ъ뒪泥댄겕
 
 ```bash
 curl http://localhost:8000/healthz
 ```
 
-응답:
+?묐떟:
 ```json
 {
   "ok": true,
@@ -62,163 +60,148 @@ curl http://localhost:8000/healthz
 }
 ```
 
-## 📁 프로젝트 구조
+## ?뱚 ?꾨줈?앺듃 援ъ“
 
 ```
 services/ai/
-├─ app.py                    # FastAPI 애플리케이션 엔트리포인트
-├─ core/                     # 핵심 모듈
-│  ├─ settings.py           # 환경 변수 및 설정
-│  ├─ llm_factory.py        # LLM 인스턴스 생성
-│  ├─ embeddings.py         # 임베딩 설정
-│  ├─ retriever.py          # 벡터 검색
-│  ├─ chains.py             # LangChain LCEL 체인
-│  └─ dual_provider.py      # 듀얼 프로바이더 폴백
-├─ ingest/                   # PDF 처리 및 인덱싱
-│  ├─ pdf_parse.py          # PDF 파싱
-│  └─ upsert_vector.py      # 벡터 DB 업서트
-├─ api/                      # API 스펙
-│  └─ openapi.yaml          # OpenAPI 3.1 스펙
-├─ requirements.txt          # Python 의존성
-├─ Dockerfile               # 컨테이너 이미지
-├─ .env.example             # 환경 변수 템플릿
-└─ README.md                # 이 파일
+?쒋? app.py                    # FastAPI ?좏뵆由ъ??댁뀡 ?뷀듃由ы룷?명듃
+?쒋? core/                     # ?듭떖 紐⑤뱢
+?? ?쒋? settings.py           # ?섍꼍 蹂??諛??ㅼ젙
+?? ?쒋? llm_factory.py        # LLM ?몄뒪?댁뒪 ?앹꽦
+?? ?쒋? embeddings.py         # ?꾨쿋???ㅼ젙
+?? ?쒋? retriever.py          # 踰≫꽣 寃???? ?쒋? chains.py             # LangChain LCEL 泥댁씤
+?? ?붴? dual_provider.py      # ????꾨줈諛붿씠???대갚
+?쒋? ingest/                   # PDF 泥섎━ 諛??몃뜳???? ?쒋? pdf_parse.py          # PDF ?뚯떛
+?? ?붴? upsert_vector.py      # 踰≫꽣 DB ?낆꽌???쒋? api/                      # API ?ㅽ럺
+?? ?붴? openapi.yaml          # OpenAPI 3.1 ?ㅽ럺
+?쒋? requirements.txt          # Python ?섏〈???쒋? Dockerfile               # 而⑦뀒?대꼫 ?대?吏
+?쒋? .env.example             # ?섍꼍 蹂???쒗뵆由??붴? README.md                # ???뚯씪
 ```
 
-## 🔑 주요 엔드포인트
-
+## ?뵎 二쇱슂 ?붾뱶?ъ씤??
 ### POST /ingest
-계약서 PDF 업로드 및 벡터 DB 저장
-
+怨꾩빟??PDF ?낅줈??諛?踰≫꽣 DB ???
 ```bash
 curl -X POST http://localhost:8000/ingest \
   -F "file=@contract.pdf" \
   -F "contract_id=contract_001" \
-  -F "addr=서울시 강남구 테헤란로 123"
+  -F "addr=?쒖슱??媛뺣궓援??뚰뿤?濡?123"
 ```
 
 ### POST /analyze
-계약서 분석 요청
+怨꾩빟??遺꾩꽍 ?붿껌
 
 ```bash
 curl -X POST http://localhost:8000/analyze \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "계약금 관련 리스크를 분석해주세요",
+    "question": "怨꾩빟湲?愿??由ъ뒪?щ? 遺꾩꽍?댁＜?몄슂",
     "mode": "single",
     "provider": "openai"
   }'
 ```
 
-## 🐳 Docker 실행
+## ?맫 Docker ?ㅽ뻾
 
-### 이미지 빌드
+### ?대?吏 鍮뚮뱶
 ```bash
 docker build -t zipcheck-ai:latest .
 ```
 
-### 컨테이너 실행
+### 而⑦뀒?대꼫 ?ㅽ뻾
 ```bash
 docker run -p 8000:8000 \
   --env-file .env \
   zipcheck-ai:latest
 ```
 
-## 🧪 테스트
-
-### 필수 환경 변수 검증
-```bash
-# 서버 시작 시 필수 키 누락되면 실패
-# DATABASE_URL, OPENAI_API_KEY, ANTHROPIC_API_KEY 필수
+## ?㎦ ?뚯뒪??
+### ?꾩닔 ?섍꼍 蹂??寃利?```bash
+# ?쒕쾭 ?쒖옉 ???꾩닔 ???꾨씫?섎㈃ ?ㅽ뙣
+# DATABASE_URL, OPENAI_API_KEY, ANTHROPIC_API_KEY ?꾩닔
 ```
 
-### OpenAPI 스펙 검증 (schemathesis)
+### OpenAPI ?ㅽ럺 寃利?(schemathesis)
 ```bash
 pip install schemathesis
 schemathesis run api/openapi.yaml --base-url http://localhost:8000
 ```
 
-## 📊 로그 및 모니터링
+## ?뱤 濡쒓렇 諛?紐⑤땲?곕쭅
 
-### 로그 레벨 설정
-`.env` 파일에서 `LOG_LEVEL` 설정:
-- DEBUG: 상세 디버깅 정보
-- INFO: 일반 정보 (기본값)
-- WARNING: 경고 메시지
-- ERROR: 에러만 출력
+### 濡쒓렇 ?덈꺼 ?ㅼ젙
+`.env` ?뚯씪?먯꽌 `LOG_LEVEL` ?ㅼ젙:
+- DEBUG: ?곸꽭 ?붾쾭源??뺣낫
+- INFO: ?쇰컲 ?뺣낫 (湲곕낯媛?
+- WARNING: 寃쎄퀬 硫붿떆吏
+- ERROR: ?먮윭留?異쒕젰
 
-### Sentry 연동
-`.env`에 `SENTRY_DSN` 설정 시 자동으로 에러 트래킹 활성화
-
-### Langfuse 연동
-LLM 호출 추적을 위해 다음 환경 변수 설정:
+### Sentry ?곕룞
+`.env`??`SENTRY_DSN` ?ㅼ젙 ???먮룞?쇰줈 ?먮윭 ?몃옒???쒖꽦??
+### Langfuse ?곕룞
+LLM ?몄텧 異붿쟻???꾪빐 ?ㅼ쓬 ?섍꼍 蹂???ㅼ젙:
 - LANGFUSE_PUBLIC_KEY
 - LANGFUSE_SECRET_KEY
 - LANGFUSE_HOST
 
-## 🔒 보안 고려사항
+## ?뵏 蹂댁븞 怨좊젮?ы빆
 
-1. **환경 변수 보호**: `.env` 파일은 절대 커밋하지 않음
-2. **CORS 설정**: `AI_ALLOWED_ORIGINS`로 허용된 출처만 접근
-3. **파일 크기 제한**: PDF 최대 50MB
-4. **파일 타입 검증**: PDF만 허용
-5. **RLS (Row Level Security)**: Supabase에서 사용자별 데이터 격리
+1. **?섍꼍 蹂??蹂댄샇**: `.env` ?뚯씪? ?덈? 而ㅻ컠?섏? ?딆쓬
+2. **CORS ?ㅼ젙**: `AI_ALLOWED_ORIGINS`濡??덉슜??異쒖쿂留??묎렐
+3. **?뚯씪 ?ш린 ?쒗븳**: PDF 理쒕? 50MB
+4. **?뚯씪 ???寃利?*: PDF留??덉슜
+5. **RLS (Row Level Security)**: Supabase?먯꽌 ?ъ슜?먮퀎 ?곗씠??寃⑸━
 
-## 📦 의존성 관리
+## ?벀 ?섏〈??愿由?
+### 二쇱슂 ?⑦궎吏
+- **FastAPI**: ???꾨젅?꾩썙??- **LangChain**: RAG ?뚯씠?꾨씪??- **OpenAI/Anthropic**: LLM ?쒓났??- **pgvector**: 踰≫꽣 寃??- **unstructured**: PDF ?뚯떛
 
-### 주요 패키지
-- **FastAPI**: 웹 프레임워크
-- **LangChain**: RAG 파이프라인
-- **OpenAI/Anthropic**: LLM 제공자
-- **pgvector**: 벡터 검색
-- **unstructured**: PDF 파싱
-
-### 버전 업데이트
+### 踰꾩쟾 ?낅뜲?댄듃
 ```bash
-# 의존성 업데이트
+# ?섏〈???낅뜲?댄듃
 pip install --upgrade -r requirements.txt
 
-# requirements.txt 갱신
+# requirements.txt 媛깆떊
 pip freeze > requirements.txt
 ```
 
-## 🐛 트러블슈팅
+## ?맀 ?몃윭釉붿뒋??
+### ?쒕쾭 ?쒖옉 ?ㅽ뙣
+- `.env` ?뚯씪???꾩닔 ?섍꼍 蹂???뺤씤
+- DATABASE_URL???щ컮瑜?PostgreSQL ?곌껐 臾몄옄?댁씤吏 ?뺤씤
+- API ?ㅺ? ?좏슚?쒖? ?뺤씤
 
-### 서버 시작 실패
-- `.env` 파일의 필수 환경 변수 확인
-- DATABASE_URL이 올바른 PostgreSQL 연결 문자열인지 확인
-- API 키가 유효한지 확인
+### PDF ?뚯떛 ?ㅽ뙣
+- poppler-utils ?ㅼ튂 ?뺤씤 (Linux/Mac)
+- tesseract-ocr ?ㅼ튂 ?뺤씤 (OCR ?꾩슂 ??
+- PDF ?뚯씪???먯긽?섏? ?딆븯?붿? ?뺤씤
 
-### PDF 파싱 실패
-- poppler-utils 설치 확인 (Linux/Mac)
-- tesseract-ocr 설치 확인 (OCR 필요 시)
-- PDF 파일이 손상되지 않았는지 확인
-
-### 벡터 DB 연결 실패
-- Supabase에서 pgvector 확장 활성화 확인:
+### 踰≫꽣 DB ?곌껐 ?ㅽ뙣
+- Supabase?먯꽌 pgvector ?뺤옣 ?쒖꽦???뺤씤:
   ```sql
   CREATE EXTENSION IF NOT EXISTS vector;
   ```
-- DATABASE_URL 형식 확인
+- DATABASE_URL ?뺤떇 ?뺤씤
 
-## 📚 참고 문서
+## ?뱴 李멸퀬 臾몄꽌
 
-- [FastAPI 문서](https://fastapi.tiangolo.com/)
-- [LangChain 문서](https://python.langchain.com/)
-- [Supabase 문서](https://supabase.com/docs)
-- [OpenAPI 스펙](./api/openapi.yaml)
+- [FastAPI 臾몄꽌](https://fastapi.tiangolo.com/)
+- [LangChain 臾몄꽌](https://python.langchain.com/)
+- [Supabase 臾몄꽌](https://supabase.com/docs)
+- [OpenAPI ?ㅽ럺](./api/openapi.yaml)
 
-## 📝 개발 로드맵
+## ?뱷 媛쒕컻 濡쒕뱶留?
+- ??**P0**: 遺???ㅽ럺 怨좎젙 (?꾨즺)
+- ?슙 **P1**: ?곗씠??蹂댁븞 ?좊?
+- ?뵜 **P2**: ?몃뜳??& ?⑥씪紐⑤뜽 遺꾩꽍
+- ?뵜 **P3**: ???LLM(?대갚/而⑥꽱?쒖뒪) & ?덉젙??
+## ?쩃 湲곗뿬
 
-- ✅ **P0**: 부팅/스펙 고정 (완료)
-- 🚧 **P1**: 데이터/보안 토대
-- 🔜 **P2**: 인덱싱 & 단일모델 분석
-- 🔜 **P3**: 듀얼 LLM(폴백/컨센서스) & 안정화
+?댁뒋 諛?PR? ?섏쁺?⑸땲??
 
-## 🤝 기여
-
-이슈 및 PR은 환영합니다!
-
-## 📄 라이선스
+## ?뱞 ?쇱씠?좎뒪
 
 MIT License
+
+
+

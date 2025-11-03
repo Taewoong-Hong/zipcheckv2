@@ -221,8 +221,8 @@ apps/web/lib/api/client.ts → 'http://localhost:8000'
 **After (개선)**:
 ```env
 # apps/web/.env.local (단일 설정)
-AI_API_URL=https://zipcheck-ai-871793445649.asia-northeast3.run.app
-NEXT_PUBLIC_AI_API_URL=https://zipcheck-ai-871793445649.asia-northeast3.run.app
+AI_API_URL=https://zipcheck-ai-ov5n6pt46a-du.a.run.app
+NEXT_PUBLIC_AI_API_URL=https://zipcheck-ai-ov5n6pt46a-du.a.run.app
 
 # 로컬 개발 시 변경
 # AI_API_URL=http://localhost:8000

@@ -809,7 +809,8 @@ function DataSection() {
 
 // ==================== 매물 크롤링 섹션 ====================
 function CrawlerSection() {
-  const API_BASE_URL = process.env.NEXT_PUBLIC_AI_API_URL || 'https://zipcheck-ai-gsiismzchtgdklvdvggu.asia-northeast3.run.app';
+  // 환경변수 우선, 누락 시 현재 Cloud Run 서비스 URL로 폴백
+  const API_BASE_URL = process.env.NEXT_PUBLIC_AI_API_URL || 'https://zipcheck-ai-ov5n6pt46a-du.a.run.app';
 
   // 전국 지역 데이터 (196개 지역)
   const KOREA_REGIONS = [

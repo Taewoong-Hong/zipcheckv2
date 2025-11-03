@@ -12,6 +12,7 @@
 
 import type { ChatState, ContractType, AddressInfo } from '@/types/analysis';
 import { getStatePrompt } from './stateMachine';
+import { getBrowserSupabase } from '@/lib/supabaseBrowser';
 
 /**
  * 분석 플로우 컨텍스트
@@ -110,9 +111,15 @@ export function getStateResponseMessage(state: ChatState, context?: AnalysisCont
  */
 export async function createCase(address: AddressInfo): Promise<string> {
   try {
+    const supabase = getBrowserSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('NO_SESSION');
     const response = await fetch('/api/case', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
       body: JSON.stringify({
         address_road: address.road,
         address_lot: address.lot,
@@ -140,9 +147,15 @@ export async function updateCase(
   updates: Partial<AnalysisContext>
 ): Promise<void> {
   try {
+    const supabase = getBrowserSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('NO_SESSION');
     const response = await fetch(`/api/case/${caseId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
       body: JSON.stringify(updates),
     });
 
@@ -163,10 +176,16 @@ export async function uploadRegistry(caseId: string, file: File): Promise<void> 
     const formData = new FormData();
     formData.append('file', file);
     formData.append('caseId', caseId);
+    const supabase = getBrowserSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('NO_SESSION');
 
     const response = await fetch('/api/registry/upload', {
       method: 'POST',
       body: formData,
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+      },
     });
 
     if (!response.ok) {
@@ -184,8 +203,14 @@ export async function uploadRegistry(caseId: string, file: File): Promise<void> 
  */
 export async function runAnalysis(caseId: string): Promise<void> {
   try {
+    const supabase = getBrowserSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('NO_SESSION');
     const response = await fetch(`/api/analysis/${caseId}`, {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+      }
     });
 
     if (!response.ok) {
@@ -206,7 +231,11 @@ export async function getReport(caseId: string): Promise<{
   address: string;
 }> {
   try {
-    const response = await fetch(`/api/report/${caseId}`);
+    const supabase = getBrowserSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string,string> = {};
+    if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+    const response = await fetch(`/api/report/${caseId}`, { headers });
 
     if (!response.ok) {
       throw new Error(`Failed to get report: ${response.status}`);

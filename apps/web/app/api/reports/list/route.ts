@@ -33,6 +33,10 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
+      // 빈 사용자(리포트 없음)일 수 있으니 404/204는 빈 리스트로 처리
+      if (response.status === 404 || response.status === 204) {
+        return NextResponse.json({ reports: [], total: 0 });
+      }
       const text = await response.text();
       return NextResponse.json(
         { error: '리포트 조회 실패', status: response.status, details: text },

@@ -4,6 +4,7 @@
 케이스 상태 전환과 분석 파이프라인을 조율합니다.
 """
 import logging
+import asyncio
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -107,7 +108,8 @@ async def simple_chat_analysis(
     logger.info(f"간단 채팅 분석: user_id={user['sub']}, question={request.question[:50]}...")
 
     try:
-        # LLM 듀얼 시스템으로 답변 생성
+        # 규칙 기반 게이트 이후의 간단 Q&A는 ChatGPT(OpenAI) 단일 모델만 사용
+        # (리포트 생성/검토 단계에서만 Claude 개입)
         context = """
 부동산 계약 리스크 분석 전문 상담입니다.
 
@@ -115,16 +117,23 @@ async def simple_chat_analysis(
 구체적인 계약서나 등기부 분석이 필요한 경우, 정식 케이스 분석을 권장합니다.
 """
 
-        result = await dual_model_analyze(
-            question=request.question,
-            context=context
+        # single_model_analyze는 동기 함수이므로 실행기에서 실행
+        from core.llm_router import single_model_analyze
+        loop = asyncio.get_running_loop()
+        single = await loop.run_in_executor(
+            None,
+            lambda: single_model_analyze(
+                question=request.question,
+                context=context,
+                provider="openai",
+            ),
         )
 
-        logger.info(f"답변 생성 완료: confidence={result.confidence}")
+        logger.info("간단 답변 생성 완료 (provider=openai)")
 
         return SimpleChatResponse(
-            answer=result.final_answer,
-            confidence=result.confidence
+            answer=single.content,
+            confidence=None,
         )
 
     except Exception as e:
@@ -149,7 +158,7 @@ async def start_analysis(
     case_response = supabase.table("v2_cases") \
         .select("*") \
         .eq("id", request.case_id) \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .execute()
 
     if not case_response.data:
@@ -208,7 +217,7 @@ async def get_analysis_status(
     case_response = supabase.table("v2_cases") \
         .select("*") \
         .eq("id", case_id) \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .execute()
 
     if not case_response.data:
@@ -261,7 +270,7 @@ async def transition_state(
             "updated_at": datetime.utcnow().isoformat(),
         }) \
         .eq("id", case_id) \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .execute()
 
     if not update_response.data:
@@ -292,7 +301,7 @@ async def get_analysis_result(
     case_response = supabase.table("v2_cases") \
         .select("*") \
         .eq("id", case_id) \
-        .eq("user_id", user["id"]) \
+        .eq("user_id", user["sub"]) \
         .execute()
 
     if not case_response.data:
@@ -353,7 +362,7 @@ async def crosscheck_draft(
 ### 최종 권장사항
 ...
 """
-    llm = ChatAnthropic(model="claude-3-5-sonnet-20241022", temperature=0.1, max_tokens=4096)
+    llm = ChatAnthropic(model="claude-3-5-sonnet-latest", temperature=0.1, max_tokens=4096)
     msgs = [
         SystemMessage(content=judge_prompt.format(draft=request.draft)),
         HumanMessage(content="검증을 수행하세요."),

@@ -50,7 +50,7 @@ def get_openai_client(model: str = "gpt-4o-mini", temperature: float = 0.2) -> C
     )
 
 
-def get_claude_client(model: str = "claude-3-5-sonnet-20240620", temperature: float = 0.1) -> ChatAnthropic:
+def get_claude_client(model: str = "claude-3-5-sonnet-latest", temperature: float = 0.1) -> ChatAnthropic:
     """
     Claude 클라이언트 생성
 
@@ -117,7 +117,7 @@ def dual_model_analyze(
     question: str,
     context: str,
     draft_model: str = "gpt-4o-mini",
-    judge_model: str = "claude-3-5-sonnet-20240620"
+    judge_model: str = "claude-3-5-sonnet-latest"
 ) -> DualAnalysisResult:
     """
     듀얼 시스템 분석
@@ -186,7 +186,20 @@ def dual_model_analyze(
         SystemMessage(content=judge_prompt.format(draft=draft.content)),
         HumanMessage(content=question),
     ]
-    judge_response = judge_llm.invoke(judge_messages)
+    try:
+        judge_response = judge_llm.invoke(judge_messages)
+    except Exception as e:
+        msg = str(e)
+        if "NotFound" in msg or "not_found_error" in msg or "model:" in msg:
+            fallback_model = "claude-3-5-haiku-latest"
+            logger.warning(
+                f"Judge model '{judge_model}' unavailable. Falling back to '{fallback_model}'."
+            )
+            judge_llm = ChatAnthropic(model=fallback_model, temperature=0.1, max_tokens=4096)
+            judge_response = judge_llm.invoke(judge_messages)
+            judge_model = fallback_model
+        else:
+            raise
     validation = LLMResponse(
         content=judge_response.content,
         model=judge_model,

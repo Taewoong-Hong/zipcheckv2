@@ -508,12 +508,16 @@ async def analyze_contract(
 
 # 개발 서버 실행 (uvicorn app:app --reload)
 if __name__ == "__main__":
+    import os
     import uvicorn
+
+    # Prefer PORT (Cloud Run/local), then AI_API_PORT, default to 8000 for local dev
+    port = int(os.getenv("PORT") or os.getenv("AI_API_PORT") or 8000)
 
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=True,
         log_level=settings.log_level.lower(),
     )

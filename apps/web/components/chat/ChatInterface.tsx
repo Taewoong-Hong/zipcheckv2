@@ -10,7 +10,6 @@ import { chatStorage } from "@/lib/chatStorage";
 import { simulateTestResponse } from "@/lib/testScenario";
 import { ChatLoadingIndicator } from "@/components/common/LoadingSpinner";
 import { StateMachine } from "@/lib/stateMachine";
-import { supabase } from "@/lib/supabase";
 import {
   isAddressInput,
   isAnalysisStartTrigger,
@@ -28,6 +27,7 @@ interface ChatInterfaceProps {
   isSidebarExpanded: boolean;
   onToggleSidebar: () => void;
   isLoggedIn?: boolean;
+  session?: any; // ✅ 세션 prop 추가
   onLoginRequired?: () => void;
 }
 
@@ -35,10 +35,12 @@ export default function ChatInterface({
   isSidebarExpanded,
   onToggleSidebar,
   isLoggedIn = true,
+  session, // ✅ 세션 prop 받기
   onLoginRequired
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false); // ✅ 중복 제출 방지용 상태 추가
   const [inputValue, setInputValue] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(() => {
     // Restore conversation ID from localStorage on mount
@@ -69,36 +71,44 @@ export default function ChatInterface({
   // Initialize conversation on first load (only if no existing conversationId)
   useEffect(() => {
     const initConversation = async () => {
-      if (!isLoggedIn || conversationId) return; // Skip if already have a conversation
+      // ✅ session prop을 직접 사용 (getSession() 호출 제거)
+      if (!session) {
+        console.log('[ChatInterface] Skipping conversation init: no session');
+        return;
+      }
+
+      if (conversationId) {
+        console.log('[ChatInterface] Skipping conversation init: already have conversationId:', conversationId);
+        return;
+      }
 
       try {
-        // Get Supabase session
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
+        console.log('[ChatInterface] Initializing new conversation with passed session...');
 
-        // Create new conversation (send auth for server to forward)
+        // ✅ 전달받은 session 직접 사용 (타이밍 이슈 해결)
         const response = await fetch('/api/chat/init', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
           },
-          // Body not required by backend; keep minimal to avoid double parsing issues
-          body: JSON.stringify({}),
+          body: JSON.stringify({ session: { access_token: session.access_token } }),
         });
 
         if (response.ok) {
           const data = await response.json();
           setConversationId(data.conversation_id);
-          console.log('New conversation created:', data.conversation_id);
+          console.log('[ChatInterface] ✅ New conversation created:', data.conversation_id);
+        } else {
+          console.error('[ChatInterface] Failed to create conversation:', response.status, await response.text());
         }
       } catch (error) {
-        console.error('Failed to initialize conversation:', error);
+        console.error('[ChatInterface] Failed to initialize conversation:', error);
       }
     };
 
     initConversation();
-  }, [isLoggedIn, conversationId]);
+  }, [session, conversationId]); // ✅ 의존성 배열 수정: isLoggedIn → session
 
   // Reset chat function for new conversation
   const resetChat = async () => {
@@ -117,26 +127,27 @@ export default function ChatInterface({
     chatStorage.createSession();
 
     // Create new conversation
-    if (isLoggedIn) {
+    // ✅ prop으로 받은 session 사용
+    if (isLoggedIn && session && session.access_token) {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          const response = await fetch('/api/chat/init', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
-            },
-            body: JSON.stringify({}),
-          });
+        const response = await fetch('/api/chat/init', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ session: { access_token: session.access_token } }),
+        });
 
-          if (response.ok) {
-            const data = await response.json();
-            setConversationId(data.conversation_id);
-          }
+        if (response.ok) {
+          const data = await response.json();
+          setConversationId(data.conversation_id);
+          console.log('[ChatInterface] ✅ New conversation created on reset:', data.conversation_id);
+        } else {
+          console.error('[ChatInterface] Failed to create new conversation on reset:', response.status);
         }
       } catch (error) {
-        console.error('Failed to create new conversation:', error);
+        console.error('[ChatInterface] Failed to create new conversation on reset:', error);
       }
     }
   };
@@ -164,6 +175,22 @@ export default function ChatInterface({
       const caseId = await createCase(addressInfo);
 
       setAnalysisContext({ caseId, address: addressInfo });
+
+      // Update conversation's property_address for gating logic
+      try {
+        if (conversationId && session?.access_token) {
+          await fetch(`/api/chat/conversation/${conversationId}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ property_address: addressInfo.road }),
+          });
+        }
+      } catch (e) {
+        console.warn('[ChatInterface] conversation address update failed:', e);
+      }
 
       // Transition to contract_type state
       stateMachine.transition('contract_type');
@@ -204,6 +231,17 @@ export default function ChatInterface({
     // Update case in database
     try {
       await updateCase(analysisContext.caseId, { contractType });
+      // Also reflect into conversation for gating
+      if (conversationId && session?.access_token) {
+        await fetch(`/api/chat/conversation/${conversationId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ contract_type: contractType }),
+        });
+      }
     } catch (error) {
       console.error('Failed to update contract type:', error);
     }
@@ -474,6 +512,12 @@ export default function ChatInterface({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
+    // ✅ 중복 제출 방지 (디바운싱)
+    if (isSubmitting) {
+      console.log('[ChatInterface] Already submitting, ignoring duplicate');
+      return;
+    }
+
     // 비로그인 상태일 때 로그인 유도
     if (!isLoggedIn) {
       onLoginRequired?.();
@@ -483,6 +527,9 @@ export default function ChatInterface({
     if (inputValue.trim() && !isLoading) {
       const content = inputValue.trim();
       setInputValue("");
+
+      // ✅ 제출 중 상태 설정 (500ms 동안 추가 제출 차단)
+      setIsSubmitting(true);
 
       // Add user message
       const userMessage: MessageType = {
@@ -494,6 +541,18 @@ export default function ChatInterface({
 
       setMessages(prev => [...prev, userMessage]);
       chatStorage.addMessage(userMessage); // Save to storage
+
+      // ✅ 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
+      const processingMessageId = `processing-${Date.now()}`;
+      const processingMessage: MessageType = {
+        id: processingMessageId,
+        role: 'assistant',
+        content: '메시지를 처리하고 있습니다...',
+        timestamp: new Date(),
+        isStreaming: true,
+      };
+      setMessages(prev => [...prev, processingMessage]);
+
       setIsLoading(true);
 
       // Check current state and detect analysis triggers
@@ -518,17 +577,23 @@ export default function ChatInterface({
         return;
       }
 
-      // Prepare AI message placeholder
+      // ✅ 처리 중 메시지를 실제 AI 응답으로 교체
       const aiMessageId = (Date.now() + 1).toString();
-      const aiMessage: MessageType = {
-        id: aiMessageId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        isStreaming: true,
-      };
 
-      setMessages(prev => [...prev, aiMessage]);
+      // 처리 중 메시지 제거하고 새로운 AI 메시지 추가
+      setMessages(prev => {
+        // processing-으로 시작하는 ID를 가진 메시지 제거
+        const filtered = prev.filter(msg => !msg.id.startsWith('processing-'));
+        // 새로운 AI 메시지 추가
+        const aiMessage: MessageType = {
+          id: aiMessageId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+          isStreaming: true,
+        };
+        return [...filtered, aiMessage];
+      });
 
       // Check if input is "test" - run simulation
       if (content.toLowerCase() === 'test') {
@@ -582,15 +647,39 @@ export default function ChatInterface({
       }
 
       try {
-        // Ensure conversation ID exists
-        if (!conversationId) {
-          throw new Error('대화 세션이 없습니다. 페이지를 새로고침해주세요.');
+        // ✅ prop으로 받은 session 사용 (getSession() 호출 제거)
+        if (!session || !session.access_token) {
+          throw new Error('로그인 세션이 만료되었습니다. 페이지를 새로고침해주세요.');
         }
 
-        // Get Supabase session
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          throw new Error('로그인 세션이 만료되었습니다.');
+        // Ensure conversation ID exists; if missing, try to auto-init once
+        let convId = conversationId;
+        if (!convId) {
+          console.log('[ChatInterface] No conversation ID, attempting auto-init...');
+          try {
+            const initRes = await fetch('/api/chat/init', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({ session: { access_token: session.access_token } }),
+            });
+            if (initRes.ok) {
+              const initData = await initRes.json();
+              convId = initData.conversation_id;
+              setConversationId(convId);
+              console.log('[ChatInterface] ✅ Auto-created conversation for submit:', convId);
+            } else {
+              console.error('[ChatInterface] Auto-init failed:', initRes.status);
+            }
+          } catch (e) {
+            console.error('[ChatInterface] Auto-init error:', e);
+          }
+        }
+
+        if (!convId) {
+          throw new Error('대화 세션을 생성할 수 없습니다. 페이지를 새로고침해주세요.');
         }
 
         // Create abort controller for cancellation
@@ -602,9 +691,11 @@ export default function ChatInterface({
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            conversation_id: conversationId,
+            conversation_id: convId,
             content,
             session,
+            // Include case_id when available for downstream processing
+            case_id: (analysisContext as any)?.caseId,
           }),
           signal: abortControllerRef.current.signal,
         });
@@ -688,6 +779,11 @@ export default function ChatInterface({
       } finally {
         setIsLoading(false);
         abortControllerRef.current = null;
+
+        // ✅ 500ms 후 제출 가능 상태로 변경 (디바운싱)
+        setTimeout(() => {
+          setIsSubmitting(false);
+        }, 500);
       }
     }
   };
@@ -703,16 +799,146 @@ export default function ChatInterface({
     setTimeout(() => handleSubmit(), 0);
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ✅ 파일 업로드 상태 추가
+  const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{name: string, size: number, id: string}>>([]);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      // TODO: Handle file upload
-      console.log("Files selected:", files);
+      await handleFileUpload(Array.from(files));
+    }
+  };
+
+  // ✅ 파일 업로드 처리 함수
+  const handleFileUpload = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    // 비로그인 상태일 때 로그인 유도
+    if (!isLoggedIn) {
+      onLoginRequired?.();
+      return;
+    }
+
+    setUploadingFiles(files);
+
+    // 파일 업로드 상태 메시지 표시
+    const uploadMessage: MessageType = {
+      id: `upload-${Date.now()}`,
+      role: 'system',
+      content: `파일 ${files.length}개를 업로드하고 있습니다...`,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, uploadMessage]);
+
+    try {
+      // 여기서 실제 파일 업로드 API 호출
+      // TODO: 실제 업로드 엔드포인트 구현 필요
+      const uploadedFileInfo = files.map(file => ({
+        name: file.name,
+        size: file.size,
+        id: `file-${Date.now()}-${Math.random()}`,
+      }));
+
+      // 업로드 완료 후 파일 목록 업데이트
+      setUploadedFiles(prev => [...prev, ...uploadedFileInfo]);
+      setUploadingFiles([]);
+
+      // 업로드 완료 메시지로 교체
+      setMessages(prev => prev.map(msg =>
+        msg.id === uploadMessage.id
+          ? {
+              ...msg,
+              content: `✅ 파일 ${files.length}개가 업로드되었습니다:\n${files.map(f => `• ${f.name} (${(f.size / 1024).toFixed(1)}KB)`).join('\n')}`,
+              role: 'system' as const,
+            }
+          : msg
+      ));
+
+      // 파일 정보를 채팅 컨텍스트에 추가
+      const fileContext = `업로드된 파일: ${files.map(f => f.name).join(', ')}`;
+      setInputValue(prev => prev ? `${prev}\n${fileContext}` : fileContext);
+
+    } catch (error) {
+      console.error('파일 업로드 실패:', error);
+      setUploadingFiles([]);
+
+      // 에러 메시지로 교체
+      setMessages(prev => prev.map(msg =>
+        msg.id === uploadMessage.id
+          ? {
+              ...msg,
+              content: '❌ 파일 업로드에 실패했습니다. 다시 시도해주세요.',
+              role: 'system' as const,
+              isError: true,
+            }
+          : msg
+      ));
+    }
+  };
+
+  // ✅ 드래그 앤 드롭 상태 추가
+  const [isDragging, setIsDragging] = useState(false);
+
+  // ✅ 드래그 앤 드롭 이벤트 핸들러
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.currentTarget === e.target) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      // PDF 및 문서 파일만 필터링
+      const validFiles = files.filter(file => {
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        return ['pdf', 'doc', 'docx', 'hwp', 'txt'].includes(ext || '');
+      });
+
+      if (validFiles.length > 0) {
+        await handleFileUpload(validFiles);
+      } else {
+        alert('지원되지 않는 파일 형식입니다. PDF, DOC, DOCX, HWP, TXT 파일만 업로드 가능합니다.');
+      }
     }
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className="flex flex-col h-full relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* ✅ 드래그 앤 드롭 오버레이 */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 bg-brand-primary/10 border-2 border-dashed border-brand-primary flex items-center justify-center">
+          <div className="bg-white rounded-xl p-8 shadow-lg">
+            <Upload className="w-16 h-16 text-brand-primary mx-auto mb-4" />
+            <p className="text-lg font-medium text-neutral-800">파일을 여기에 놓으세요</p>
+            <p className="text-sm text-neutral-600 mt-2">PDF, DOC, DOCX, HWP, TXT 파일 지원</p>
+          </div>
+        </div>
+      )}
       {messages.length === 0 ? (
         // Original Welcome Screen
         <div className="flex-1 flex items-center justify-center p-8 md:p-12">

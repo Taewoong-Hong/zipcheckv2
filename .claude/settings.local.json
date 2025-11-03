@@ -52,7 +52,9 @@
       "Bash(supabase functions deploy:*)",
       "Bash(gcloud logging read:*)",
       "Bash(gcloud secrets versions access:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(gcloud run revisions list:*)",
+      "Bash(del anon_temp.txt secret_temp.txt)"
     ],
     "deny": [],
     "ask": []

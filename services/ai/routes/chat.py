@@ -192,7 +192,7 @@ async def send_message(request: SendMessageRequest, user: dict = Depends(get_cur
             # 계약유형 판별
             content_lower = request.content.strip()
             detected_contract = None
-            for ct in ["전세", "전월세", "월세", "매매"]:
+            for ct in ["전세", "전월세", "월세", "반전세", "매매"]:
                 if ct in content_lower:
                     detected_contract = ct
                     break

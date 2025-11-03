@@ -110,7 +110,7 @@ def extract_text_from_image_with_claude(image: Image.Image) -> str:
 
     try:
         message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-3-5-sonnet-latest",
             max_tokens=4096,
             messages=[
                 {

@@ -2,6 +2,7 @@
  * Supabase client for ZipCheck v2
  *
  * This module provides a configured Supabase client for browser use.
+ * Uses singleton pattern to prevent multiple GoTrueClient instances.
  */
 
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
@@ -13,8 +14,37 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
+// Singleton instance
+let supabaseInstance: ReturnType<typeof createSupabaseClient> | null = null;
+
 /**
- * Supabase client instance
+ * Get singleton Supabase client instance
+ * Prevents multiple GoTrueClient instances warning
+ */
+function getSupabaseClient() {
+  if (supabaseInstance) return supabaseInstance;
+
+  supabaseInstance = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      // 통일된 storageKey 사용 (중복 인스턴스 방지)
+      storageKey: 'zipcheck-auth-token',
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    },
+  });
+
+  // 개발 환경 디버깅용
+  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+    (window as any)._supabase = supabaseInstance;
+  }
+
+  return supabaseInstance;
+}
+
+/**
+ * Supabase client instance (singleton)
  *
  * @example
  * ```ts
@@ -26,15 +56,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * });
  * ```
  */
-export const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    // 토큰 만료 시 자동으로 localStorage에서 제거
-    storageKey: 'sb-gsiismzchtgdklvdvggu-auth-token',
-  },
-});
+export const supabase = getSupabaseClient();
 
 /**
  * 토큰 갱신 및 인증 상태 변경 처리
@@ -59,7 +81,7 @@ if (typeof window !== 'undefined') {
       case 'SIGNED_OUT':
         console.log('🚪 사용자 로그아웃, localStorage 클리어');
         // localStorage에서 세션 데이터 클리어
-        localStorage.removeItem('sb-gsiismzchtgdklvdvggu-auth-token');
+        localStorage.removeItem('zipcheck-auth-token');
         break;
 
       case 'USER_UPDATED':

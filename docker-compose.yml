@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend (포트 8000 고정)
+  backend:
+    build:
+      context: ./services/ai
+      dockerfile: Dockerfile
+    container_name: zipcheck-backend
+    ports:
+      - "8000:8000"  # 로컬 포트 8000 고정
+    environment:
+      - PORT=8000
+      # 환경변수는 .env 파일에서 자동 로드
+    env_file:
+      - ./services/ai/.env
+    volumes:
+      - ./services/ai:/app
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    networks:
+      - zipcheck-network
+
+  # Next.js Frontend (포트 3000)
+  frontend:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: zipcheck-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_AI_API_URL=http://backend:8000
+      - AI_API_URL=http://backend:8000
+    env_file:
+      - ./.env.local
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    command: npm run dev
+    restart: unless-stopped
+    networks:
+      - zipcheck-network
+
+networks:
+  zipcheck-network:
+    driver: bridge

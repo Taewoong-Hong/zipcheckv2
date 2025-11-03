@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // Resolve access token: Authorization header -> Supabase session -> JSON body session
+    // Resolve access token: Authorization header -> Supabase session -> Cookie -> JSON body session
     let bearerToken: string | undefined;
     if (authHeader?.startsWith('Bearer ')) {
       bearerToken = authHeader.slice('Bearer '.length).trim();
@@ -58,6 +58,27 @@ export async function POST(request: NextRequest) {
         bearerToken = session.access_token;
         console.log('[chat/init] Using token from Supabase session');
       } else {
+        // Try well-known cookie names as fallback in dev/local
+        const cookieAccess = cookieStore.get('sb-access-token')?.value
+          || cookieStore.get('sb:token')?.value
+          || cookieStore.get('supabase-auth-token')?.value;
+        if (cookieAccess) {
+          try {
+            // Some cookies store JSON with access_token; handle both raw and JSON
+            if (cookieAccess.startsWith('{')) {
+              const parsed = JSON.parse(cookieAccess);
+              bearerToken = parsed?.access_token || parsed?.currentSession?.access_token;
+            } else {
+              bearerToken = cookieAccess;
+            }
+            if (bearerToken) {
+              console.log('[chat/init] Using token from cookie');
+            }
+          } catch (e) {
+            console.warn('[chat/init] Failed parsing token cookie:', e);
+          }
+        }
+
         try {
           const body = await request.json();
           const tokenFromBody: string | undefined = body?.session?.access_token;

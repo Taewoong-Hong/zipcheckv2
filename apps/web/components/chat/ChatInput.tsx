@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, KeyboardEvent } from "react";
+import React, { useRef, useState, useEffect, KeyboardEvent } from "react";
 import { Send, Upload, Paperclip, Search, Loader2, X } from "lucide-react";
 
 interface ChatInputProps {
@@ -16,19 +16,19 @@ export default function ChatInput({
 }: ChatInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [loadingSuggest, setLoadingSuggest] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const handleSubmit = () => {
     if (inputValue.trim() && !isLoading) {
       onSubmit(inputValue.trim(), attachedFiles.length > 0 ? attachedFiles : undefined);
       setInputValue("");
       setAttachedFiles([]);
-
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
     }
   };
 
@@ -59,6 +59,51 @@ export default function ChatInput({
     // Auto-resize textarea
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+  };
+
+  // Address autocomplete via JUSO proxy (skips on local automatically)
+  useEffect(() => {
+    const q = inputValue.trim();
+    if (q.length < 3) {
+      setSuggestions([]);
+      setShowSuggest(false);
+      return;
+    }
+    setLoadingSuggest(true);
+
+    // Debounce
+    const t = setTimeout(async () => {
+      try {
+        if (abortRef.current) abortRef.current.abort();
+        const ac = new AbortController();
+        abortRef.current = ac;
+        const res = await fetch(`/api/juso/search?query=${encodeURIComponent(q)}&size=5`, { signal: ac.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.skipped) {
+          setSuggestions([]);
+          setShowSuggest(false);
+        } else {
+          setSuggestions(Array.isArray(data.results) ? data.results : []);
+          setShowSuggest(true);
+        }
+      } catch (e) {
+        setSuggestions([]);
+        setShowSuggest(false);
+      } finally {
+        setLoadingSuggest(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [inputValue]);
+
+  const handlePickSuggestion = (item: any) => {
+    const addr = item?.roadAddr || item?.jibunAddr || '';
+    if (!addr) return;
+    setInputValue(addr);
+    setShowSuggest(false);
+    // Submit immediately with the picked address
+    setTimeout(() => handleSubmit(), 0);
   };
 
   const formatFileSize = (bytes: number) => {
@@ -101,7 +146,7 @@ export default function ChatInput({
 
       {/* Input Area */}
       <div className="p-4">
-        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden focus-within:border-brand-primary transition-colors">
+        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden focus-within:border-brand-primary transition-colors relative">
           <div className="flex items-center p-3 gap-2">
             <textarea
               ref={textareaRef}
@@ -160,7 +205,28 @@ export default function ChatInput({
               </button>
             </div>
           </div>
+          {/* Suggestions dropdown */}
+          {showSuggest && suggestions.length > 0 && (
+            <div className="absolute left-3 right-3 top-full mt-1 z-20 bg-white border border-neutral-200 rounded-xl shadow-sm max-h-64 overflow-auto">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => handlePickSuggestion(s)}
+                  className="w-full text-left px-3 py-2 hover:bg-neutral-100"
+                >
+                  <div className="text-sm text-neutral-800">{s.roadAddr || s.jibunAddr}</div>
+                  <div className="text-xs text-neutral-500">{s.zipNo} · {s.bdNm || ''}</div>
+                </button>
+              ))}
+              {loadingSuggest && (
+                <div className="px-3 py-2 text-xs text-neutral-500">검색 중...</div>
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Confirm modal removed: confirmation handled in-chat via AddressSearchSelector */}
 
         {/* Helper Text */}
         <div className="mt-2 flex items-center justify-between px-1">

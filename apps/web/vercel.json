@@ -8,7 +8,7 @@
   "rewrites": [
     {
       "source": "/api/ai/:path*",
-      "destination": "https://zipcheck-ai-ey5iqw5oaa-du.a.run.app/:path*"
+      "destination": "https://zipcheck-ai-ov5n6pt46a-du.a.run.app/:path*"
     }
   ]
 }

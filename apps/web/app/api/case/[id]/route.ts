@@ -1,32 +1,46 @@
 /**
- * 케이스 업데이트 API
+ * 케이스 업데이트/조회 API
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+
+function getBearer(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  return authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+}
+
+function createServerSupabase(bearer: string) {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      global: { headers: { Authorization: `Bearer ${bearer}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    }
+  );
+}
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = createClient();
+    const bearer = getBearer(request);
+    if (!bearer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // 인증 확인
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = createServerSupabase(bearer);
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await request.json();
     const { id } = await params;
 
-    // 케이스 업데이트
     const { data, error } = await supabase
       .from('v2_cases')
       .update(body)
       .eq('id', id)
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .select()
       .single();
 
@@ -50,22 +64,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = createClient();
+    const bearer = getBearer(request);
+    if (!bearer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // 인증 확인
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const supabase = createServerSupabase(bearer);
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
 
-    // 케이스 조회
     const { data, error } = await supabase
       .from('v2_cases')
       .select('*')
       .eq('id', id)
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .single();
 
     if (error) {
@@ -82,3 +94,4 @@ export async function GET(
     );
   }
 }
+
