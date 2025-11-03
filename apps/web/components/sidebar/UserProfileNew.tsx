@@ -29,13 +29,39 @@ export default function UserProfileNew({ isExpanded }: UserProfileNewProps) {
       setIsLoggedIn(!!session);
 
       if (session?.user) {
+        // Provider에 따른 프로필 정보 가져오기
+        const provider = session.user.app_metadata?.provider || 'email';
+        const metadata = session.user.user_metadata || {};
+
+        // Provider별 이름 추출 우선순위
+        let userName = "사용자";
+        if (provider === 'kakao') {
+          userName = metadata.name || metadata.full_name || session.user.email?.split('@')[0] || "사용자";
+        } else if (provider === 'naver') {
+          userName = metadata.name || metadata.full_name || session.user.email?.split('@')[0] || "사용자";
+        } else {
+          userName = metadata.name || metadata.full_name || session.user.email?.split('@')[0] || "사용자";
+        }
+
+        // Provider별 프로필 이미지 추출
+        let avatarUrl = null;
+        if (provider === 'kakao') {
+          avatarUrl = metadata.avatar_url || metadata.picture || null;
+        } else if (provider === 'naver') {
+          avatarUrl = metadata.avatar_url || metadata.picture || null;
+        } else {
+          avatarUrl = metadata.avatar_url || null;
+        }
+
         // 사용자 정보 업데이트
         setUser({
-          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || "사용자",
+          name: userName,
           email: session.user.email || "",
           plan: "무료", // TODO: 실제 플랜 정보 가져오기
-          image: session.user.user_metadata?.avatar_url || null,
+          image: avatarUrl,
         });
+
+        console.log('[UserProfile] Provider:', provider, 'Name:', userName, 'Avatar:', avatarUrl);
       }
     };
     checkAuth();
@@ -45,12 +71,38 @@ export default function UserProfileNew({ isExpanded }: UserProfileNewProps) {
       setIsLoggedIn(!!session);
 
       if (session?.user) {
+        // Provider에 따른 프로필 정보 가져오기
+        const provider = session.user.app_metadata?.provider || 'email';
+        const metadata = session.user.user_metadata || {};
+
+        // Provider별 이름 추출
+        let userName = "사용자";
+        if (provider === 'kakao') {
+          userName = metadata.name || metadata.full_name || session.user.email?.split('@')[0] || "사용자";
+        } else if (provider === 'naver') {
+          userName = metadata.name || metadata.full_name || session.user.email?.split('@')[0] || "사용자";
+        } else {
+          userName = metadata.name || metadata.full_name || session.user.email?.split('@')[0] || "사용자";
+        }
+
+        // Provider별 프로필 이미지 추출
+        let avatarUrl = null;
+        if (provider === 'kakao') {
+          avatarUrl = metadata.avatar_url || metadata.picture || null;
+        } else if (provider === 'naver') {
+          avatarUrl = metadata.avatar_url || metadata.picture || null;
+        } else {
+          avatarUrl = metadata.avatar_url || null;
+        }
+
         setUser({
-          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || "사용자",
+          name: userName,
           email: session.user.email || "",
           plan: "무료",
-          image: session.user.user_metadata?.avatar_url || null,
+          image: avatarUrl,
         });
+
+        console.log('[UserProfile] Auth changed - Provider:', provider, 'Name:', userName);
       } else {
         // 로그아웃 시 초기화
         setUser({

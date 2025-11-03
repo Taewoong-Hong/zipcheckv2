@@ -24,14 +24,27 @@ let supabaseInstance: ReturnType<typeof createSupabaseClient> | null = null;
 function getSupabaseClient() {
   if (supabaseInstance) return supabaseInstance;
 
+  // localStorage 접근 가능 여부 체크
+  let storage: Storage | undefined;
+  if (typeof window !== 'undefined') {
+    try {
+      // localStorage 접근 테스트
+      window.localStorage.setItem('__test__', '1');
+      window.localStorage.removeItem('__test__');
+      storage = window.localStorage;
+    } catch (e) {
+      console.warn('[Supabase] localStorage 접근 불가, 메모리 스토리지 사용');
+      // localStorage 접근 불가 시 메모리 기반 스토리지 사용
+      storage = undefined;
+    }
+  }
+
   supabaseInstance = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
     auth: {
-      persistSession: true,
+      persistSession: storage !== undefined, // localStorage 없으면 세션 유지 안 함
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      // 통일된 storageKey 사용 (중복 인스턴스 방지)
-      storageKey: 'zipcheck-auth-token',
-      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+      storage: storage,
     },
   });
 
@@ -80,8 +93,7 @@ if (typeof window !== 'undefined') {
 
       case 'SIGNED_OUT':
         console.log('🚪 사용자 로그아웃, localStorage 클리어');
-        // localStorage에서 세션 데이터 클리어
-        localStorage.removeItem('zipcheck-auth-token');
+        // localStorage에서 세션 데이터 클리어 (Supabase가 자동으로 처리)
         break;
 
       case 'USER_UPDATED':

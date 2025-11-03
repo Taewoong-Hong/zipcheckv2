@@ -45,7 +45,12 @@ export default function ChatInterface({
   const [conversationId, setConversationId] = useState<string | null>(() => {
     // Restore conversation ID from localStorage on mount
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('chat_conversation_id');
+      try {
+        return localStorage.getItem('chat_conversation_id');
+      } catch (e) {
+        console.warn('[ChatInterface] localStorage access denied');
+        return null;
+      }
     }
     return null;
   });
@@ -404,6 +409,18 @@ export default function ChatInterface({
       };
       setMessages(prev => [...prev, aiMessage]);
       chatStorage.addMessage(aiMessage);
+
+      // Show the upload component again to allow retry
+      const retryMessage: MessageType = {
+        id: (Date.now() + 2).toString(),
+        role: 'assistant',
+        content: 'PDF를 다시 업로드해 주세요.',
+        timestamp: new Date(),
+        componentType: 'registry_choice',
+        componentData: { userCredits: analysisContext.userCredits ?? 0, registryCost: 10 },
+      };
+      setMessages(prev => [...prev, retryMessage]);
+      chatStorage.addMessage(retryMessage);
     } finally {
       setIsLoading(false);
     }
@@ -654,6 +671,11 @@ export default function ChatInterface({
 
         // Ensure conversation ID exists; if missing, try to auto-init once
         let convId = conversationId;
+        // If this is a fresh UI session (no prior messages), force a new conversation
+        // to avoid reusing an old server conversation that may already have address/contract_type
+        if (!messages || messages.length === 0) {
+          convId = undefined as any;
+        }
         if (!convId) {
           console.log('[ChatInterface] No conversation ID, attempting auto-init...');
           try {
