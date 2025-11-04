@@ -581,25 +581,55 @@ async def parse_registry_pdf(pdf_path: str) -> RegistryDocument:
     1. 텍스트 PDF → 정규식 파서 (LLM 없음, 비용 0, hallucination 없음)
     2. 이미지 PDF → Gemini Vision OCR → 정규식 파서
     """
-    logger.info(f"등기부 파싱 시작: {pdf_path}")
+    logger.info(f"📄 [PDF 파싱 시작] 파일: {pdf_path}")
 
-    # Step 1: PDF 타입 감지
-    is_text_pdf, raw_text = is_text_extractable_pdf(pdf_path, min_chars=500)
+    try:
+        # Step 1: PDF 타입 감지
+        logger.info("🔍 [Step 1/3] PDF 타입 감지 중...")
+        is_text_pdf, raw_text = is_text_extractable_pdf(pdf_path, min_chars=500)
 
-    # Step 2: 이미지 PDF면 Gemini Vision OCR
-    if not is_text_pdf:
-        logger.info("이미지 PDF 감지 → Gemini Vision OCR 시작")
-        raw_text = await ocr_with_gemini_vision(pdf_path)
+        logger.info(f"✅ [PDF 타입] {'텍스트 PDF' if is_text_pdf else '이미지 PDF'} (추출된 텍스트: {len(raw_text)}자)")
 
-        if not raw_text or len(raw_text) < 100:
-            logger.error("OCR 실패 또는 텍스트 없음")
-            return RegistryDocument(raw_text=raw_text)
+        # Step 2: 이미지 PDF면 Gemini Vision OCR
+        if not is_text_pdf:
+            logger.info("🖼️ [Step 2/3] 이미지 PDF 감지 → Gemini Vision OCR 시작")
+            raw_text = await ocr_with_gemini_vision(pdf_path)
 
-    # Step 3: 정규식 기반 파싱 (LLM 없음!)
-    registry = parse_with_regex(raw_text)
+            logger.info(f"✅ [OCR 완료] 추출된 텍스트: {len(raw_text)}자")
 
-    logger.info(f"파싱 완료: 주소={registry.property_address}, 근저당={len(registry.mortgages)}건")
-    return registry
+            if not raw_text or len(raw_text) < 100:
+                logger.error(f"❌ [OCR 실패] 텍스트가 너무 짧음: {len(raw_text)}자")
+                return RegistryDocument(raw_text=raw_text)
+        else:
+            logger.info("📝 [Step 2/3] 텍스트 PDF - OCR 생략")
+
+        # 원본 텍스트 미리보기 (디버깅용)
+        preview = raw_text[:500].replace('\n', ' ')
+        logger.info(f"📄 [텍스트 미리보기] {preview}...")
+
+        # Step 3: 정규식 기반 파싱 (LLM 없음!)
+        logger.info("🔍 [Step 3/3] 정규식 기반 파싱 시작...")
+        registry = parse_with_regex(raw_text)
+
+        # 파싱 결과 상세 로깅
+        logger.info(f"✅ [파싱 완료] 주소={registry.property_address or 'N/A'}")
+        logger.info(f"   └─ 소유자: {registry.owner.name if registry.owner else 'N/A'}")
+        logger.info(f"   └─ 근저당: {len(registry.mortgages)}건 (총 {sum(m.amount or 0 for m in registry.mortgages)}만원)")
+        logger.info(f"   └─ 압류/가압류: {len(registry.seizures)}건")
+        logger.info(f"   └─ 질권: {len(registry.pledges)}건")
+        logger.info(f"   └─ 전세권: {len(registry.lease_rights)}건")
+
+        # 파싱 신뢰도 체크 (핵심 필드 누락 경고)
+        if not registry.property_address:
+            logger.warning("⚠️ [파싱 경고] 주소 추출 실패")
+        if not registry.owner:
+            logger.warning("⚠️ [파싱 경고] 소유자 정보 추출 실패")
+
+        return registry
+
+    except Exception as e:
+        logger.error(f"❌ [파싱 실패] {str(e)}", exc_info=True)
+        raise
 
 
 async def parse_registry_from_url(file_url: str) -> RegistryDocument:
