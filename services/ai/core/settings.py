@@ -200,8 +200,17 @@ class Settings(BaseSettings):
     )
     allow_parse_public_supabase_only: bool = Field(
         default=True,
-        description="Restrict /parse/registry to Supabase public storage URLs only"
+        description="Restrict /parse/registry to Supabase storage URLs only (public + private)"
     )
+    allowed_storage_buckets: str = Field(
+        default="artifacts",
+        description="Comma-separated list of allowed Supabase storage buckets"
+    )
+
+    @property
+    def storage_bucket_whitelist(self) -> set[str]:
+        """Parse allowed storage buckets from comma-separated string."""
+        return {bucket.strip() for bucket in self.allowed_storage_buckets.split(",")}
 
     # Google reCAPTCHA
     recaptcha_site_key: str | None = Field(

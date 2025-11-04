@@ -636,42 +636,125 @@ async def parse_registry_from_url(file_url: str) -> RegistryDocument:
     """
     Supabase Storage URL에서 등기부 파싱
 
-    TODO: URL에서 다운로드 후 파싱
+    보안 강화:
+    - 정규식 패턴 매칭 (버킷 + 경로 검증)
+    - 버킷 화이트리스트 (artifacts만 허용)
+    - SSRF 방지 (내부 IP 차단)
+    - Content-Type 검증 (application/pdf만 허용)
     """
     import tempfile
     import httpx
-    from urllib.parse import urlparse
-    import socket, ipaddress, os
+    from urllib.parse import urlparse, parse_qs
+    import socket, ipaddress, os, re
     from core.settings import settings
+    from fastapi import HTTPException
 
-    # 1) URL 검증: 기본적으로 Supabase public storage만 허용 (설정 기반)
+    # 1) HTTPS 강제
     parsed = urlparse(file_url)
     if parsed.scheme != "https":
-        raise ValueError("Only HTTPS URLs are allowed")
+        logger.error(f"❌ [URL 검증 실패] HTTP 프로토콜: {file_url}")
+        raise HTTPException(status_code=400, detail="Only HTTPS URLs are allowed")
 
-    if settings.allow_parse_public_supabase_only:
-        allowed_prefix = settings.supabase_public_storage_prefix
-        if not allowed_prefix or not file_url.startswith(allowed_prefix):
-            raise ValueError("URL is not allowed. Only Supabase public storage URLs are permitted")
+    # 2) Supabase Storage URL 패턴 매칭 (정규식 + 버킷 화이트리스트)
+    if settings.allow_parse_public_supabase_only and settings.supabase_url:
+        supabase_host = settings.supabase_url.replace('https://', '').replace('http://', '')
 
-    # 2) SSRF 방지: 호스트 IP가 내부망/로컬/메타데이터 주소인지 확인
+        # 허용된 버킷 (화이트리스트 - settings에서 로드)
+        ALLOWED_BUCKETS = settings.storage_bucket_whitelist
+
+        # 정규식 패턴: https://{supabase_host}/storage/v1/object/(public|sign|authenticated)/{bucket}/{path}
+        pattern = re.compile(
+            rf"^https://{re.escape(supabase_host)}/storage/v1/object/"
+            r"(public|sign|authenticated)/(?P<bucket>[a-z0-9-_]+)/(?P<path>.+)$"
+        )
+
+        match = pattern.match(file_url)
+
+        if not match:
+            # URL 민감 정보 마스킹 (쿼리스트링 제거)
+            safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            logger.error(f"❌ [URL 검증 실패] 패턴 불일치: {safe_url}")
+            logger.error(f"   └─ 허용 패턴: {supabase_host}/storage/v1/object/(public|sign|authenticated)/<bucket>/<path>")
+            raise HTTPException(status_code=403, detail="URL pattern not permitted")
+
+        bucket = match.group('bucket')
+
+        if bucket not in ALLOWED_BUCKETS:
+            logger.error(f"❌ [버킷 검증 실패] 허용되지 않은 버킷: {bucket}")
+            logger.error(f"   └─ 허용 버킷: {', '.join(ALLOWED_BUCKETS)}")
+            raise HTTPException(status_code=403, detail=f"Bucket '{bucket}' not allowed")
+
+        logger.info(f"✅ [URL 검증 통과] 버킷={bucket}, 경로={match.group('path')[:50]}...")
+
+    # 3) SSRF 방지 강화: 호스트 IP가 내부망/로컬/메타데이터 주소인지 확인
     try:
-        infos = socket.getaddrinfo(parsed.hostname, None)
+        # DNS resolution을 통해 실제 IP 확인
+        infos = socket.getaddrinfo(parsed.hostname, 443)
         for family, _, _, _, sockaddr in infos:
             ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
-                raise ValueError("URL host resolves to a private or disallowed IP")
-    except Exception as e:
-        raise ValueError(f"Failed to resolve host for security checks: {e}")
 
-    # 3) 제한된 스트리밍 다운로드 (크기 제한, 리다이렉트 금지)
+            # 내부망 IP 차단 (Private, Loopback, Link-Local, Multicast, Reserved)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                logger.error(f"❌ [SSRF 방지] 내부 IP로 리졸브됨: {sockaddr[0]}")
+                raise HTTPException(status_code=403, detail="URL resolves to a private or disallowed IP")
+
+        logger.info(f"✅ [SSRF 검증 통과] 호스트={parsed.hostname}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [SSRF 검증 실패] DNS 리졸브 오류: {e}")
+        raise HTTPException(status_code=403, detail=f"Failed to resolve host for security checks: {e}")
+
+    # 4) HEAD 요청으로 Content-Type 선검증 (application/pdf만 허용)
     limits = httpx.Limits(max_connections=5, max_keepalive_connections=5)
     timeout = httpx.Timeout(10.0, connect=5.0, read=10.0)
-    max_bytes = settings.parse_max_download_mb * 1024 * 1024
 
     async with httpx.AsyncClient(limits=limits, timeout=timeout, follow_redirects=False) as client:
+        try:
+            # HEAD 요청으로 메타데이터 확인
+            head_resp = await client.head(file_url)
+            head_resp.raise_for_status()
+
+            content_type = head_resp.headers.get("Content-Type", "")
+            content_length = head_resp.headers.get("Content-Length", "0")
+
+            # Content-Type 검증
+            if "application/pdf" not in content_type.lower():
+                logger.error(f"❌ [Content-Type 검증 실패] {content_type}")
+                raise HTTPException(status_code=422, detail="File must be application/pdf")
+
+            # Content-Length 검증
+            max_bytes = settings.parse_max_download_mb * 1024 * 1024
+            try:
+                file_size = int(content_length)
+                if file_size > max_bytes:
+                    logger.error(f"❌ [파일 크기 초과] {file_size} bytes > {max_bytes} bytes")
+                    raise HTTPException(status_code=422, detail=f"File size exceeds {settings.parse_max_download_mb}MB limit")
+
+                logger.info(f"✅ [HEAD 검증 통과] Content-Type={content_type}, Size={file_size} bytes")
+
+            except ValueError:
+                # Content-Length 파싱 실패 시 경고만 (스트리밍에서 재검증)
+                logger.warning(f"⚠️ [HEAD 응답] Content-Length 파싱 실패: {content_length}")
+
+        except HTTPException:
+            raise
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ [HEAD 요청 실패] HTTP {e.response.status_code}")
+            # HEAD 실패 시에도 GET으로 진행 (일부 서버는 HEAD를 지원하지 않음)
+            logger.warning("⚠️ HEAD 요청 실패, GET으로 진행합니다")
+
+        # 5) 제한된 스트리밍 다운로드 (크기 제한, 리다이렉트 금지)
         async with client.stream("GET", file_url, headers={"Accept": "application/pdf"}) as resp:
             resp.raise_for_status()
+
+            # Content-Type 재검증 (GET 응답에서)
+            content_type = resp.headers.get("Content-Type", "")
+            if "application/pdf" not in content_type.lower():
+                logger.error(f"❌ [GET Content-Type 검증 실패] {content_type}")
+                raise HTTPException(status_code=422, detail="File must be application/pdf")
+
             total = 0
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 tmp_path = tmp.name
@@ -680,13 +763,16 @@ async def parse_registry_from_url(file_url: str) -> RegistryDocument:
                     if total > max_bytes:
                         tmp.close()
                         os.unlink(tmp_path)
-                        raise ValueError("Downloaded file exceeds size limit")
+                        logger.error(f"❌ [다운로드 크기 초과] {total} bytes")
+                        raise HTTPException(status_code=422, detail="Downloaded file exceeds size limit")
                     tmp.write(chunk)
 
-        # 4) 파싱
-        registry = parse_registry_pdf(tmp_path)
+            logger.info(f"✅ [다운로드 완료] {total} bytes")
 
-        # 5) 임시 파일 삭제
+        # 6) 파싱
+        registry = await parse_registry_pdf(tmp_path)
+
+        # 7) 임시 파일 삭제
         try:
             os.unlink(tmp_path)
         except Exception:

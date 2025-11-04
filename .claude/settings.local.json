@@ -59,7 +59,8 @@
       "Bash(where:*)",
       "Bash(git filter-branch:*)",
       "Bash(git rebase:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(gcloud run regions:*)"
     ],
     "deny": [],
     "ask": []

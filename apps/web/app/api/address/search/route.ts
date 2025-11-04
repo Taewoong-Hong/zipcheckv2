@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const q = url.searchParams.get('q') || url.searchParams.get('query') || '';
     const size = url.searchParams.get('size') || '10';
+    const debug = url.searchParams.get('debug') === '1';
 
     if (!q) return NextResponse.json({ results: [] });
 
@@ -54,6 +55,7 @@ export async function GET(request: NextRequest) {
         Accept: 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         Referer: process.env.NEXT_PUBLIC_SITE_URL || 'https://www.zipcheck.kr',
+        'Accept-Language': 'ko-KR,ko;q=0.9',
         'User-Agent': 'zipcheck/2.0',
       },
       body: form.toString(),
@@ -63,9 +65,16 @@ export async function GET(request: NextRequest) {
     });
     if (!res.ok) {
       const text = await res.text();
-      return NextResponse.json({ error: 'JUSO_FAILED', details: text }, { status: 502 });
+      return NextResponse.json({ error: 'JUSO_FAILED', status: res.status, details: text }, { status: 502 });
     }
     const data = await res.json();
+
+    // JUSO는 200이어도 에러를 payload로 돌려줄 수 있음
+    const common = data?.results?.common;
+    if (common && common.errorCode && String(common.errorCode) !== '0') {
+      const payload = { error: 'JUSO_ERROR', code: common.errorCode, message: common.errorMessage, totalCount: common.totalCount };
+      return NextResponse.json(debug ? { ...payload, raw: data } : payload, { status: 502 });
+    }
     const list = data?.results?.juso || [];
     const results = list.map((j: any) => ({
       roadAddr: j.roadAddr,
@@ -79,7 +88,7 @@ export async function GET(request: NextRequest) {
       buldSlno: j.buldSlno,
       detBdNmList: j.detBdNmList,
     }));
-    return NextResponse.json({ results });
+    return NextResponse.json(debug ? { results, raw: data } : { results });
   } catch (error) {
     return NextResponse.json(
       { error: 'SERVER_ERROR', details: error instanceof Error ? error.message : 'Unknown error' },

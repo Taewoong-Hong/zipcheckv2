@@ -948,6 +948,9 @@ export default function ChatInterface({
 
   // ✅ 드래그 앤 드롭 이벤트 핸들러
   const handleDragEnter = (e: React.DragEvent) => {
+    // 파일 드래그가 아닌 텍스트 드래그/선택 등에는 반응하지 않도록 가드
+    const hasFiles = Array.from(e.dataTransfer?.types || []).includes('Files');
+    if (!hasFiles) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
@@ -962,11 +965,15 @@ export default function ChatInterface({
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    const hasFiles = Array.from(e.dataTransfer?.types || []).includes('Files');
+    if (!hasFiles) return;
     e.preventDefault();
     e.stopPropagation();
   };
 
   const handleDrop = async (e: React.DragEvent) => {
+    const hasFiles = Array.from(e.dataTransfer?.types || []).includes('Files');
+    if (!hasFiles) return;
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
