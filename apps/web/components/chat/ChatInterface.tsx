@@ -57,6 +57,7 @@ export default function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const initializingRef = useRef(false); // ✅ Race condition 방지용 ref 추가
 
   // Analysis flow state
   const [stateMachine] = useState(() => new StateMachine('init'));
@@ -87,6 +88,14 @@ export default function ChatInterface({
         return;
       }
 
+      // ✅ Race condition 방지: 이미 초기화 중이면 중단
+      if (initializingRef.current) {
+        console.log('[ChatInterface] Already initializing conversation, skipping duplicate init');
+        return;
+      }
+
+      initializingRef.current = true;
+
       try {
         console.log('[ChatInterface] Initializing new conversation with passed session...');
 
@@ -109,11 +118,13 @@ export default function ChatInterface({
         }
       } catch (error) {
         console.error('[ChatInterface] Failed to initialize conversation:', error);
+      } finally {
+        initializingRef.current = false;
       }
     };
 
     initConversation();
-  }, [session, conversationId]); // ✅ 의존성 배열 수정: isLoggedIn → session
+  }, [session]); // ✅ FIX: conversationId 제거 (re-render loop 방지)
 
   // Reset chat function for new conversation
   const resetChat = async () => {
@@ -177,7 +188,7 @@ export default function ChatInterface({
         zipCode: address.zipNo,
         buildingName: address.bdNm,
       };
-      const caseId = await createCase(addressInfo);
+      const caseId = await createCase(addressInfo, session?.access_token);
 
       setAnalysisContext({ caseId, address: addressInfo });
 
@@ -235,7 +246,7 @@ export default function ChatInterface({
 
     // Update case in database
     try {
-      await updateCase(analysisContext.caseId, { contractType });
+      await updateCase(analysisContext.caseId, { contractType }, session?.access_token);
       // Also reflect into conversation for gating
       if (conversationId && session?.access_token) {
         await fetch(`/api/chat/conversation/${conversationId}`, {
@@ -321,7 +332,7 @@ export default function ChatInterface({
         updates.price = data.deposit;
       }
 
-      await updateCase(analysisContext.caseId, updates);
+      await updateCase(analysisContext.caseId, updates, session?.access_token);
     } catch (error) {
       console.error('Failed to update price:', error);
     }
@@ -330,7 +341,7 @@ export default function ChatInterface({
     stateMachine.transition('registry_choice');
 
     // Get user credits
-    const credits = await getUserCredits();
+    const credits = await getUserCredits(session?.access_token);
     setAnalysisContext(prev => ({ ...prev, userCredits: credits }));
 
     // Add AI response with registry choice component
@@ -370,7 +381,7 @@ export default function ChatInterface({
     try {
       if (method === 'upload' && file) {
         // Upload file
-        await uploadRegistry(analysisContext.caseId, file);
+        await uploadRegistry(analysisContext.caseId, file, session?.access_token);
 
         // Transition to registry_ready
         stateMachine.transition('registry_ready');
@@ -447,10 +458,10 @@ export default function ChatInterface({
 
     try {
       // Run analysis
-      await runAnalysis(analysisContext.caseId);
+      await runAnalysis(analysisContext.caseId, session?.access_token);
 
       // Get report data
-      const reportData = await getReport(analysisContext.caseId);
+      const reportData = await getReport(analysisContext.caseId, session?.access_token);
 
       // Transition to report
       stateMachine.transition('report');
@@ -588,9 +599,15 @@ export default function ChatInterface({
           componentType: 'address_search',
           componentData: { initialAddress: content },
         };
-        setMessages(prev => [...prev, aiMessage]);
+        // Remove the temporary processing message and append the address search message
+        setMessages(prev => {
+          const filtered = prev.filter(msg => msg.id !== processingMessageId);
+          return [...filtered, aiMessage];
+        });
         chatStorage.addMessage(aiMessage);
         setIsLoading(false);
+        // allow next submit
+        setTimeout(() => setIsSubmitting(false), 0);
         return;
       }
 
@@ -669,13 +686,9 @@ export default function ChatInterface({
           throw new Error('로그인 세션이 만료되었습니다. 페이지를 새로고침해주세요.');
         }
 
-        // Ensure conversation ID exists; if missing, try to auto-init once
+        // ✅ FIX: Ensure conversation ID exists without forcing reset
+        // Only auto-init if conversationId is truly missing (not just empty messages)
         let convId = conversationId;
-        // If this is a fresh UI session (no prior messages), force a new conversation
-        // to avoid reusing an old server conversation that may already have address/contract_type
-        if (!messages || messages.length === 0) {
-          convId = undefined as any;
-        }
         if (!convId) {
           console.log('[ChatInterface] No conversation ID, attempting auto-init...');
           try {
@@ -728,6 +741,13 @@ export default function ChatInterface({
 
         if (!response.body) {
           throw new Error('No response body');
+        }
+
+        // ✅ 응답 헤더에서 새 conversation_id 확인
+        const newConvId = response.headers.get('X-New-Conversation-Id');
+        if (newConvId && newConvId !== conversationId) {
+          console.log('[ChatInterface] ✅ Received new conversation ID from server:', newConvId);
+          setConversationId(newConvId);
         }
 
         // Handle streaming response

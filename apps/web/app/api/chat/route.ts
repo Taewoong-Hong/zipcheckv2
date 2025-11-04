@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
     const norm = text.toLowerCase().replace(/\s+/g, '');
 
     function replyAddressPrompt(): string {
-      return '부동산 주소를 입력해주세요.\n예: 서울특별시 강남구 테헤란로 123 또는 "서울 강남구 역삼동 123-45"';
+      return '안녕하세요! 부동산 AI 서비스 집체크입니다. 검토하실 부동산 주소를 입력해주세요.';
     }
 
     function replyContractPrompt(): string {
