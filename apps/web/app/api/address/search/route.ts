@@ -17,6 +17,16 @@ export async function GET(request: NextRequest) {
     const size = url.searchParams.get('size') || '10';
     const debug = url.searchParams.get('debug') === '1';
 
+    // 버전 식별용 (디버깅)
+    const isVersionCheck = url.searchParams.get('__version') === '1';
+    if (isVersionCheck) {
+      return NextResponse.json({
+        endpoint: '/api/address/search',
+        version: 'v2',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     if (!q) return NextResponse.json({ results: [] });
 
     if (isLocal(request)) {
