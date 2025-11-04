@@ -25,9 +25,7 @@ https://supabase.com/dashboard
 
 ```
 http://localhost:3000/zc-ops-nx7k2
-http://localhost:3003/zc-ops-nx7k2
 http://localhost:3000/auth/callback
-http://localhost:3003/auth/callback
 https://zipcheck.kr/zc-ops-nx7k2
 https://zipcheck.kr/auth/callback
 ```
