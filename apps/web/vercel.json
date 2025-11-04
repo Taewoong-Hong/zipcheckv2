@@ -5,6 +5,7 @@
   "installCommand": "npm install",
   "framework": "nextjs",
   "outputDirectory": ".next",
+  "regions": ["icn1"],
   "rewrites": [
     {
       "source": "/api/ai/:path*",
