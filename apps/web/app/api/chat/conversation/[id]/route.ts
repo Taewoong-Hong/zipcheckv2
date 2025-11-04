@@ -4,7 +4,7 @@ const AI_API_URL = process.env.AI_API_URL;
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     if (!AI_API_URL) {
@@ -22,8 +22,9 @@ export async function PATCH(
       );
     }
 
+    const { id } = await params;
     const body = await request.json();
-    const response = await fetch(`${AI_API_URL}/chat/conversation/${params.id}`, {
+    const response = await fetch(`${AI_API_URL}/chat/conversation/${id}`, {
       method: 'PATCH',
       headers: {
         'Authorization': authHeader,

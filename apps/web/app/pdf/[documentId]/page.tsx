@@ -1,12 +1,12 @@
 /**
- * PDF 뷰어 전용 페이지
+ * PDF 뷰어 페이지
  *
  * 경로: /pdf/[documentId]
  * 예시: /pdf/doc_abc123def456
  *
  * 보안:
- * - Supabase Auth 인증 필요
- * - RLS로 사용자별 문서 접근 제어
+ * - Supabase Auth 세션 필요
+ * - RLS로 사용자별 문서 격리 제어
  * - 암호화된 파일 URL 제공
  */
 
@@ -34,7 +34,7 @@ export default function PDFViewerPage() {
 
   async function loadDocument() {
     try {
-      // 1. 인증 확인
+      // 1. 세션 확인
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -44,10 +44,10 @@ export default function PDFViewerPage() {
         return;
       }
 
-      // 2. 문서 메타데이터 조회
+      // 2. 문서 메타데이터 조회 (v2_artifacts 테이블 사용)
       const { data: document, error: docError } = await supabase
-        .from('v2_documents')
-        .select('id, user_id, file_name, file_path, property_address')
+        .from('v2_artifacts')
+        .select('id, user_id, file_url, metadata')
         .eq('id', documentId)
         .single();
 
@@ -58,49 +58,22 @@ export default function PDFViewerPage() {
       }
 
       // 3. 권한 확인 (본인 문서만 열람 가능, RLS가 자동으로 처리)
-      if (document.user_id !== session.user.id) {
-        setError('접근 권한이 없습니다.');
+      if ((document as any).user_id !== session.user.id) {
+        setError('열람 권한이 없습니다.');
         setIsLoading(false);
         return;
       }
 
-      // 4. 파일명 복호화 (암호화된 경우)
-      let displayName = document.file_name || '문서.pdf';
-      const propertyAddress = document.property_address;
+      // 4. 파일명 및 URL 처리
+      const fileName = (document as any).metadata?.file_name || '문서.pdf';
+      setFileName(fileName);
 
-      if (propertyAddress) {
-        try {
-          const decryptedAddress = decrypt(propertyAddress);
-          displayName = `${decryptedAddress}_등기부등본.pdf`;
-        } catch (err) {
-          // 복호화 실패 시 원본 사용
-          console.warn('Failed to decrypt property address:', err);
-        }
-      }
-
-      setFileName(displayName);
-
-      // 5. Supabase Storage에서 서명된 URL 가져오기
-      if (document.file_path) {
-        // Supabase Storage 경로인 경우
-        if (document.file_path.startsWith('documents/')) {
-          const { data: urlData, error: urlError } = await supabase.storage
-            .from('zipcheck-documents')
-            .createSignedUrl(document.file_path, 3600); // 1시간 유효
-
-          if (urlError || !urlData) {
-            setError('파일 URL을 생성할 수 없습니다.');
-            setIsLoading(false);
-            return;
-          }
-
-          setFileUrl(urlData.signedUrl);
-        } else {
-          // 로컬 파일 경로인 경우 (API 프록시 사용)
-          setFileUrl(`/api/pdf/proxy?path=${encodeURIComponent(document.file_path)}`);
-        }
+      // 5. file_url 직접 사용 (이미 서명된 URL)
+      const fileUrl = (document as any).file_url;
+      if (fileUrl) {
+        setFileUrl(fileUrl);
       } else {
-        setError('파일 경로가 없습니다.');
+        setError('파일 URL이 없습니다.');
         setIsLoading(false);
         return;
       }

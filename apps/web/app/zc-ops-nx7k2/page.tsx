@@ -135,7 +135,7 @@ export default function AdminDashboard() {
         .eq('id', session.user.id)
         .single();
 
-      if (userError || userData?.role !== 'admin') {
+      if (userError || (userData as any)?.role !== 'admin') {
         setAuthError('접근 권한이 없습니다.');
         await supabase.auth.signOut();
         setIsLoading(false);

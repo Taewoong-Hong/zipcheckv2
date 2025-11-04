@@ -141,8 +141,8 @@ export default function AdminDashboard() {
 
       console.log('📊 User data:', userData, 'Error:', userError);
 
-      if (userError || userData?.role !== 'admin') {
-        console.log('❌ Step 5 FAILED - Not admin. Role:', userData?.role);
+      if (userError || (userData as any)?.role !== 'admin') {
+        console.log('❌ Step 5 FAILED - Not admin. Role:', (userData as any)?.role);
         setAuthError('접근 권한이 없습니다.');
         await supabase.auth.signOut();
         setIsLoading(false);
