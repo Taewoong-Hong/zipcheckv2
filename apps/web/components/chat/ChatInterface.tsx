@@ -188,7 +188,7 @@ export default function ChatInterface({
         zipCode: address.zipNo,
         buildingName: address.bdNm,
       };
-      const caseId = await createCase(addressInfo, session?.access_token);
+      const caseId = await createCase(addressInfo);
 
       setAnalysisContext({ caseId, address: addressInfo });
 
