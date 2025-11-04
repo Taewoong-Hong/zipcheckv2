@@ -54,7 +54,12 @@
       "Bash(gcloud secrets versions access:*)",
       "Bash(powershell -Command:*)",
       "Bash(gcloud run revisions list:*)",
-      "Bash(del anon_temp.txt secret_temp.txt)"
+      "Bash(del anon_temp.txt secret_temp.txt)",
+      "Bash(scoop install:*)",
+      "Bash(where:*)",
+      "Bash(git filter-branch:*)",
+      "Bash(git rebase:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": []

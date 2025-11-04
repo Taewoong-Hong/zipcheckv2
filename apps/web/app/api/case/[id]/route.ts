@@ -36,9 +36,34 @@ export async function PATCH(
     const body = await request.json();
     const { id } = await params;
 
+    // Map camelCase client fields to DB snake_case and whitelist
+    const updates: Record<string, any> = {};
+    if (typeof (body as any).contractType === 'string') updates.contract_type = (body as any).contractType;
+    if (typeof (body as any).deposit === 'number') updates.contract_amount = (body as any).deposit;
+    if (typeof (body as any).monthlyRent === 'number') updates.monthly_rent = (body as any).monthlyRent;
+    if (typeof (body as any).current_state === 'string') updates.current_state = (body as any).current_state;
+    if (typeof (body as any).state === 'string') updates.state = (body as any).state;
+    if (typeof (body as any).property_address === 'string') updates.property_address = (body as any).property_address;
+    if (typeof (body as any).address_road === 'string') updates.address_road = (body as any).address_road;
+    if (typeof (body as any).address_lot === 'string') updates.address_lot = (body as any).address_lot;
+    if ((body as any).address_detail) updates.address_detail = (body as any).address_detail;
+    if ((body as any).address && typeof (body as any).address === 'object') {
+      const addr = (body as any).address;
+      if (typeof addr.road === 'string') updates.property_address = addr.road;
+      if (typeof addr.lot === 'string') updates.address_lot = addr.lot;
+      updates.address_detail = addr;
+    }
+    const allowedDirect = ['flags', 'metadata'];
+    for (const k of allowedDirect) {
+      if (k in (body as any)) updates[k] = (body as any)[k];
+    }
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+    }
+
     const { data, error } = await supabase
       .from('v2_cases')
-      .update(body)
+      .update(updates)
       .eq('id', id)
       .eq('user_id', user.id)
       .select()
@@ -94,4 +119,3 @@ export async function GET(
     );
   }
 }
-

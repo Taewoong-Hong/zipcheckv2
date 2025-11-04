@@ -3,10 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 // Back-compat alias for legacy AddressSearchSelector
 // Proxies to JUSO, but in local/dev returns a mock result using the query itself.
 
-function isLocal() {
-  if (process.env.NODE_ENV === 'development') return true;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
-  return appUrl.includes('localhost') || appUrl.includes('127.0.0.1');
+function isLocal(req: NextRequest) {
+  const h = req.nextUrl.hostname || '';
+  return h === 'localhost' || h === '127.0.0.1';
 }
 
 export async function GET(request: NextRequest) {
@@ -17,7 +16,7 @@ export async function GET(request: NextRequest) {
 
     if (!q) return NextResponse.json({ results: [] });
 
-    if (isLocal()) {
+    if (isLocal(request)) {
       // Local environment: pretend the user's query is a valid single result
       return NextResponse.json({
         results: [
@@ -74,4 +73,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

@@ -3,11 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 // Conditional JUSO proxy with local-skip
 // Docs: https://www.juso.go.kr/addrlink/devAddrLinkRequestGuide.do
 
-function isLocal() {
-  // Skip in development/local to avoid errors as requested
-  if (process.env.NODE_ENV === 'development') return true;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
-  return appUrl.includes('localhost') || appUrl.includes('127.0.0.1');
+function isLocal(req: NextRequest) {
+  const h = req.nextUrl.hostname || '';
+  return h === 'localhost' || h === '127.0.0.1';
 }
 
 export async function GET(request: NextRequest) {
@@ -20,7 +18,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ results: [] });
     }
 
-    if (isLocal()) {
+    if (isLocal(request)) {
       // Local environment: skip external JUSO API
       return NextResponse.json({ skipped: true, results: [] });
     }
@@ -64,4 +62,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

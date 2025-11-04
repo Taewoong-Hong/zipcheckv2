@@ -104,6 +104,8 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <head>
+        {/* Favicon */}
+        <link rel="icon" href="/logo.png" type="image/png" />
         {/* Cloudflare Turnstile */}
         <script
           src="https://challenges.cloudflare.com/turnstile/v0/api.js"

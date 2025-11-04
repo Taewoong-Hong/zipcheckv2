@@ -109,16 +109,20 @@ export function getStateResponseMessage(state: ChatState, context?: AnalysisCont
 /**
  * 케이스 생성 API 호출
  */
-export async function createCase(address: AddressInfo): Promise<string> {
+export async function createCase(address: AddressInfo, accessToken?: string): Promise<string> {
   try {
-    const supabase = getBrowserSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('NO_SESSION');
+    let token = accessToken;
+    if (!token) {
+      const supabase = getBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
+    if (!token) throw new Error('NO_SESSION');
     const response = await fetch('/api/case', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
         address_road: address.road,
@@ -144,17 +148,22 @@ export async function createCase(address: AddressInfo): Promise<string> {
  */
 export async function updateCase(
   caseId: string,
-  updates: Partial<AnalysisContext>
+  updates: Partial<AnalysisContext>,
+  accessToken?: string,
 ): Promise<void> {
   try {
-    const supabase = getBrowserSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('NO_SESSION');
+    let token = accessToken;
+    if (!token) {
+      const supabase = getBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
+    if (!token) throw new Error('NO_SESSION');
     const response = await fetch(`/api/case/${caseId}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify(updates),
     });
@@ -171,20 +180,24 @@ export async function updateCase(
 /**
  * 등기부 업로드 API 호출
  */
-export async function uploadRegistry(caseId: string, file: File): Promise<void> {
+export async function uploadRegistry(caseId: string, file: File, accessToken?: string): Promise<void> {
   try {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('caseId', caseId);
-    const supabase = getBrowserSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('NO_SESSION');
+    let token = accessToken;
+    if (!token) {
+      const supabase = getBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
+    if (!token) throw new Error('NO_SESSION');
 
     const response = await fetch('/api/registry/upload', {
       method: 'POST',
       body: formData,
       headers: {
-        'Authorization': `Bearer ${session.access_token}`,
+        'Authorization': `Bearer ${token}`,
       },
     });
 
@@ -201,15 +214,19 @@ export async function uploadRegistry(caseId: string, file: File): Promise<void> 
 /**
  * 분석 실행 API 호출
  */
-export async function runAnalysis(caseId: string): Promise<void> {
+export async function runAnalysis(caseId: string, accessToken?: string): Promise<void> {
   try {
-    const supabase = getBrowserSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('NO_SESSION');
+    let token = accessToken;
+    if (!token) {
+      const supabase = getBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
+    if (!token) throw new Error('NO_SESSION');
     const response = await fetch(`/api/analysis/${caseId}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${session.access_token}`,
+        'Authorization': `Bearer ${token}`,
       }
     });
 
@@ -225,16 +242,20 @@ export async function runAnalysis(caseId: string): Promise<void> {
 /**
  * 리포트 데이터 조회 API 호출
  */
-export async function getReport(caseId: string): Promise<{
+export async function getReport(caseId: string, accessToken?: string): Promise<{
   content: string;
   contractType: string;
   address: string;
 }> {
   try {
-    const supabase = getBrowserSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
+    let token = accessToken;
+    if (!token) {
+      const supabase = getBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
     const headers: Record<string,string> = {};
-    if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     const response = await fetch(`/api/report/${caseId}`, { headers });
 
     if (!response.ok) {
@@ -252,9 +273,16 @@ export async function getReport(caseId: string): Promise<{
 /**
  * 사용자 크레딧 조회
  */
-export async function getUserCredits(): Promise<number> {
+export async function getUserCredits(accessToken?: string): Promise<number> {
   try {
-    const response = await fetch('/api/credits/balance');
+    let token = accessToken;
+    if (!token) {
+      const supabase = getBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
+    const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
+    const response = await fetch('/api/credits/balance', { headers });
 
     if (!response.ok) {
       throw new Error(`Failed to get credits: ${response.status}`);

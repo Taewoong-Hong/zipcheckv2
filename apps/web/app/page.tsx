@@ -33,16 +33,46 @@ function HomePageContent() {
       router.replace('/', { scroll: false });
     }
 
-    // 로그인 상태 확인
+    // 로그인 상태 확인 (서버 API로 HTTP-only 쿠키 기반 세션 확인)
+    let mounted = true;
     const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setIsLoggedIn(!!session);
-      setSession(session);
+      try {
+        // 1) 서버 API로 HTTP-only 쿠키 확인
+        const res = await fetch("/api/auth/session", { credentials: "include" });
+        const data = await res.json();
+
+        if (!mounted) return;
+
+        if (data.authenticated && data.session) {
+          console.log("[Auth] 서버 세션 확인:", data.session.user.email);
+          setIsLoggedIn(true);
+          setSession(data.session);
+
+          // 2) Supabase 클라이언트에 세션 설정
+          const { error } = await supabase.auth.setSession({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          });
+
+          if (error) {
+            console.error("[Auth] Supabase 클라이언트 세션 설정 실패:", error);
+          } else {
+            console.log("[Auth] Supabase 클라이언트 세션 설정 완료");
+          }
+        } else {
+          console.log("[Auth] 세션 없음");
+          setIsLoggedIn(false);
+        }
+      } catch (e) {
+        console.error("[Auth] 세션 확인 실패:", e);
+        setIsLoggedIn(false);
+      }
     };
     checkAuth();
 
     // 로그인 상태 변경 감지
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      console.log("[Auth] 상태 변경:", _event, newSession?.user?.email);
       setIsLoggedIn(!!newSession);
       setSession(newSession);
       // 로그인 성공 시 모달 닫기
@@ -63,6 +93,7 @@ function HomePageContent() {
 
     window.addEventListener('resize', handleResize);
     return () => {
+      mounted = false;
       window.removeEventListener('resize', handleResize);
       subscription.unsubscribe();
     };

@@ -246,7 +246,7 @@ export default function ChatInterface({
 
     // Update case in database
     try {
-      await updateCase(analysisContext.caseId, { contractType }, session?.access_token);
+      await updateCase(analysisContext.caseId, { contractType });
       // Also reflect into conversation for gating
       if (conversationId && session?.access_token) {
         await fetch(`/api/chat/conversation/${conversationId}`, {
@@ -332,7 +332,7 @@ export default function ChatInterface({
         updates.price = data.deposit;
       }
 
-      await updateCase(analysisContext.caseId, updates, session?.access_token);
+      await updateCase(analysisContext.caseId, updates);
     } catch (error) {
       console.error('Failed to update price:', error);
     }
@@ -341,7 +341,7 @@ export default function ChatInterface({
     stateMachine.transition('registry_choice');
 
     // Get user credits
-    const credits = await getUserCredits(session?.access_token);
+    const credits = await getUserCredits();
     setAnalysisContext(prev => ({ ...prev, userCredits: credits }));
 
     // Add AI response with registry choice component
@@ -381,7 +381,7 @@ export default function ChatInterface({
     try {
       if (method === 'upload' && file) {
         // Upload file
-        await uploadRegistry(analysisContext.caseId, file, session?.access_token);
+        await uploadRegistry(analysisContext.caseId, file);
 
         // Transition to registry_ready
         stateMachine.transition('registry_ready');
@@ -458,10 +458,10 @@ export default function ChatInterface({
 
     try {
       // Run analysis
-      await runAnalysis(analysisContext.caseId, session?.access_token);
+      await runAnalysis(analysisContext.caseId);
 
       // Get report data
-      const reportData = await getReport(analysisContext.caseId, session?.access_token);
+      const reportData = await getReport(analysisContext.caseId);
 
       // Transition to report
       stateMachine.transition('report');

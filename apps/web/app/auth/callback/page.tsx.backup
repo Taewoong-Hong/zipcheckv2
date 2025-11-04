@@ -1,0 +1,142 @@
+// OAuth Callback Handler (Naver, Kakao, Google)
+// hashed_token을 받아서 verifyOtp로 세션 생성
+
+"use client";
+
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
+function AuthCallbackContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
+  const [errorMessage, setErrorMessage] = useState<string>("");
+
+  useEffect(() => {
+    const handleCallback = async () => {
+      try {
+        const token_hash = searchParams?.get("token_hash");
+        const type = (searchParams?.get("type") ?? "email") as "email" | "sms";
+        const next = searchParams?.get("next") ?? "/";
+
+        if (!token_hash) {
+          setStatus("error");
+          setErrorMessage("인증 토큰이 없습니다.");
+          return;
+        }
+
+        console.log("[OAuth Callback] Verifying session...");
+        console.log("[OAuth Callback] token_hash:", token_hash);
+        console.log("[OAuth Callback] type:", type);
+
+        // verifyOtp로 세션 생성
+        const { data, error } = await supabase.auth.verifyOtp({
+          type,
+          token_hash,
+        });
+
+        console.log("[OAuth Callback] verifyOtp response:", { data, error });
+
+        if (error) {
+          console.error("[OAuth Callback] ❌ Session verification failed:", error);
+          setStatus("error");
+          setErrorMessage(error.message);
+          return;
+        }
+
+        if (!data.session) {
+          console.error("[OAuth Callback] ❌ Session verification failed: null");
+          console.error("[OAuth Callback] Full data object:", JSON.stringify(data, null, 2));
+          router.push(`/?error=no_session`);
+          return;
+        }
+
+        console.log("[OAuth Callback] ✅ Session created:", data.session.user.email);
+        setStatus("success");
+
+        // 세션 생성 성공 → next로 리디렉션
+        setTimeout(() => {
+          router.push(next);
+        }, 500);
+      } catch (err) {
+        console.error("[OAuth Callback] Unexpected error:", err);
+        setStatus("error");
+        setErrorMessage(err instanceof Error ? err.message : "로그인 처리 중 오류가 발생했습니다.");
+      }
+    };
+
+    handleCallback();
+  }, [searchParams, router]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8 text-center">
+        {status === "loading" && (
+          <>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              로그인 처리 중...
+            </h2>
+            <p className="text-sm text-gray-600">
+              잠시만 기다려 주세요.
+            </p>
+          </>
+        )}
+
+        {status === "success" && (
+          <>
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              로그인 성공!
+            </h2>
+            <p className="text-sm text-gray-600">
+              홈 페이지로 이동합니다...
+            </p>
+          </>
+        )}
+
+        {status === "error" && (
+          <>
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              로그인 실패
+            </h2>
+            <p className="text-sm text-gray-600 mb-4">
+              {errorMessage || "알 수 없는 오류가 발생했습니다."}
+            </p>
+            <button
+              onClick={() => router.push("/")}
+              className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+            >
+              홈으로 돌아가기
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mx-auto"></div>
+      </div>
+    }>
+      <AuthCallbackContent />
+    </Suspense>
+  );
+}
