@@ -12,9 +12,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // v2_documents와 v2_profiles 조인하여 데이터 가져오기
+    // v2_doc_texts와 v2_profiles 조인하여 데이터 가져오기
     const { data: documents, error } = await supabase
-      .from('v2_documents')
+      .from('v2_doc_texts')
       .select(`
         id,
         user_id,

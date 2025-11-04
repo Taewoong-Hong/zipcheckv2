@@ -66,8 +66,8 @@ class Contract(Base):
 
 
 class Document(Base):
-    """문서 원본 및 텍스트 모델 (v2) - 등기부등본/계약서."""
-    __tablename__ = "v2_documents"
+    """문서 텍스트/지식 레이어 모델 (v2) - RAG·임베딩 대상."""
+    __tablename__ = "v2_doc_texts"
     __table_args__ = (
         CheckConstraint("document_type IN ('registry', 'contract')", name="check_document_type"),
         CheckConstraint("registry_type IN ('land', 'building', 'collective') OR registry_type IS NULL", name="check_registry_type"),
@@ -99,7 +99,7 @@ class Embedding(Base):
     __tablename__ = "v2_embeddings"
 
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    doc_id = Column(PGUUID(as_uuid=True), ForeignKey("v2_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    doc_id = Column(PGUUID(as_uuid=True), ForeignKey("v2_doc_texts.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
     embedding = Column(Vector(1536))  # text-embedding-3-small (1536 dimensions)
     chunk_text = Column(Text)

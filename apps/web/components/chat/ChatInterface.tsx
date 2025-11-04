@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Upload, Send, Search, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
 import { Message as MessageType } from "@/types/chat";
 import type { ContractType, RegistryMethod, AddressInfo, ChatState } from "@/types/analysis";
@@ -10,6 +10,7 @@ import { chatStorage } from "@/lib/chatStorage";
 import { simulateTestResponse } from "@/lib/testScenario";
 import { ChatLoadingIndicator } from "@/components/common/LoadingSpinner";
 import { StateMachine } from "@/lib/stateMachine";
+import { getBrowserSupabase } from "@/lib/supabaseBrowser";
 import {
   isAddressInput,
   isAnalysisStartTrigger,
@@ -42,22 +43,16 @@ export default function ChatInterface({
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // ✅ 중복 제출 방지용 상태 추가
   const [inputValue, setInputValue] = useState("");
-  const [conversationId, setConversationId] = useState<string | null>(() => {
-    // Restore conversation ID from localStorage on mount
-    if (typeof window !== 'undefined') {
-      try {
-        return localStorage.getItem('chat_conversation_id');
-      } catch (e) {
-        console.warn('[ChatInterface] localStorage access denied');
-        return null;
-      }
-    }
-    return null;
-  });
+  // 새 채팅 화면에서는 이전 대화 ID를 자동 복구하지 않는다
+  // (이전 대화의 상태가 남아 주소 단계를 건너뛰는 이슈 방지)
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const initializingRef = useRef(false); // ✅ Race condition 방지용 ref 추가
+  // Conversation init single-flight and abort control
+  const conversationInitPromiseRef = useRef<Promise<string> | null>(null);
+  const initAbortRef = useRef<AbortController | null>(null);
 
   // Analysis flow state
   const [stateMachine] = useState(() => new StateMachine('init'));
@@ -124,10 +119,67 @@ export default function ChatInterface({
     };
 
     initConversation();
-  }, [session]); // ✅ FIX: conversationId 제거 (re-render loop 방지)
+  }, [session, conversationId]); // ✅ 의존성 보강
+
+  // Abort any in-flight init on unmount
+  useEffect(() => {
+    return () => {
+      initAbortRef.current?.abort();
+    };
+  }, []);
+
+  // Reset conversation when user switches
+  useEffect(() => {
+    if (!session) {
+      setConversationId(null);
+    }
+  }, [session]);
+
+  // Ensure a conversation id exists (single-flight + latest token)
+  const getOrCreateConversationId = async (): Promise<string> => {
+    if (conversationId) return conversationId;
+
+    // 최신 토큰 확보 (세션 prop이 오래되었을 수 있음)
+    const supabase = getBrowserSupabase();
+    const { data } = await supabase.auth.getSession();
+    const latestToken = data.session?.access_token || session?.access_token;
+    if (!latestToken) throw new Error('NO_SESSION');
+
+    if (conversationInitPromiseRef.current) {
+      return await conversationInitPromiseRef.current;
+    }
+
+    // cancel previous init
+    initAbortRef.current?.abort();
+    initAbortRef.current = new AbortController();
+
+    conversationInitPromiseRef.current = (async () => {
+      const res = await fetch('/api/chat/init', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${latestToken}`,
+        },
+        body: JSON.stringify({ session: { access_token: latestToken } }),
+        credentials: 'include',
+        signal: initAbortRef.current!.signal,
+      });
+      if (!res.ok) throw new Error(`init failed: ${res.status}`);
+      const payload = await res.json();
+      const id: string = payload.conversation_id;
+      setConversationId(id);
+      return id;
+    })();
+
+    try {
+      return await conversationInitPromiseRef.current;
+    } finally {
+      conversationInitPromiseRef.current = null;
+    }
+  };
 
   // Reset chat function for new conversation
-  const resetChat = async () => {
+  const resetChat = useCallback(async () => {
     setMessages([]);
     setInputValue("");
     setIsLoading(false);
@@ -166,7 +218,7 @@ export default function ChatInterface({
         console.error('[ChatInterface] Failed to create new conversation on reset:', error);
       }
     }
-  };
+  }, [isLoggedIn, session, stateMachine]);
 
   // Handle address selection
   const handleAddressSelect = async (address: any) => {
@@ -497,7 +549,7 @@ export default function ChatInterface({
   };
 
   // Load session function
-  const loadSession = (sessionId: string) => {
+  const loadSession = useCallback((sessionId: string) => {
     const success = chatStorage.setCurrentSession(sessionId);
     if (success) {
       const session = chatStorage.getCurrentSession();
@@ -505,17 +557,17 @@ export default function ChatInterface({
         setMessages(session.messages);
       }
     }
-  };
+  }, []);
 
   // Save current chat function
-  const saveCurrentChat = () => {
+  const saveCurrentChat = useCallback(() => {
     // chatStorage already auto-saves messages, but we ensure it's saved
     const session = chatStorage.getCurrentSession();
     if (session && session.messages.length > 0) {
       // Session is already saved in localStorage through chatStorage
       console.log('Current chat saved:', session.id);
     }
-  };
+  }, []);
 
   // Expose functions globally for sidebar to call
   useEffect(() => {
@@ -530,7 +582,7 @@ export default function ChatInterface({
       delete (window as any).getRecentSessions;
       delete (window as any).saveCurrentChat;
     };
-  }, []);
+  }, [resetChat, loadSession, saveCurrentChat]);
 
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
@@ -686,36 +738,8 @@ export default function ChatInterface({
           throw new Error('로그인 세션이 만료되었습니다. 페이지를 새로고침해주세요.');
         }
 
-        // ✅ FIX: Ensure conversation ID exists without forcing reset
-        // Only auto-init if conversationId is truly missing (not just empty messages)
-        let convId = conversationId;
-        if (!convId) {
-          console.log('[ChatInterface] No conversation ID, attempting auto-init...');
-          try {
-            const initRes = await fetch('/api/chat/init', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.access_token}`,
-              },
-              body: JSON.stringify({ session: { access_token: session.access_token } }),
-            });
-            if (initRes.ok) {
-              const initData = await initRes.json();
-              convId = initData.conversation_id;
-              setConversationId(convId);
-              console.log('[ChatInterface] ✅ Auto-created conversation for submit:', convId);
-            } else {
-              console.error('[ChatInterface] Auto-init failed:', initRes.status);
-            }
-          } catch (e) {
-            console.error('[ChatInterface] Auto-init error:', e);
-          }
-        }
-
-        if (!convId) {
-          throw new Error('대화 세션을 생성할 수 없습니다. 페이지를 새로고침해주세요.');
-        }
+        // Ensure conversation exists (awaits init if needed)
+        const convId = await getOrCreateConversationId();
 
         // Create abort controller for cancellation
         abortControllerRef.current = new AbortController();

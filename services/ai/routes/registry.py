@@ -69,7 +69,7 @@ async def upload_registry(
     1. PDF 파일 업로드
     2. 텍스트 추출 및 파싱
     3. 메타데이터 추출 (주소, 소유자 등)
-    4. DB 저장 (v2_documents)
+    4. DB 저장 (v2_doc_texts)
     5. 벡터 임베딩 생성 및 저장
 
     Args:

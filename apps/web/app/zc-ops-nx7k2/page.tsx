@@ -13,7 +13,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
@@ -69,21 +69,7 @@ export default function AdminDashboard() {
     adminRole: false,
   });
 
-  useEffect(() => {
-    checkAuthSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        checkAuthSession();
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  async function checkAuthSession() {
+  const checkAuthSession = useCallback(async () => {
     try {
       setAuthError(null);
 
@@ -150,7 +136,21 @@ export default function AdminDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    checkAuthSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        checkAuthSession();
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [checkAuthSession]);
 
   async function handleGoogleLogin() {
     try {

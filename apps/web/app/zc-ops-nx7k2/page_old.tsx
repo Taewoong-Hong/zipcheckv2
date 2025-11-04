@@ -13,7 +13,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
@@ -56,23 +56,7 @@ export default function AdminDashboard() {
     adminRole: false,
   });
 
-  useEffect(() => {
-    // 초기 세션 확인
-    checkAuthSession();
-
-    // Auth state 변화 감지 (로그인 콜백 처리)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        checkAuthSession();
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  async function checkAuthSession() {
+  const checkAuthSession = useCallback(async () => {
     try {
       setAuthError(null);
 
@@ -160,7 +144,23 @@ export default function AdminDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    // 초기 세션 확인
+    checkAuthSession();
+
+    // Auth state 변화 감지 (로그인 콜백 처리)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        checkAuthSession();
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [checkAuthSession]);
 
   async function handleGoogleLogin() {
     try {

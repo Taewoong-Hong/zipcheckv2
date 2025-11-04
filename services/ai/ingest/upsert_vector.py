@@ -196,7 +196,7 @@ def upsert_document_embeddings(
     (등기부등본 등 document_type='registry'인 문서용)
 
     Args:
-        doc_id: 문서 고유 ID (v2_documents.id)
+        doc_id: 문서 고유 ID (v2_doc_texts.id)
         user_id: 사용자 UUID
         text: 전체 텍스트
         metadata: 추가 메타데이터

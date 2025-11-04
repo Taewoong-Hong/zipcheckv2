@@ -32,14 +32,33 @@ export interface AnalysisContext {
  * 사용자 입력이 주소 입력인지 감지
  */
 export function isAddressInput(input: string): boolean {
-  const addressKeywords = ['주소', '위치', '아파트', '빌라', '오피스텔', '동', '구', '시', '도'];
-  const hasKeyword = addressKeywords.some(keyword => input.includes(keyword));
+  const s = (input || '').trim();
+  if (s.length < 3) return false;
 
-  // 또는 도로명/지번 패턴 감지 (예: "서울시", "강남구", "123번지")
-  const addressPattern = /(시|구|동|로|길|번지)/;
-  const hasPattern = addressPattern.test(input);
+  // 키워드/행정구역 기반
+  const addressKeywords = ['주소', '위치', '아파트', '빌라', '오피스텔', '주택', '원룸'];
+  const hasKeyword = addressKeywords.some((k) => s.includes(k));
 
-  return hasKeyword || hasPattern;
+  // 행정구역/도로명/지번 패턴 (조금 더 포괄적으로)
+  const adminPattern = /(시|도|군|구|읍|면|동|리)/;
+  const roadPattern = /(로|길)\s*\d{1,4}/;
+  const lotPattern = /(번지|지번)/;
+  const unitPattern = /(동|층|호)\s*\d{1,4}/;
+
+  // 숫자와 한글이 함께 있고 공백이 포함된 일반적인 주소 형태
+  const hasKorean = /[가-힣]/.test(s);
+  const hasNumber = /\d/.test(s);
+  const hasSpace = /\s/.test(s);
+  const genericShape = hasKorean && hasNumber && hasSpace && s.length >= 6;
+
+  return (
+    hasKeyword ||
+    adminPattern.test(s) ||
+    roadPattern.test(s) ||
+    lotPattern.test(s) ||
+    unitPattern.test(s) ||
+    genericShape
+  );
 }
 
 /**

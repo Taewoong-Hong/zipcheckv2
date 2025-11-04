@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       supabase.auth.admin.listUsers(),
 
       // 총 문서 수
-      supabase.from('v2_documents').select('id', { count: 'exact', head: true }),
+      supabase.from('v2_doc_texts').select('id', { count: 'exact', head: true }),
 
       // 결제 데이터는 아직 테이블이 없으므로 임시 데이터
       Promise.resolve({ data: null, error: null }),
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
         .gte('created_at', todayISO),
 
       supabase
-        .from('v2_documents')
+        .from('v2_doc_texts')
         .select('id', { count: 'exact', head: true })
         .gte('created_at', todayISO),
     ]);

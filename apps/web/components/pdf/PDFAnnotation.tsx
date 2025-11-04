@@ -40,12 +40,12 @@ interface Annotation {
 }
 
 interface PDFAnnotationProps {
-  documentId: string;
+  artifactId: string;
   userId: string;
 }
 
 export default function PDFAnnotation({
-  documentId,
+  artifactId,
   userId,
 }: PDFAnnotationProps) {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -71,7 +71,7 @@ export default function PDFAnnotation({
       // const { error } = await supabase
       //   .from('v2_annotations')
       //   .upsert({
-      //     document_id: documentId,
+      //     artifact_id: artifactId,
       //     user_id: userId,
       //     annotations: annotations,
       //   });
@@ -90,7 +90,7 @@ export default function PDFAnnotation({
       // const { data, error } = await supabase
       //   .from('v2_annotations')
       //   .select('annotations')
-      //   .eq('document_id', documentId)
+      //   .eq('artifact_id', artifactId)
       //   .eq('user_id', userId)
       //   .single();
       //

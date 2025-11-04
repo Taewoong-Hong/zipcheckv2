@@ -1,8 +1,8 @@
 /**
  * PDF 뷰어 페이지
  *
- * 경로: /pdf/[documentId]
- * 예시: /pdf/doc_abc123def456
+ * 경로: /pdf/[artifactId]
+ * 예시: /pdf/artifact_abc123def456
  *
  * 보안:
  * - Supabase Auth 세션 필요
@@ -12,7 +12,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import PDFViewer from '@/components/pdf/PDFViewer';
@@ -21,18 +21,14 @@ import { decrypt } from '@/lib/encryption';
 export default function PDFViewerPage() {
   const params = useParams();
   const router = useRouter();
-  const documentId = params?.documentId as string;
+  const artifactId = params?.artifactId as string;
 
   const [fileUrl, setFileUrl] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
 
-  useEffect(() => {
-    loadDocument();
-  }, [documentId]);
-
-  async function loadDocument() {
+  const loadDocument = useCallback(async () => {
     try {
       // 1. 세션 확인
       const {
@@ -48,7 +44,7 @@ export default function PDFViewerPage() {
       const { data: document, error: docError } = await supabase
         .from('v2_artifacts')
         .select('id, user_id, file_url, metadata')
-        .eq('id', documentId)
+        .eq('id', artifactId)
         .single();
 
       if (docError || !document) {
@@ -84,7 +80,11 @@ export default function PDFViewerPage() {
       setError('문서를 불러오는 중 오류가 발생했습니다.');
       setIsLoading(false);
     }
-  }
+  }, [artifactId, router]);
+
+  useEffect(() => {
+    loadDocument();
+  }, [loadDocument]);
 
   function handleClose() {
     router.back();
