@@ -123,7 +123,10 @@ export async function POST(request: NextRequest) {
         if (aiUrl) {
           fetch(`${aiUrl}/parse/registry`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${bearer}`,
+            },
             body: JSON.stringify({ file_url: signed.signedUrl }),
           }).catch(() => {});
         }
