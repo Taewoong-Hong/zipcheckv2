@@ -25,16 +25,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ skipped: true, results: [] });
     }
 
-    const key = process.env.JUSO_API_KEY;
+    // V1 호환: KEYWORD_JUSO_API_KEY 우선, 없으면 JUSO_API_KEY 사용
+    const key = process.env.KEYWORD_JUSO_API_KEY || process.env.JUSO_API_KEY;
     if (!key) {
-      return NextResponse.json({ error: 'MISSING_JUSO_API_KEY' }, { status: 500 });
+      return NextResponse.json({ error: 'MISSING_JUSO_API_KEY', message: 'KEYWORD_JUSO_API_KEY 또는 JUSO_API_KEY 환경변수가 필요합니다' }, { status: 500 });
     }
 
-    // DEBUG: 키 형식 확인 (프로덕션 배포 후 제거 필요)
+    // DEBUG: 사용된 환경변수 확인
+    console.log('[JUSO DEBUG] Using key from:', process.env.KEYWORD_JUSO_API_KEY ? 'KEYWORD_JUSO_API_KEY' : 'JUSO_API_KEY');
     console.log('[JUSO DEBUG] Key length:', key.length);
     console.log('[JUSO DEBUG] Key preview:', key.substring(0, 10) + '...');
-    console.log('[JUSO DEBUG] Has whitespace:', /\s/.test(key));
-    console.log('[JUSO DEBUG] Has quotes:', key.includes('"') || key.includes("'"));
 
     const form = new URLSearchParams();
     form.set('confmKey', key);
