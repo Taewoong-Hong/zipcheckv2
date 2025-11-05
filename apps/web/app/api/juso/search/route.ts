@@ -15,7 +15,6 @@ export async function GET(request: NextRequest) {
     const query = request.nextUrl.searchParams.get('query') || '';
     const page = request.nextUrl.searchParams.get('page') || '1';
     const size = request.nextUrl.searchParams.get('size') || '10';
-    const debug = request.nextUrl.searchParams.get('debug') === '1';
 
     if (!query) {
       return NextResponse.json({ results: [] });
@@ -41,45 +40,57 @@ export async function GET(request: NextRequest) {
     const res = await fetch('https://www.juso.go.kr/addrlink/addrLinkApi.do', {
       method: 'POST',
       headers: {
-        Accept: 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        Referer: process.env.NEXT_PUBLIC_SITE_URL || 'https://www.zipcheck.kr',
-        'Accept-Language': 'ko-KR,ko;q=0.9',
-        'User-Agent': 'zipcheck/2.0',
+        'Referer': process.env.NEXT_PUBLIC_SITE_URL || 'https://www.zipcheck.kr',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       body: form.toString(),
-      cache: 'no-store',
-      // @ts-ignore
-      next: { revalidate: 0 },
     });
-    if (!res.ok) {
-      const text = await res.text();
-      return NextResponse.json({ error: 'JUSO_FAILED', status: res.status, details: text }, { status: 502 });
-    }
-    const data = await res.json();
-    const common = data?.results?.common;
-    if (common && common.errorCode && String(common.errorCode) !== '0') {
-      const payload = { error: 'JUSO_ERROR', code: common.errorCode, message: common.errorMessage, totalCount: common.totalCount };
-      return NextResponse.json(debug ? { ...payload, raw: data } : payload, { status: 502 });
-    }
-    const list = data?.results?.juso || [];
-    const results = list.map((j: any) => ({
-      roadAddr: j.roadAddr,
-      jibunAddr: j.jibunAddr,
-      zipNo: j.zipNo,
-      siNm: j.siNm,
-      sggNm: j.sggNm,
-      emdNm: j.emdNm,
-      bdNm: j.bdNm,
-      roadAddrPart1: j.roadAddrPart1,
-      roadAddrPart2: j.roadAddrPart2,
-    }));
 
-    return NextResponse.json(debug ? { results, raw: data } : { results });
+    // V1 방식: 텍스트로 먼저 받고 JSON 파싱
+    const text = await res.text();
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseError) {
+      // JSONP 형식 fallback
+      const jsonMatch = text.match(/callback\(([\s\S]*)\);?$/);
+      if (jsonMatch) {
+        try {
+          data = JSON.parse(jsonMatch[1]);
+        } catch (e) {
+          console.error('JUSO API 파싱 실패:', text.substring(0, 500));
+          return NextResponse.json({ error: 'PARSE_ERROR', results: [] }, { status: 500 });
+        }
+      } else {
+        console.error('JUSO API 파싱 실패:', text.substring(0, 500));
+        return NextResponse.json({ error: 'PARSE_ERROR', results: [] }, { status: 500 });
+      }
+    }
+
+    const common = data?.results?.common;
+
+    // V1 방식: errorCode === '0' 문자열 비교
+    if (common?.errorCode === '0') {
+      // 성공: results.juso 배열 반환 (V2 UI에 맞춤)
+      const list = data.results?.juso || [];
+      return NextResponse.json({ results: list });
+    } else {
+      // API 에러 (로그만 출력하고 빈 배열 반환)
+      console.error('JUSO API 에러:', {
+        errorCode: common?.errorCode,
+        errorMessage: common?.errorMessage,
+        totalCount: common?.totalCount
+      });
+      return NextResponse.json({ error: common?.errorMessage || 'API 오류', results: [] });
+    }
+
   } catch (error) {
-    return NextResponse.json(
-      { error: 'SERVER_ERROR', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    console.error('JUSO API 호출 실패:', error);
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : '서버 오류',
+      results: []
+    }, { status: 500 });
   }
 }
