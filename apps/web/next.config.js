@@ -25,21 +25,10 @@ const nextConfig = {
   // 트레일링 슬래시 제거 (SEO 중복 URL 방지)
   trailingSlash: false,
 
-  // 리다이렉트 설정 (apex → www, API 제외)
+  // 리다이렉트 설정 제거 (middleware.ts로 이동)
+  // API 경로 제외가 더 정확하게 처리됩니다
   async redirects() {
-    return [
-      {
-        source: '/:path((?!api).*)*', // API 경로 제외 (negative lookahead)
-        has: [
-          {
-            type: 'host',
-            value: 'zipcheck.kr',
-          },
-        ],
-        destination: 'https://www.zipcheck.kr/:path*',
-        permanent: true, // 308 영구 리다이렉트 (SEO)
-      },
-    ];
+    return [];
   },
 
   // 헤더 설정 (보안 및 성능)
