@@ -49,7 +49,8 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const key = process.env.JUSO_API_KEY;
+    // V1 호환: KEYWORD_JUSO_API_KEY 우선, 없으면 JUSO_API_KEY 사용
+    const key = process.env.KEYWORD_JUSO_API_KEY || process.env.JUSO_API_KEY;
     if (!key) return NextResponse.json({ error: 'MISSING_JUSO_API_KEY' }, { status: 500 });
 
     const form = new URLSearchParams();
