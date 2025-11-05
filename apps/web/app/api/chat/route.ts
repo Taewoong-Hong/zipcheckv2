@@ -99,7 +99,42 @@ export async function POST(request: NextRequest) {
     const looksLikeAddress = (t: string) => {
       const s = (t || '').trim();
       if (s.length < 5) return false;
-      return /(시|도|구|동|읍|면)\s*[^\s]*\s*\d{1,4}/.test(s) || /(로|길)\s*\d{1,4}/.test(s) || /\d{1,4}-\d{1,4}/.test(s);
+      return /(시|도|구|동|읍|면)\s*[^\s]*\s*\d{1,4}/.test(s) ||
+             /(로|길)\s*\d{1,4}/.test(s) ||
+             /\d{1,4}-\d{1,4}/.test(s) ||
+             /^\d{5}$/.test(s); // 5자리 우편번호 또는 지번
+    };
+
+    // 비교분석 또는 일반 질문 의도 감지
+    const isComparisonOrGeneralQuestion = (t: string) => {
+      const s = t.toLowerCase();
+
+      // 비교 키워드
+      if (/(비교|vs|대|versus|차이|어디가|어느|둘 중|어떤 게|중에|어디|골라)/.test(s)) return true;
+
+      // 복수 주소 감지 (2개 이상의 부동산)
+      const addressMarkers = (s.match(/(시|구|동|로|길|아파트|빌라|오피스텔)/g) || []).length;
+      if (addressMarkers >= 6) return true; // "강남구 역삼동 XX아파트" = 3, 2개 = 6
+
+      // "~와 ~" 패턴
+      if (/(와|과|랑|하고)\s*[^\s]*\s*(비교|어때|괜찮|추천)/.test(s)) return true;
+
+      // 일반 질문 패턴 (주소 특정 없이 일반 정보 요청)
+      const generalQuestions = [
+        /(어때|어떤지|괜찮|좋|나쁨|추천|방법|팁|조언)/,
+        /(뭐|무엇|왜|어떻게|어디서|언제|얼마)/,
+        /(설명|알려|가르쳐|궁금|질문|물어)/,
+        /(시세|가격|동향|전망|트렌드)/,
+        /(전세가율|월세|매매|부동산).*\?/
+      ];
+
+      const hasGeneralQuestionPattern = generalQuestions.some(re => re.test(s));
+      const hasSpecificAddress = looksLikeAddress(t);
+
+      // 일반 질문 패턴은 있지만 구체적인 주소는 없는 경우
+      if (hasGeneralQuestionPattern && !hasSpecificAddress) return true;
+
+      return false;
     };
     const detectContract = (t: string): string | undefined => {
       const s = (t || '').trim();
@@ -166,6 +201,11 @@ export async function POST(request: NextRequest) {
     }
 
     function getFixedReply(): string | undefined {
+      // 비교분석/일반질문 의도는 모달 없이 바로 LLM 답변
+      if (isComparisonOrGeneralQuestion(content)) {
+        return undefined; // LLM 분석 단계로 진행
+      }
+
       if (!addr) {
         const rules: Array<[RegExp, string]> = [
           [/^(안녕|안녕하세요|하이|hello|hi)$/i, '안녕하세요! 집체크입니다. 검토하실 부동산 주소를 입력해주세요.'],
@@ -224,9 +264,21 @@ export async function POST(request: NextRequest) {
         start(controller) {
           const data = JSON.stringify({ content: guided, done: false });
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          // server-side gating: only open address modal when input looks like an address
+          if (!addr && !looksLikeAddress(content)) {
+            const doneData = JSON.stringify({ done: true });
+            controller.enqueue(encoder.encode(`data: ${doneData}\n\n`));
+            controller.close();
+            return;
+          }
           // (선택) 주소 선택 지원 메타 이벤트
           if (!addr) {
-            const metaAddr = JSON.stringify({ meta: true, component: 'address_search', options: [] });
+            const metaAddr = JSON.stringify({
+              meta: true,
+              component: 'address_search',
+              initialQuery: content.trim(),
+              options: []
+            });
             controller.enqueue(encoder.encode(`data: ${metaAddr}\n\n`));
           }
           // 계약 유형 셀렉트 힌트
