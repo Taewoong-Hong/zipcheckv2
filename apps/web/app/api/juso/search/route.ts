@@ -30,6 +30,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'MISSING_JUSO_API_KEY' }, { status: 500 });
     }
 
+    // DEBUG: 키 형식 확인 (프로덕션 배포 후 제거 필요)
+    console.log('[JUSO DEBUG] Key length:', key.length);
+    console.log('[JUSO DEBUG] Key preview:', key.substring(0, 10) + '...');
+    console.log('[JUSO DEBUG] Has whitespace:', /\s/.test(key));
+    console.log('[JUSO DEBUG] Has quotes:', key.includes('"') || key.includes("'"));
+
     const form = new URLSearchParams();
     form.set('confmKey', key);
     form.set('currentPage', page);
@@ -49,6 +55,10 @@ export async function GET(request: NextRequest) {
 
     // V1 방식: 텍스트로 먼저 받고 JSON 파싱
     const text = await res.text();
+
+    // DEBUG: API 응답 확인 (프로덕션 배포 후 제거 필요)
+    console.log('[JUSO DEBUG] Response status:', res.status);
+    console.log('[JUSO DEBUG] Response preview:', text.substring(0, 500));
 
     let data;
     try {
