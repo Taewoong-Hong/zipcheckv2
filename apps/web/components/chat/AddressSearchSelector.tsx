@@ -18,7 +18,7 @@ interface AddressResult {
 
 interface AddressSearchSelectorProps {
   initialAddress?: string;
-  onAddressSelect: (address: AddressResult) => void;
+  onAddressSelect: (address: AddressResult, detailAddress: string) => void;
   onCancel?: () => void;
 }
 
@@ -32,6 +32,18 @@ export default function AddressSearchSelector({
   const [selectedAddress, setSelectedAddress] = useState<AddressResult | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // 상세주소 선택 상태
+  const [selectedDong, setSelectedDong] = useState("");
+  const [selectedHo, setSelectedHo] = useState("");
+  const [selectedFloor, setSelectedFloor] = useState("");
+
+  // 동/호수 선택지 (API 응답에서 추출)
+  const [dongOptions, setDongOptions] = useState<string[]>([]);
+  const [hoOptions, setHoOptions] = useState<string[]>([]);
+
+  // 층 선택지 (1층~50층)
+  const floorOptions = Array.from({ length: 50 }, (_, i) => `${i + 1}`);
 
   // 주소 검색 API 호출 (기존 GET API 사용)
   const searchAddress = async () => {
@@ -87,12 +99,48 @@ export default function AddressSearchSelector({
   // 주소 선택 핸들러
   const handleSelectAddress = (address: AddressResult) => {
     setSelectedAddress(address);
+
+    // detBdNmList에서 동/호 정보 추출
+    if (address.detBdNmList) {
+      const details = address.detBdNmList.split(',').map(d => d.trim());
+
+      // 동 추출 (예: "101동", "102동")
+      const dongs = details
+        .filter(d => d.includes('동'))
+        .map(d => d.match(/\d+동/)?.[0])
+        .filter((d): d is string => !!d);
+
+      // 호 추출 (예: "101호", "102호")
+      const hos = details
+        .filter(d => d.includes('호'))
+        .map(d => d.match(/\d+호/)?.[0])
+        .filter((d): d is string => !!d);
+
+      setDongOptions([...new Set(dongs)]); // 중복 제거
+      setHoOptions([...new Set(hos)]);
+    }
+
+    // 선택 초기화
+    setSelectedDong("");
+    setSelectedHo("");
+    setSelectedFloor("");
   };
 
   // 확인 버튼 핸들러
   const handleConfirm = () => {
     if (selectedAddress) {
-      onAddressSelect(selectedAddress);
+      // 층 필수 검증
+      if (!selectedFloor) {
+        setErrorMessage("층을 선택해주세요.");
+        return;
+      }
+
+      // 에러 메시지 초기화
+      setErrorMessage("");
+
+      // 선택한 동/호수/층수를 조합하여 상세주소 생성
+      const details = [selectedDong, selectedFloor, selectedHo].filter(Boolean).join(' ');
+      onAddressSelect(selectedAddress, details);
     }
   };
 
@@ -180,8 +228,8 @@ export default function AddressSearchSelector({
       {/* 선택된 주소 확인 */}
       {selectedAddress && (
         <div className="mb-4 p-4 bg-brand-50 border border-brand-200 rounded-lg">
-          <p className="text-sm font-medium text-neutral-700 mb-2">선택된 주소</p>
-          <div className="space-y-1">
+          <p className="text-sm font-medium text-neutral-700 mb-3">선택된 주소</p>
+          <div className="space-y-1 mb-4">
             <p className="text-sm text-neutral-800">
               <span className="font-medium">도로명:</span> {selectedAddress.roadAddr}
             </p>
@@ -193,6 +241,75 @@ export default function AddressSearchSelector({
                 <span className="font-medium">건물명:</span> {selectedAddress.bdNm}
               </p>
             )}
+          </div>
+
+          {/* 상세주소 입력 */}
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-neutral-700">
+              상세주소
+            </label>
+
+            {/* 동 선택/입력 (선택사항) */}
+            {dongOptions.length > 0 ? (
+              <select
+                value={selectedDong}
+                onChange={(e) => setSelectedDong(e.target.value)}
+                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
+              >
+                <option value="">동을 선택해주세요. (선택)</option>
+                {dongOptions.map((dong) => (
+                  <option key={dong} value={dong}>{dong}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                placeholder="동을 입력해주세요. (선택)"
+                value={selectedDong}
+                onChange={(e) => setSelectedDong(e.target.value)}
+                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
+              />
+            )}
+
+            {/* 호 선택/입력 (선택사항) */}
+            {hoOptions.length > 0 ? (
+              <select
+                value={selectedHo}
+                onChange={(e) => setSelectedHo(e.target.value)}
+                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
+              >
+                <option value="">호를 선택해주세요. (선택)</option>
+                {hoOptions.map((ho) => (
+                  <option key={ho} value={ho}>{ho}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                placeholder="호를 입력해주세요. (선택)"
+                value={selectedHo}
+                onChange={(e) => setSelectedHo(e.target.value)}
+                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
+              />
+            )}
+
+            {/* 층 선택 (필수) */}
+            <div>
+              <select
+                value={selectedFloor}
+                onChange={(e) => setSelectedFloor(e.target.value)}
+                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
+              >
+                <option value="">층을 선택해주세요. (필수)</option>
+                <option value="0">지하(0층)</option>
+                {floorOptions.map((floor) => (
+                  <option key={floor} value={floor}>{floor}층</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-neutral-500">
+                *층은 필수 선택 사항입니다. 지하의 경우 &apos;지하(0층)&apos;을 선택해주세요.
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -209,7 +326,7 @@ export default function AddressSearchSelector({
         )}
         <button
           onClick={handleConfirm}
-          disabled={!selectedAddress}
+          disabled={!selectedAddress || !selectedFloor}
           className="px-6 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           이 주소로 계속하기

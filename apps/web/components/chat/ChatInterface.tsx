@@ -639,7 +639,7 @@ export default function ChatInterface({
       const currentState = stateMachine.getState();
 
       // Handle based on current state
-      if (currentState === 'init' && isAddressInput(content)) {
+      if (false && currentState === 'init' && isAddressInput(content)) {
         // User entered an address - show address search selector
         stateMachine.transition('address_pick');
 
