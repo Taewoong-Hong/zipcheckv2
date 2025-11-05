@@ -28,13 +28,8 @@ export async function GET(request: NextRequest) {
     // V1 호환: KEYWORD_JUSO_API_KEY 우선, 없으면 JUSO_API_KEY 사용
     const key = process.env.KEYWORD_JUSO_API_KEY || process.env.JUSO_API_KEY;
     if (!key) {
-      return NextResponse.json({ error: 'MISSING_JUSO_API_KEY', message: 'KEYWORD_JUSO_API_KEY 또는 JUSO_API_KEY 환경변수가 필요합니다' }, { status: 500 });
+      return NextResponse.json({ error: 'MISSING_JUSO_API_KEY' }, { status: 500 });
     }
-
-    // DEBUG: 사용된 환경변수 확인
-    console.log('[JUSO DEBUG] Using key from:', process.env.KEYWORD_JUSO_API_KEY ? 'KEYWORD_JUSO_API_KEY' : 'JUSO_API_KEY');
-    console.log('[JUSO DEBUG] Key length:', key.length);
-    console.log('[JUSO DEBUG] Key preview:', key.substring(0, 10) + '...');
 
     const form = new URLSearchParams();
     form.set('confmKey', key);
@@ -55,10 +50,6 @@ export async function GET(request: NextRequest) {
 
     // V1 방식: 텍스트로 먼저 받고 JSON 파싱
     const text = await res.text();
-
-    // DEBUG: API 응답 확인 (프로덕션 배포 후 제거 필요)
-    console.log('[JUSO DEBUG] Response status:', res.status);
-    console.log('[JUSO DEBUG] Response preview:', text.substring(0, 500));
 
     let data;
     try {
