@@ -303,12 +303,33 @@ export async function POST(request: NextRequest) {
     console.warn('[api/chat] gating check failed (proceeding to analyze):', e);
   }
 
-  // 3. LLM 분석 (기존 /analyze 엔드포인트)
+  // 3. LLM 분석 - GPT-4o-mini 또는 기존 시스템 선택
   let analyzeResponse: Response;
+  const useGPTv2 = process.env.USE_GPT_V2 === 'true' || body.useGPTv2;
+
   try {
-    // Use trailing slash to hit simple chat endpoint (no case_id required)
-    analyzeResponse = await fetch(`${AI_API_URL}/analyze/`, {
-      method: 'POST',
+    if (useGPTv2) {
+      // GPT-4o-mini with Function Calling (v2)
+      analyzeResponse = await fetch(`${AI_API_URL}/chat/v2/message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          conversation_id: currentConversationId,
+          content,
+          context: {
+            property_address: body.property_address,
+            contract_type: body.contract_type,
+            case_id: body.case_id
+          }
+        }),
+      });
+    } else {
+      // 기존 rule-based + simple LLM (v1)
+      analyzeResponse = await fetch(`${AI_API_URL}/analyze/`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
@@ -317,10 +338,11 @@ export async function POST(request: NextRequest) {
           question: content,
         }),
       });
-    } catch (e: any) {
-      console.error('[api/chat] analyze network error:', e?.message || e);
-      return NextResponse.json({ error: 'BACKEND_UNREACHABLE' }, { status: 502 });
     }
+  } catch (e: any) {
+    console.error('[api/chat] analyze network error:', e?.message || e);
+    return NextResponse.json({ error: 'BACKEND_UNREACHABLE' }, { status: 502 });
+  }
 
     if (!analyzeResponse.ok) {
       const text = await analyzeResponse.text();
@@ -328,14 +350,26 @@ export async function POST(request: NextRequest) {
     }
 
   const analyzeData = await analyzeResponse.json();
-  const answer = analyzeData.answer || '응답을 생성할 수 없습니다.';
+
+  // v2 response has 'reply' field, v1 has 'answer' field
+  const answer = analyzeData.reply || analyzeData.answer || '응답을 생성할 수 없습니다.';
+  const toolCalls = analyzeData.tool_calls || analyzeData.toolCalls || []; // Handle both naming conventions
+
+  // Log tool calls for debugging
+  if (toolCalls.length > 0) {
+    console.log('[chat/route] Tool calls received from backend:', JSON.stringify(toolCalls, null, 2));
+  }
 
   // 4. AI 응답 메시지 저장
   const { error: insertErr } = await supabase.from('messages').insert({
     conversation_id: currentConversationId,
     role: 'assistant',
     content: answer,
-    meta: { topic: 'contract_analysis', extension: 'chat' },
+    meta: {
+      topic: 'contract_analysis',
+      extension: 'chat',
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+    },
   });
   if (insertErr) {
     console.warn('[api/chat] assistant message insert failed:', insertErr);
@@ -350,6 +384,19 @@ export async function POST(request: NextRequest) {
           const meta = JSON.stringify({ newConversationId, done: false, meta: true });
           controller.enqueue(encoder.encode(`data: ${meta}\n\n`));
         }
+
+        // Send tool calls if any (for v2)
+        if (toolCalls.length > 0) {
+          toolCalls.forEach((toolCall: any) => {
+            const toolData = JSON.stringify({
+              meta: true,
+              toolCall: toolCall,
+              done: false
+            });
+            controller.enqueue(encoder.encode(`data: ${toolData}\n\n`));
+          });
+        }
+
         const chunks = answer.split(' ');
         chunks.forEach((chunk: string, index: number) => {
           setTimeout(() => {

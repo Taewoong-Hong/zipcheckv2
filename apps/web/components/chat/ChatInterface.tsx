@@ -755,6 +755,10 @@ export default function ChatInterface({
             session,
             // Include case_id when available for downstream processing
             case_id: (analysisContext as any)?.caseId,
+            // Enable GPT v2 mode for better conversational experience
+            useGPTv2: true,
+            property_address: analysisContext?.address?.road,
+            contract_type: analysisContext?.contractType,
           }),
           signal: abortControllerRef.current.signal,
         });
@@ -799,6 +803,115 @@ export default function ChatInterface({
                       ? { ...msg, isStreaming: false }
                       : msg
                   ));
+                } else if (data.toolCall) {
+                  // Handle tool call from GPT-4o-mini
+                  console.log('[ChatInterface] Tool call received:', data.toolCall);
+
+                  // Parse the tool call
+                  const toolName = data.toolCall.function?.name;
+                  const toolArgs = data.toolCall.function?.arguments ?
+                    JSON.parse(data.toolCall.function.arguments) : {};
+
+                  // Handle different tool calls to trigger UI modals
+                  if (toolName === 'search_address') {
+                    // Trigger address search modal
+                    const addressQuery = toolArgs.query || '';
+                    stateMachine.transition('address_pick');
+
+                    const modalMessage: MessageType = {
+                      id: `modal-${Date.now()}`,
+                      role: 'assistant',
+                      content: toolArgs.message || '주소를 검색해주세요. 정확한 주소를 선택하면 분석이 더 정확해집니다.',
+                      timestamp: new Date(),
+                      componentType: 'address_search',
+                      componentData: { initialAddress: addressQuery },
+                    };
+
+                    setMessages(prev => {
+                      // Remove the current streaming message and add modal message
+                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                      return [...filtered, modalMessage];
+                    });
+                    chatStorage.addMessage(modalMessage);
+                    setIsLoading(false);
+
+                  } else if (toolName === 'select_contract_type') {
+                    // Trigger contract type selector
+                    stateMachine.transition('contract_type');
+
+                    const modalMessage: MessageType = {
+                      id: `modal-${Date.now()}`,
+                      role: 'assistant',
+                      content: toolArgs.message || getStateResponseMessage('contract_type', { address: analysisContext?.address }),
+                      timestamp: new Date(),
+                      componentType: 'contract_selector',
+                    };
+
+                    setMessages(prev => {
+                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                      return [...filtered, modalMessage];
+                    });
+                    chatStorage.addMessage(modalMessage);
+                    setIsLoading(false);
+
+                  } else if (toolName === 'input_price') {
+                    // Trigger price input modal
+                    stateMachine.transition('price_input');
+
+                    const modalMessage: MessageType = {
+                      id: `modal-${Date.now()}`,
+                      role: 'assistant',
+                      content: toolArgs.message || getStateResponseMessage('price_input', { contractType: analysisContext?.contractType }),
+                      timestamp: new Date(),
+                      componentType: 'price_input',
+                      componentData: { contractType: analysisContext?.contractType },
+                    };
+
+                    setMessages(prev => {
+                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                      return [...filtered, modalMessage];
+                    });
+                    chatStorage.addMessage(modalMessage);
+                    setIsLoading(false);
+
+                  } else if (toolName === 'upload_registry') {
+                    // Trigger registry upload modal
+                    stateMachine.transition('registry_choice');
+
+                    const modalMessage: MessageType = {
+                      id: `modal-${Date.now()}`,
+                      role: 'assistant',
+                      content: toolArgs.message || getStateResponseMessage('registry_choice', analysisContext),
+                      timestamp: new Date(),
+                      componentType: 'registry_choice',
+                      componentData: {
+                        userCredits: analysisContext?.userCredits ?? 0,
+                        registryCost: 10
+                      },
+                    };
+
+                    setMessages(prev => {
+                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                      return [...filtered, modalMessage];
+                    });
+                    chatStorage.addMessage(modalMessage);
+                    setIsLoading(false);
+
+                  } else if (toolName === 'start_analysis') {
+                    // Start the analysis process
+                    await startAnalysis();
+
+                  } else {
+                    // Unknown tool call - show as regular message
+                    console.warn('[ChatInterface] Unknown tool call:', toolName);
+                    accumulatedContent = `시스템: ${toolName} 기능을 실행하려 했으나 아직 구현되지 않았습니다.`;
+                  }
+
+                  // Exit the streaming loop after handling tool call
+                  if (toolName && toolName !== 'start_analysis') {
+                    break;
+                  }
+
                 } else if (data.content) {
                   // Accumulate content
                   accumulatedContent += data.content;
