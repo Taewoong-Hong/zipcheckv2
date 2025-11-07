@@ -19,7 +19,7 @@ const supabase = createClient(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { conversation_id, content, session } = body;
+    const { conversation_id, content, session, recent_context } = body;
 
     // 인증 확인
     if (!session?.access_token) {
@@ -103,6 +103,64 @@ export async function POST(request: NextRequest) {
              /(로|길)\s*\d{1,4}/.test(s) ||
              /\d{1,4}-\d{1,4}/.test(s) ||
              /^\d{5}$/.test(s); // 5자리 우편번호 또는 지번
+    };
+
+    // 부동산 분석 요청 감지 (registry_choice 모달 트리거)
+    const isRealEstateAnalysisRequest = (t: string) => {
+      const s = t.toLowerCase();
+
+      // 분석 요청 키워드 (핵심)
+      const analysisKeywords = [
+        '분석', '검토', '체크', '확인', '점검', '리스크', '위험',
+        '살펴', '알아', '조사', '평가', '검사', '진단', '감정'
+      ];
+
+      // 부동산 관련 키워드
+      const realEstateKeywords = [
+        '아파트', '빌라', '오피스텔', '주택', '부동산', '집',
+        '전세', '월세', '매매', '계약', '등기', '등기부'
+      ];
+
+      // 의도 표현 키워드
+      const intentKeywords = [
+        '하려고', '할려고', '하고싶', '하고 싶', '예정', '계획',
+        '할건데', '할 건데', '하는데', '할까', '해줘', '해주',
+        '보고싶', '보고 싶', '봐줘', '봐주'
+      ];
+
+      // 1. 명시적 분석 요청: "~를 분석해줘", "~를 검토해줘"
+      const hasAnalysisKeyword = analysisKeywords.some(k => s.includes(k));
+      const hasRealEstateKeyword = realEstateKeywords.some(k => s.includes(k));
+
+      if (hasAnalysisKeyword && (hasRealEstateKeyword || looksLikeAddress(t))) {
+        console.log('[분석 요청 감지] 분석 키워드 + 부동산/주소');
+        return true;
+      }
+
+      // 2. 계약 의도: "전세 계약하려고", "매매하려는데"
+      const hasIntentKeyword = intentKeywords.some(k => s.includes(k));
+      const contractTypes = ['전세', '월세', '매매', '계약'];
+      const hasContractType = contractTypes.some(c => s.includes(c));
+
+      if (hasIntentKeyword && hasContractType) {
+        console.log('[분석 요청 감지] 계약 의도 표현');
+        return true;
+      }
+
+      // 3. 등기부 관련: "등기부 확인", "등기 떼고싶어"
+      if (s.includes('등기') && (hasAnalysisKeyword || hasIntentKeyword || s.includes('확인') || s.includes('떼'))) {
+        console.log('[분석 요청 감지] 등기부 관련 요청');
+        return true;
+      }
+
+      // 4. 주소만 입력한 경우 (기존 로직과 호환)
+      // 주소가 있고, 비교/일반 질문이 아닌 경우
+      if (looksLikeAddress(t) && !isComparisonOrGeneralQuestion(t)) {
+        console.log('[분석 요청 감지] 주소 입력 (비교/일반 아님)');
+        return true;
+      }
+
+      return false;
     };
 
     // 비교분석 또는 일반 질문 의도 감지
@@ -233,6 +291,56 @@ export async function POST(request: NextRequest) {
 
     const guided: string | undefined = getFixedReply();
 
+    // 부동산 분석 요청이 감지되면 분석 플로우 시작
+    if (isRealEstateAnalysisRequest(content) && (!addr || !ctype)) {
+      console.log('[게이팅] 부동산 분석 시작 - 필수 정보 수집');
+
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          // 메시지와 함께 적절한 모달 트리거
+          if (!addr) {
+            // 주소가 없으면 주소 입력 요청
+            const msg = '부동산 분석을 시작하겠습니다. 먼저 검토하실 부동산 주소를 입력해주세요.';
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
+
+            // 주소가 입력 텍스트에 포함되어 있을 수 있으니 체크
+            if (looksLikeAddress(content)) {
+              const metaAddr = JSON.stringify({
+                meta: true,
+                component: 'address_search',
+                initialQuery: content.trim(),
+                options: []
+              });
+              controller.enqueue(encoder.encode(`data: ${metaAddr}\n\n`));
+            }
+          } else if (!ctype) {
+            // 주소는 있지만 계약 타입이 없으면
+            const msg = '주소가 확인되었습니다. 계약 형태를 선택해주세요.';
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
+
+            const meta = JSON.stringify({
+              meta: true,
+              component: 'contract_selector',
+              options: ['전세','월세','반전세','매매']
+            });
+            controller.enqueue(encoder.encode(`data: ${meta}\n\n`));
+          }
+
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+          controller.close();
+        },
+      });
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      };
+      if (newConversationId) headers['X-New-Conversation-Id'] = newConversationId;
+      return new NextResponse(stream, { headers });
+    }
+
     // If address + contract_type are both present, prompt registry choice in-chat
     if (addr && ctype) {
       const encoder = new TextEncoder();
@@ -323,7 +431,9 @@ export async function POST(request: NextRequest) {
             property_address: body.property_address,
             contract_type: body.contract_type,
             case_id: body.case_id
-          }
+          },
+          // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
+          recent_context: recent_context
         }),
       });
     } else {
@@ -336,6 +446,8 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify({
           question: content,
+          // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
+          recent_context: recent_context
         }),
       });
     }

@@ -48,9 +48,15 @@ def generate_markdown_report(
     lines.append(f"- **주소**: {address}")
 
     if contract_type == "매매":
-        lines.append(f"- **매매가**: {deposit:,}만원 ({deposit * 10000:,}원)")
+        if deposit is not None:
+            lines.append(f"- **매매가**: {deposit:,}만원 ({deposit * 10000:,}원)")
+        else:
+            lines.append(f"- **매매가**: 정보 없음")
     else:
-        lines.append(f"- **보증금**: {deposit:,}만원 ({deposit * 10000:,}원)")
+        if deposit is not None:
+            lines.append(f"- **보증금**: {deposit:,}만원 ({deposit * 10000:,}원)")
+        else:
+            lines.append(f"- **보증금**: 정보 없음")
         if monthly_rent:
             lines.append(f"- **월세**: {monthly_rent:,}만원")
 

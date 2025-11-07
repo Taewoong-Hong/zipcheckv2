@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., description="대화 히스토리")
     session_id: Optional[str] = Field(None, description="세션 ID")
     context: Optional[Dict[str, Any]] = Field(None, description="추가 컨텍스트")
+    recent_context: Optional[List[Dict[str, str]]] = Field(None, description="최근 대화 히스토리 (Claude-like integrated answer)")
 
 class ToolCall(BaseModel):
     type: str = Field(..., description="도구 타입")
@@ -210,14 +211,14 @@ SYSTEM_PROMPT = """당신은 집체크의 AI 부동산 분석 전문가입니다
 # ===========================
 # API Endpoints
 # ===========================
-@router.post("/message", response_model=ChatResponse)
+@router.post("/message/legacy", response_model=ChatResponse)
 async def chat_with_gpt(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user)
 ):
     """
-    GPT-4o-mini를 사용한 대화형 채팅 엔드포인트
+    GPT-4o-mini를 사용한 대화형 채팅 엔드포인트 (레거시 - messages 배열 방식)
     Function Calling을 통해 도구를 자동으로 선택하고 실행
     """
     try:
@@ -339,6 +340,142 @@ async def chat_with_gpt(
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
         raise HTTPException(500, f"채팅 처리 중 오류가 발생했습니다: {str(e)}")
+
+class ConversationMessageRequest(BaseModel):
+    """대화 기반 메시지 요청 (Next.js 호환)"""
+    conversation_id: str = Field(..., description="대화 ID")
+    content: str = Field(..., description="메시지 내용")
+    context: Optional[Dict[str, Any]] = Field(None, description="추가 컨텍스트")
+    recent_context: Optional[List[Dict[str, str]]] = Field(None, description="최근 대화 히스토리 (Claude-like integrated answer)")
+
+
+@router.post("/message", response_model=ChatResponse)
+async def chat_with_conversation(
+    request: ConversationMessageRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user)
+):
+    """
+    대화 ID 기반 채팅 엔드포인트 (Next.js 호환)
+
+    Claude-like 동작:
+    - 답변 중 새 질문이 오면 recent_context에 이전 대화 포함
+    - GPT가 이전 질문과 새 질문을 통합하여 답변
+    """
+    try:
+        supabase = get_supabase_client(service_role=True)
+
+        # 1. 대화 히스토리 조회
+        messages_result = supabase.table("messages") \
+            .select("role, content") \
+            .eq("conversation_id", request.conversation_id) \
+            .order("created_at", desc=False) \
+            .execute()
+
+        # 2. 메시지 구성
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+        # ✅ recent_context가 있으면 우선 사용 (답변 중 새 질문)
+        if request.recent_context:
+            logger.info(f"[Claude-like] Using recent_context with {len(request.recent_context)} messages")
+            for msg in request.recent_context:
+                messages.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                })
+        elif messages_result.data:
+            # recent_context 없으면 전체 히스토리 사용 (일반 흐름)
+            for msg in messages_result.data:
+                messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+
+        # 3. 현재 메시지 추가
+        messages.append({
+            "role": "user",
+            "content": request.content
+        })
+
+        logger.info(f"Calling GPT-4o-mini with {len(messages)} messages (recent_context: {bool(request.recent_context)})")
+
+        # 4. GPT-4o-mini 호출
+        completion = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            tools=get_tool_definitions(),
+            tool_choice="auto",
+            temperature=0.7,
+            max_tokens=1000
+        )
+
+        response_message = completion.choices[0].message
+
+        # 5. Tool calls 처리 (기존 로직 동일)
+        tool_calls = []
+        if response_message.tool_calls:
+            for tool_call in response_message.tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+
+                logger.info(f"Tool call: {function_name} with args: {function_args}")
+
+                if function_name == "open_address_search_modal":
+                    tool_calls.append(ToolCall(
+                        type="OPEN_ADDRESS_MODAL",
+                        data={
+                            "keyword": function_args.get("keyword", ""),
+                            "purpose": function_args["purpose"],
+                            "index": function_args.get("search_index", 0)
+                        }
+                    ))
+
+                elif function_name == "request_registry_upload":
+                    tool_calls.append(ToolCall(
+                        type="REQUEST_REGISTRY_UPLOAD",
+                        data={
+                            "contractType": function_args["contract_type"],
+                            "isRequired": function_args["is_required"]
+                        }
+                    ))
+
+                elif function_name == "start_analysis":
+                    background_tasks.add_task(
+                        start_background_analysis,
+                        request.conversation_id,
+                        function_args,
+                        user["sub"]
+                    )
+                    tool_calls.append(ToolCall(
+                        type="START_ANALYSIS",
+                        data=function_args
+                    ))
+
+                elif function_name == "generate_report":
+                    tool_calls.append(ToolCall(
+                        type="GENERATE_REPORT",
+                        data=function_args
+                    ))
+
+                elif function_name == "ask_clarification":
+                    tool_calls.append(ToolCall(
+                        type="ASK_CLARIFICATION",
+                        data=function_args
+                    ))
+
+        # 6. 응답
+        reply = response_message.content or "무엇을 도와드릴까요?"
+
+        return ChatResponse(
+            reply=reply,
+            tool_calls=tool_calls if tool_calls else None,
+            session_id=request.conversation_id
+        )
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}", exc_info=True)
+        raise HTTPException(500, f"채팅 처리 중 오류가 발생했습니다: {str(e)}")
+
 
 @router.get("/session/{session_id}")
 async def get_session(

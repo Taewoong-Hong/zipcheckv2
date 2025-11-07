@@ -183,6 +183,10 @@ class LegalDongCodeAPIClient(BasePublicDataAPI):
         query_string = urlencode(params).replace("+", "%20")
         url = f"{self.BASE_URL}?{query_string}"
 
+        # Ensure client is initialized
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized. Use async context manager or provide client.")
+
         try:
             response = await self.client.get(url)
 
@@ -317,6 +321,10 @@ class AptTradeAPIClient(BasePublicDataAPI):
 
         if len(deal_ymd) != 6 or not deal_ymd.isdigit():
             raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd} (must be 6 digits YYYYMM)")
+
+        # Ensure client is initialized
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized. Use async context manager or provide client.")
 
         # 새 버전 API 먼저 시도, 실패하면 구 버전 시도
         for version, base_url in self.API_URLS.items():

@@ -1,13 +1,17 @@
 """
 채팅 API 라우터
-기존 conversations/messages 테이블 활용
+기존 conversations/messages 테이블 활용 + Idempotency + SSE Streaming
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Header
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, AsyncGenerator
 from uuid import UUID
 import logging
+import asyncio
+import json
+from datetime import datetime
 
 from core.auth import get_current_user
 from core.supabase_client import get_supabase_client
@@ -26,9 +30,10 @@ class CreateConversationResponse(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    """메시지 전송 요청"""
+    """메시지 전송 요청 (idempotency 지원)"""
     conversation_id: str = Field(..., description="대화 ID")
     content: str = Field(..., min_length=1, max_length=5000, description="메시지 내용")
+    client_message_id: Optional[str] = Field(None, description="클라이언트 생성 메시지 ID (idempotency key, ULID 권장)")
     component_type: Optional[str] = Field(None, description="UI 컴포넌트 타입")
     component_data: Optional[dict] = Field(None, description="UI 컴포넌트 데이터")
 
@@ -135,9 +140,16 @@ async def init_chat(user: dict = Depends(get_current_user)):
 
 
 @router.post("/message")
-async def send_message(request: SendMessageRequest, user: dict = Depends(get_current_user)):
+async def send_message(
+    request: SendMessageRequest,
+    user: dict = Depends(get_current_user),
+    x_idempotency_key: Optional[str] = Header(None)
+):
     """
-    메시지 전송 (사용자 메시지 저장)
+    메시지 전송 (사용자 메시지 저장) - Idempotent
+
+    클라이언트는 client_message_id (ULID) 또는 X-Idempotency-Key 헤더를 전송하여
+    네트워크 재시도 시 중복 메시지 방지
     """
     user_id = user["sub"]
     logger.info(f"메시지 전송: user_id={user_id}, conversation_id={request.conversation_id}")
@@ -155,17 +167,41 @@ async def send_message(request: SendMessageRequest, user: dict = Depends(get_cur
         if not conv_check.data:
             raise HTTPException(404, "대화를 찾을 수 없거나 권한이 없습니다")
 
-        # 2. 메시지 저장 (기존 messages 테이블 구조)
+        # 2. Idempotency 체크
+        idempotency_key = request.client_message_id or x_idempotency_key
+
+        if idempotency_key:
+            # 동일 키로 이미 생성된 메시지가 있는지 확인
+            existing = supabase.table("messages") \
+                .select("id, conversation_id, role, content, created_at, meta") \
+                .eq("conversation_id", request.conversation_id) \
+                .execute()
+
+            for msg in (existing.data or []):
+                meta = msg.get("meta") or {}
+                if meta.get("client_message_id") == idempotency_key:
+                    logger.info(f"Idempotent 응답: message_id={msg['id']}, key={idempotency_key}")
+                    return {
+                        "ok": True,
+                        "message_id": msg["id"],
+                        "conversation_id": request.conversation_id,
+                        "idempotent": True
+                    }
+
+        # 3. 메시지 저장 (기존 messages 테이블 구조)
         message_data = {
             "conversation_id": request.conversation_id,
             "role": "user",
             "content": request.content,
-            "meta": { "topic": "contract_analysis", "extension": "chat" }
+            "meta": {
+                "topic": "contract_analysis",
+                "extension": "chat",
+                "client_message_id": idempotency_key  # Idempotency key 저장
+            }
         }
 
         # payload에 컴포넌트 정보 저장
         if request.component_type or request.component_data:
-            message_data["meta"] = message_data.get("meta", {})
             message_data["meta"]["component_type"] = request.component_type
             message_data["meta"]["component_data"] = request.component_data or {}
 
@@ -457,3 +493,192 @@ async def delete_conversation(conversation_id: str, user: dict = Depends(get_cur
     except Exception as e:
         logger.error(f"대화 삭제 오류: {e}")
         raise HTTPException(500, f"대화 삭제 실패: {str(e)}")
+
+
+# ============== SSE 스트리밍 엔드포인트 ==============
+
+@router.get("/stream/{message_id}")
+async def stream_message(message_id: int, user: dict = Depends(get_current_user)):
+    """
+    메시지 스트리밍 (SSE)
+
+    - LLM 응답을 실시간으로 스트리밍
+    - message_chunks 테이블에서 청크를 읽어서 전송
+    - 클라이언트는 EventSource로 연결
+    """
+    user_id = user["sub"]
+    logger.info(f"메시지 스트리밍 시작: user_id={user_id}, message_id={message_id}")
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """SSE 이벤트 생성기"""
+        try:
+            supabase = get_supabase_client(service_role=True)
+
+            # 1. 메시지 소유권 확인
+            msg_check = supabase.table("messages") \
+                .select("id, conversation_id") \
+                .eq("id", message_id) \
+                .execute()
+
+            if not msg_check.data:
+                yield f"event: error\ndata: {json.dumps({'error': 'Message not found'})}\n\n"
+                return
+
+            conversation_id = msg_check.data[0]["conversation_id"]
+
+            # 대화 소유권 확인
+            conv_check = supabase.table("conversations") \
+                .select("id") \
+                .eq("id", conversation_id) \
+                .eq("user_id", user_id) \
+                .execute()
+
+            if not conv_check.data:
+                yield f"event: error\ndata: {json.dumps({'error': 'Unauthorized'})}\n\n"
+                return
+
+            # 2. message_chunks 폴링 (실시간 스트리밍 시뮬레이션)
+            last_seq = -1
+            max_poll_count = 300  # 최대 5분 (1초 간격)
+            poll_count = 0
+
+            while poll_count < max_poll_count:
+                # 새로운 청크 조회
+                chunks_result = supabase.table("message_chunks") \
+                    .select("seq, delta, created_at") \
+                    .eq("message_id", message_id) \
+                    .gt("seq", last_seq) \
+                    .order("seq", desc=False) \
+                    .execute()
+
+                chunks = chunks_result.data or []
+
+                if chunks:
+                    for chunk in chunks:
+                        # SSE 형식으로 전송
+                        data = {
+                            "seq": chunk["seq"],
+                            "delta": chunk["delta"],
+                            "timestamp": chunk["created_at"]
+                        }
+                        yield f"event: chunk\ndata: {json.dumps(data)}\n\n"
+                        last_seq = chunk["seq"]
+
+                # 메시지 완료 상태 확인
+                msg_status = supabase.table("messages") \
+                    .select("meta") \
+                    .eq("id", message_id) \
+                    .execute()
+
+                if msg_status.data:
+                    meta = msg_status.data[0].get("meta") or {}
+                    if meta.get("status") == "completed":
+                        # 스트리밍 완료
+                        yield f"event: done\ndata: {json.dumps({'message_id': message_id})}\n\n"
+                        logger.info(f"메시지 스트리밍 완료: message_id={message_id}")
+                        return
+
+                # 1초 대기
+                await asyncio.sleep(1)
+                poll_count += 1
+
+            # 타임아웃
+            yield f"event: timeout\ndata: {json.dumps({'message_id': message_id})}\n\n"
+            logger.warning(f"메시지 스트리밍 타임아웃: message_id={message_id}")
+
+        except Exception as e:
+            logger.error(f"메시지 스트리밍 오류: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Nginx 버퍼링 비활성화
+        }
+    )
+
+
+@router.post("/message/{message_id}/finalize")
+async def finalize_message(message_id: int, user: dict = Depends(get_current_user)):
+    """
+    메시지 스트리밍 완료 처리
+
+    - message_chunks의 모든 청크를 병합하여 messages.content에 저장
+    - 청크 테이블은 선택적으로 보관 (분석/디버깅용)
+    """
+    user_id = user["sub"]
+    logger.info(f"메시지 완료 처리: user_id={user_id}, message_id={message_id}")
+
+    try:
+        supabase = get_supabase_client(service_role=True)
+
+        # 1. 메시지 소유권 확인
+        msg_check = supabase.table("messages") \
+            .select("id, conversation_id, content") \
+            .eq("id", message_id) \
+            .execute()
+
+        if not msg_check.data:
+            raise HTTPException(404, "Message not found")
+
+        conversation_id = msg_check.data[0]["conversation_id"]
+
+        # 대화 소유권 확인
+        conv_check = supabase.table("conversations") \
+            .select("id") \
+            .eq("id", conversation_id) \
+            .eq("user_id", user_id) \
+            .execute()
+
+        if not conv_check.data:
+            raise HTTPException(403, "Unauthorized")
+
+        # 2. 청크 조회 및 병합
+        chunks_result = supabase.table("message_chunks") \
+            .select("seq, delta") \
+            .eq("message_id", message_id) \
+            .order("seq", desc=False) \
+            .execute()
+
+        chunks = chunks_result.data or []
+
+        if not chunks:
+            # 청크가 없으면 현재 content 유지
+            logger.warning(f"청크 없음: message_id={message_id}")
+            return {
+                "ok": True,
+                "message_id": message_id,
+                "finalized": False,
+                "reason": "no_chunks"
+            }
+
+        # 청크 병합
+        final_content = "".join([chunk["delta"] for chunk in chunks])
+
+        # 3. messages.content 업데이트
+        supabase.table("messages").update({
+            "content": final_content,
+            "meta": {
+                "status": "completed",
+                "chunk_count": len(chunks)
+            }
+        }).eq("id", message_id).execute()
+
+        logger.info(f"메시지 완료 처리 성공: message_id={message_id}, chunks={len(chunks)}")
+
+        return {
+            "ok": True,
+            "message_id": message_id,
+            "finalized": True,
+            "chunk_count": len(chunks),
+            "content_length": len(final_content)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"메시지 완료 처리 오류: {e}")
+        raise HTTPException(500, f"메시지 완료 처리 실패: {str(e)}")

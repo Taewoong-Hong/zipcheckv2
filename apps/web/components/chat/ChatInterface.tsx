@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Upload, Send, Search, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
@@ -28,7 +28,7 @@ interface ChatInterfaceProps {
   isSidebarExpanded: boolean;
   onToggleSidebar: () => void;
   isLoggedIn?: boolean;
-  session?: any; // ✅ 세션 prop 추가
+  session?: any; // 세션 prop 추가
   onLoginRequired?: () => void;
 }
 
@@ -36,20 +36,20 @@ export default function ChatInterface({
   isSidebarExpanded,
   onToggleSidebar,
   isLoggedIn = true,
-  session, // ✅ 세션 prop 받기
+  session, // 세션 prop 받기
   onLoginRequired
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false); // ✅ 중복 제출 방지용 상태 추가
+  const [isSubmitting, setIsSubmitting] = useState(false); // 중복 제출 방지 상태 추가
   const [inputValue, setInputValue] = useState("");
-  // 새 채팅 화면에서는 이전 대화 ID를 자동 복구하지 않는다
-  // (이전 대화의 상태가 남아 주소 단계를 건너뛰는 이슈 방지)
+  // 채팅 화면에서 이전 대화 ID를 자동 복구하려 하는데
+  // (이전 세션의 상태가 남아 주소 단계를 건너뛰는 이슈 방지)
   const [conversationId, setConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const initializingRef = useRef(false); // ✅ Race condition 방지용 ref 추가
+  const initializingRef = useRef(false); // Race condition 방지용 ref 추가
   // Conversation init single-flight and abort control
   const conversationInitPromiseRef = useRef<Promise<string> | null>(null);
   const initAbortRef = useRef<AbortController | null>(null);
@@ -72,8 +72,17 @@ export default function ChatInterface({
   // Initialize conversation on first load (only if no existing conversationId)
   useEffect(() => {
     const initConversation = async () => {
-      // ✅ session prop을 직접 사용 (getSession() 호출 제거)
-      if (!session) {
+      // Try to obtain a valid access token from props or Supabase (fallback)
+      let accessToken: string | undefined = session?.access_token;
+      if (!accessToken) {
+        try {
+          const sb = getBrowserSupabase();
+          const { data } = await sb.auth.getSession();
+          accessToken = data.session?.access_token;
+        } catch (_) {}
+      }
+
+      if (!accessToken) {
         console.log('[ChatInterface] Skipping conversation init: no session');
         return;
       }
@@ -83,7 +92,7 @@ export default function ChatInterface({
         return;
       }
 
-      // ✅ Race condition 방지: 이미 초기화 중이면 중단
+      // Prevent duplicate initialization races
       if (initializingRef.current) {
         console.log('[ChatInterface] Already initializing conversation, skipping duplicate init');
         return;
@@ -92,22 +101,21 @@ export default function ChatInterface({
       initializingRef.current = true;
 
       try {
-        console.log('[ChatInterface] Initializing new conversation with passed session...');
-
-        // ✅ 전달받은 session 직접 사용 (타이밍 이슈 해결)
+        console.log('[ChatInterface] Initializing new conversation ...');
         const response = await fetch('/api/chat/init', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+            'Authorization': 'Bearer ' + accessToken,
           },
-          body: JSON.stringify({ session: { access_token: session.access_token } }),
+          credentials: 'include',
+          body: JSON.stringify({ session: { access_token: accessToken } }),
         });
 
         if (response.ok) {
           const data = await response.json();
           setConversationId(data.conversation_id);
-          console.log('[ChatInterface] ✅ New conversation created:', data.conversation_id);
+          console.log('[ChatInterface] New conversation created:', data.conversation_id);
         } else {
           console.error('[ChatInterface] Failed to create conversation:', response.status, await response.text());
         }
@@ -119,7 +127,7 @@ export default function ChatInterface({
     };
 
     initConversation();
-  }, [session, conversationId]); // ✅ 의존성 보강
+  }, [session, conversationId]); // ???�존??보강
 
   // Abort any in-flight init on unmount
   useEffect(() => {
@@ -139,7 +147,7 @@ export default function ChatInterface({
   const getOrCreateConversationId = async (): Promise<string> => {
     if (conversationId) return conversationId;
 
-    // 최신 토큰 확보 (세션 prop이 오래되었을 수 있음)
+    // 최신 ?�큰 ?�보 (?�션 prop???�래?�었?????�음)
     const supabase = getBrowserSupabase();
     const { data } = await supabase.auth.getSession();
     const latestToken = data.session?.access_token || session?.access_token;
@@ -195,7 +203,7 @@ export default function ChatInterface({
     chatStorage.createSession();
 
     // Create new conversation
-    // ✅ prop으로 받은 session 사용
+    // ??prop?�로 받�? session ?�용
     if (isLoggedIn && session && session.access_token) {
       try {
         const response = await fetch('/api/chat/init', {
@@ -210,7 +218,7 @@ export default function ChatInterface({
         if (response.ok) {
           const data = await response.json();
           setConversationId(data.conversation_id);
-          console.log('[ChatInterface] ✅ New conversation created on reset:', data.conversation_id);
+          console.log('[ChatInterface] ??New conversation created on reset:', data.conversation_id);
         } else {
           console.error('[ChatInterface] Failed to create new conversation on reset:', response.status);
         }
@@ -422,7 +430,7 @@ export default function ChatInterface({
     const userMessage: MessageType = {
       id: Date.now().toString(),
       role: 'user',
-      content: method === 'issue' ? '등기부등본 발급 요청' : '등기부등본 업로드',
+      content: method === 'issue' ? '등기부등본 발급 신청' : '등기부등본 업로드',
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, userMessage]);
@@ -549,10 +557,10 @@ export default function ChatInterface({
   };
 
   // Load session function
-  const loadSession = useCallback((sessionId: string) => {
-    const success = chatStorage.setCurrentSession(sessionId);
+  const loadSession = useCallback(async (sessionId: string) => {
+    const success = await chatStorage.setCurrentSession(sessionId);
     if (success) {
-      const session = chatStorage.getCurrentSession();
+      const session = await chatStorage.getCurrentSession();
       if (session) {
         setMessages(session.messages);
       }
@@ -560,9 +568,9 @@ export default function ChatInterface({
   }, []);
 
   // Save current chat function
-  const saveCurrentChat = useCallback(() => {
+  const saveCurrentChat = useCallback(async () => {
     // chatStorage already auto-saves messages, but we ensure it's saved
-    const session = chatStorage.getCurrentSession();
+    const session = await chatStorage.getCurrentSession();
     if (session && session.messages.length > 0) {
       // Session is already saved in localStorage through chatStorage
       console.log('Current chat saved:', session.id);
@@ -592,13 +600,13 @@ export default function ChatInterface({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    // ✅ 중복 제출 방지 (디바운싱)
+    // 중복 제출 방지 (디바운싱)
     if (isSubmitting) {
       console.log('[ChatInterface] Already submitting, ignoring duplicate');
       return;
     }
 
-    // 비로그인 상태일 때 로그인 유도
+    // 비로그인 상태에서 로그인 유도
     if (!isLoggedIn) {
       onLoginRequired?.();
       return;
@@ -608,7 +616,7 @@ export default function ChatInterface({
       const content = inputValue.trim();
       setInputValue("");
 
-      // ✅ 제출 중 상태 설정 (500ms 동안 추가 제출 차단)
+      // 제출 중 상태 설정 (500ms 동안 추가 제출 차단)
       setIsSubmitting(true);
 
       // Add user message
@@ -622,7 +630,7 @@ export default function ChatInterface({
       setMessages(prev => [...prev, userMessage]);
       chatStorage.addMessage(userMessage); // Save to storage
 
-      // ✅ 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
+      // 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
       const processingMessageId = `processing-${Date.now()}`;
       const processingMessage: MessageType = {
         id: processingMessageId,
@@ -639,14 +647,14 @@ export default function ChatInterface({
       const currentState = stateMachine.getState();
 
       // Handle based on current state
-      if (false && currentState === 'init' && isAddressInput(content)) {
+      if (currentState === 'init' && isAddressInput(content)) {
         // User entered an address - show address search selector
         stateMachine.transition('address_pick');
 
         const aiMessage: MessageType = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: '주소를 검색해주세요. 정확한 주소를 선택하면 분석이 더 정확해집니다.',
+          content: '\uC8FC\uC18C\uB97C \uAC80\uC0C9\uD574 \uC8FC\uC138\uC694. \uC815\uD655\uD55C \uC8FC\uC18C\uB97C \uC120\uD0DD\uD558\uBA74 \uBD84\uC11D\uC774 \uB354 \uC815\uD655\uD569\uB2C8\uB2E4.',
           timestamp: new Date(),
           componentType: 'address_search',
           componentData: { initialAddress: content },
@@ -663,7 +671,7 @@ export default function ChatInterface({
         return;
       }
 
-      // ✅ 처리 중 메시지를 실제 AI 응답으로 교체
+      // 처리 중 메시지를 제거 AI 응답으로 교체
       const aiMessageId = (Date.now() + 1).toString();
 
       // 처리 중 메시지 제거하고 새로운 AI 메시지 추가
@@ -721,7 +729,7 @@ export default function ChatInterface({
             msg.id === aiMessageId
               ? {
                   ...msg,
-                  content: '시뮬레이션 중 오류가 발생했습니다.',
+                  content: '테스트 시뮬레이션 중 오류가 발생했습니다.',
                   isError: true,
                   isStreaming: false,
                 }
@@ -733,9 +741,12 @@ export default function ChatInterface({
       }
 
       try {
-        // ✅ prop으로 받은 session 사용 (getSession() 호출 제거)
-        if (!session || !session.access_token) {
-          throw new Error('로그인 세션이 만료되었습니다. 페이지를 새로고침해주세요.');
+        // Ensure we have a valid access token (session prop may be stale)
+        const sb = getBrowserSupabase();
+        const { data: sbData } = await sb.auth.getSession();
+        const accessToken = sbData.session?.access_token || session?.access_token;
+        if (!accessToken) {
+          throw new Error('Session expired. Please refresh the page.');
         }
 
         // Ensure conversation exists (awaits init if needed)
@@ -746,13 +757,11 @@ export default function ChatInterface({
 
         const response = await fetch('/api/chat', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
           body: JSON.stringify({
             conversation_id: convId,
             content,
-            session,
+            session: { access_token: accessToken },
             // Include case_id when available for downstream processing
             case_id: (analysisContext as any)?.caseId,
             // Enable GPT v2 mode for better conversational experience
@@ -760,6 +769,7 @@ export default function ChatInterface({
             property_address: analysisContext?.address?.road,
             contract_type: analysisContext?.contractType,
           }),
+          credentials: 'include',
           signal: abortControllerRef.current.signal,
         });
 
@@ -771,10 +781,10 @@ export default function ChatInterface({
           throw new Error('No response body');
         }
 
-        // ✅ 응답 헤더에서 새 conversation_id 확인
+        // 응답 헤더에서 conversation_id 확인
         const newConvId = response.headers.get('X-New-Conversation-Id');
         if (newConvId && newConvId !== conversationId) {
-          console.log('[ChatInterface] ✅ Received new conversation ID from server:', newConvId);
+          console.log('[ChatInterface] Received new conversation ID from server:', newConvId);
           setConversationId(newConvId);
         }
 
@@ -821,7 +831,7 @@ export default function ChatInterface({
                     const modalMessage: MessageType = {
                       id: `modal-${Date.now()}`,
                       role: 'assistant',
-                      content: toolArgs.message || '주소를 검색해주세요. 정확한 주소를 선택하면 분석이 더 정확해집니다.',
+                      content: toolArgs.message || '주소를 검색해주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
                       timestamp: new Date(),
                       componentType: 'address_search',
                       componentData: { initialAddress: addressQuery },
@@ -948,7 +958,7 @@ export default function ChatInterface({
             msg.id === aiMessageId
               ? {
                   ...msg,
-                  content: '죄송합니다. 응답을 생성하는 중 오류가 발생했습니다. 다시 시도해 주세요.',
+                  content: '죄송합니다. 답변을 생성하는 중 오류가 발생했습니다. 다시 시도해 주세요.',
                   isError: true,
                   isStreaming: false,
                 }
@@ -959,7 +969,7 @@ export default function ChatInterface({
         setIsLoading(false);
         abortControllerRef.current = null;
 
-        // ✅ 500ms 후 제출 가능 상태로 변경 (디바운싱)
+        // 500ms 후 제출 가능 상태로 변경 (디바운싱)
         setTimeout(() => {
           setIsSubmitting(false);
         }, 500);
@@ -969,7 +979,7 @@ export default function ChatInterface({
 
   const handleChatSubmit = (content: string, files?: File[]) => {
     setInputValue(content);
-    // 즉시 submit 실행
+    // 즉시 submit ?�행
     setTimeout(() => handleSubmit(), 0);
   };
 
@@ -978,7 +988,7 @@ export default function ChatInterface({
     setTimeout(() => handleSubmit(), 0);
   };
 
-  // ✅ 파일 업로드 상태 추가
+  // 파일 업로드 상태 추가
   const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{name: string, size: number, id: string}>>([]);
 
@@ -989,11 +999,11 @@ export default function ChatInterface({
     }
   };
 
-  // ✅ 파일 업로드 처리 함수
+  // 파일 업로드 처리 함수
   const handleFileUpload = async (files: File[]) => {
     if (files.length === 0) return;
 
-    // 비로그인 상태일 때 로그인 유도
+    // 비로그인 상태에서 로그인 유도
     if (!isLoggedIn) {
       onLoginRequired?.();
       return;
@@ -1011,7 +1021,7 @@ export default function ChatInterface({
     setMessages(prev => [...prev, uploadMessage]);
 
     try {
-      // 여기서 실제 파일 업로드 API 호출
+      // 여기에 실제 파일 업로드 API 호출
       // TODO: 실제 업로드 엔드포인트 구현 필요
       const uploadedFileInfo = files.map(file => ({
         name: file.name,
@@ -1028,7 +1038,7 @@ export default function ChatInterface({
         msg.id === uploadMessage.id
           ? {
               ...msg,
-              content: `✅ 파일 ${files.length}개가 업로드되었습니다:\n${files.map(f => `• ${f.name} (${(f.size / 1024).toFixed(1)}KB)`).join('\n')}`,
+              content: `파일 ${files.length}개가 업로드되었습니다:\n${files.map(f => `- ${f.name} (${(f.size / 1024).toFixed(1)}KB)`).join('\n')}`,
               role: 'system' as const,
             }
           : msg
@@ -1047,7 +1057,7 @@ export default function ChatInterface({
         msg.id === uploadMessage.id
           ? {
               ...msg,
-              content: '❌ 파일 업로드에 실패했습니다. 다시 시도해주세요.',
+              content: '파일 업로드에 실패했습니다. 다시 시도해주세요.',
               role: 'system' as const,
               isError: true,
             }
@@ -1056,12 +1066,12 @@ export default function ChatInterface({
     }
   };
 
-  // ✅ 드래그 앤 드롭 상태 추가
+  // 드래그 앤 드롭 상태 추가
   const [isDragging, setIsDragging] = useState(false);
 
-  // ✅ 드래그 앤 드롭 이벤트 핸들러
+  // 드래그 앤 드롭 이벤트 핸들러
   const handleDragEnter = (e: React.DragEvent) => {
-    // 파일 드래그가 아닌 텍스트 드래그/선택 등에는 반응하지 않도록 가드
+    // 파일 드래그가 아닌 텍스트 드래그 선택 등에는 반응하지 않도록 가드
     const hasFiles = Array.from(e.dataTransfer?.types || []).includes('Files');
     if (!hasFiles) return;
     e.preventDefault();
@@ -1093,7 +1103,7 @@ export default function ChatInterface({
 
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
-      // PDF 및 문서 파일만 필터링
+      // PDF 및 문서 파일을 필터링
       const validFiles = files.filter(file => {
         const ext = file.name.split('.').pop()?.toLowerCase();
         return ['pdf', 'doc', 'docx', 'hwp', 'txt'].includes(ext || '');
@@ -1115,7 +1125,7 @@ export default function ChatInterface({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* ✅ 드래그 앤 드롭 오버레이 */}
+      {/* 드래그 앤 드롭 오버레이 */}
       {isDragging && (
         <div className="absolute inset-0 z-50 bg-brand-primary/10 border-2 border-dashed border-brand-primary flex items-center justify-center">
           <div className="bg-white rounded-xl p-8 shadow-lg">
@@ -1151,7 +1161,7 @@ export default function ChatInterface({
                         onLoginRequired?.();
                       }
                     }}
-                    placeholder="부동산 계약과 관련된 무엇이든 물어보세요"
+                    placeholder="부동산 계약에 관련된 무엇이든 물어보세요"
                     className="flex-1 outline-none text-neutral-800 placeholder-neutral-400 text-sm md:text-base pl-2"
                     disabled={isLoading}
                   />
@@ -1162,7 +1172,7 @@ export default function ChatInterface({
                     <button
                       type="button"
                       className="hidden md:block p-2 rounded-lg hover:bg-neutral-100 transition-colors group relative"
-                      title="딥 서치"
+                      title="검색"
                     >
                       <Search className="w-4 h-4 text-neutral-600 group-hover:text-brand-primary" />
                     </button>
@@ -1208,7 +1218,7 @@ export default function ChatInterface({
                 onClick={() => window.location.href = '/guide/lease-analysis'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">📄 임대차 계약 분석 가이드</h3>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">전세 계약 분석 가이드</h3>
                 <p className="text-xs text-neutral-600">특약사항과 보증금 보호 조건을 확인해드려요</p>
               </button>
 
@@ -1216,24 +1226,24 @@ export default function ChatInterface({
                 onClick={() => window.location.href = '/guide/purchase-review'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">🏢 매매 계약 검토 가이드</h3>
-                <p className="text-xs text-neutral-600">최적의 매매가와 협상 포지션, 특약사항을 검토해드려요</p>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">매매 계약 검토 가이드</h3>
+                <p className="text-xs text-neutral-600">최적의 매매가와 협상 포인트 특약사항을 검토해드려요</p>
               </button>
 
               <button
                 onClick={() => window.location.href = '/guide/rental-checklist'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">✅ 전세 계약 체크리스트</h3>
-                <p className="text-xs text-neutral-600">전세 계약 전 필수 확인사항을 단계별로 안내해드려요</p>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">월세 계약 체크리스트</h3>
+                <p className="text-xs text-neutral-600">월세 계약 시 필수 확인사항을 단계별로 안내해드려요</p>
               </button>
 
               <button
                 onClick={() => window.location.href = '/guide/fraud-prevention'}
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
-                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">🚨 전세사기 피해 가이드</h3>
-                <p className="text-xs text-neutral-600">피해 대응을 위한 단계별 가이드, 양식을 제공해드려요</p>
+                <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">전세사기 예방 가이드</h3>
+                <p className="text-xs text-neutral-600">피해 예방을 위한 단계적 가이드, 지식을 제공해드려요</p>
               </button>
             </div>
           </div>
@@ -1254,7 +1264,7 @@ export default function ChatInterface({
               />
             ))}
 
-            {/* AI 답변 생성 중 로딩 인디케이터 */}
+            {/* AI 응답 생성 중 로딩 인디케이터 */}
             {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
               <div className="mb-6">
                 <ChatLoadingIndicator />
@@ -1281,3 +1291,4 @@ export default function ChatInterface({
     </div>
   );
 }
+

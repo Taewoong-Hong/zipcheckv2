@@ -1,0 +1,182 @@
+{
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+    "annotations": {
+      "run.googleapis.com/build-enable-automatic-updates": "false",
+      "run.googleapis.com/build-id": "9e5cf7d8-e286-4a83-ba51-184d8bd4f969",
+      "run.googleapis.com/build-image-uri": "asia-northeast3-docker.pkg.dev/advance-vector-475706-a5/cloud-run-source-deploy/zipcheck-ai",
+      "run.googleapis.com/build-name": "projects/871793445649/locations/asia-northeast3/builds/9e5cf7d8-e286-4a83-ba51-184d8bd4f969",
+      "run.googleapis.com/build-source-location": "gs://run-sources-advance-vector-475706-a5-asia-northeast3/services/zipcheck-ai/1762327297.519407-d93cd68d674f441dbc53984cc5dae88c.zip#1762327297518222",
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "543.0.0",
+      "run.googleapis.com/ingress": "all",
+      "run.googleapis.com/ingress-status": "all",
+      "run.googleapis.com/operation-id": "90859a8a-c245-43d4-ac7a-50ca34011c83",
+      "run.googleapis.com/urls": "[\"https://zipcheck-ai-871793445649.asia-northeast3.run.app\",\"https://zipcheck-ai-ov5n6pt46a-du.a.run.app\"]",
+      "serving.knative.dev/creator": "ghdxodnd@gmail.com",
+      "serving.knative.dev/lastModifier": "ghdxodnd@gmail.com"
+    },
+    "creationTimestamp": "2025-10-21T11:26:40.473198Z",
+    "generation": 72,
+    "labels": {
+      "cloud.googleapis.com/location": "asia-northeast3",
+      "run.googleapis.com/satisfiesPzs": "true"
+    },
+    "name": "zipcheck-ai",
+    "namespace": "871793445649",
+    "resourceVersion": "AAZC09ZYCEE",
+    "selfLink": "/apis/serving.knative.dev/v1/namespaces/871793445649/services/zipcheck-ai",
+    "uid": "2883ad39-1154-426a-acab-8161fb6c5163"
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "annotations": {
+          "autoscaling.knative.dev/maxScale": "3",
+          "autoscaling.knative.dev/minScale": "1",
+          "run.googleapis.com/client-name": "gcloud",
+          "run.googleapis.com/client-version": "543.0.0",
+          "run.googleapis.com/startup-cpu-boost": "true"
+        },
+        "labels": {
+          "client.knative.dev/nonce": "sogrvkfbkc",
+          "run.googleapis.com/startupProbeType": "Default"
+        }
+      },
+      "spec": {
+        "containerConcurrency": 10,
+        "containers": [
+          {
+            "env": [
+              {
+                "name": "APP_ENV",
+                "value": "production"
+              },
+              {
+                "name": "LOG_LEVEL",
+                "value": "INFO"
+              },
+              {
+                "name": "OPENAI_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "openai-api-key"
+                  }
+                }
+              },
+              {
+                "name": "DATABASE_URL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "supabase-database-url"
+                  }
+                }
+              },
+              {
+                "name": "JWT_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "supabase-jwt-secret"
+                  }
+                }
+              },
+              {
+                "name": "SUPABASE_ANON_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "supabase-anon-key"
+                  }
+                }
+              },
+              {
+                "name": "SUPABASE_SERVICE_ROLE_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "supabase-service-role-key"
+                  }
+                }
+              },
+              {
+                "name": "VWORLD_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "vworld-api-key-production"
+                  }
+                }
+              }
+            ],
+            "image": "asia-northeast3-docker.pkg.dev/advance-vector-475706-a5/cloud-run-source-deploy/zipcheck-ai@sha256:e8515f48c6066d568f5bb71d96039fec0d8da71f01d13a7604d8301ecdaf6446",
+            "ports": [
+              {
+                "containerPort": 8080,
+                "name": "http1"
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "1Gi"
+              }
+            },
+            "startupProbe": {
+              "failureThreshold": 1,
+              "periodSeconds": 240,
+              "tcpSocket": {
+                "port": 8080
+              },
+              "timeoutSeconds": 240
+            }
+          }
+        ],
+        "serviceAccountName": "871793445649-compute@developer.gserviceaccount.com",
+        "timeoutSeconds": 300
+      }
+    },
+    "traffic": [
+      {
+        "percent": 100,
+        "revisionName": "zipcheck-ai-00063-djg"
+      }
+    ]
+  },
+  "status": {
+    "address": {
+      "url": "https://zipcheck-ai-ov5n6pt46a-du.a.run.app"
+    },
+    "conditions": [
+      {
+        "lastTransitionTime": "2025-11-05T07:24:21.844130Z",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2025-11-05T07:24:21.857986Z",
+        "reason": "Retired",
+        "status": "True",
+        "type": "ConfigurationsReady"
+      },
+      {
+        "lastTransitionTime": "2025-10-30T07:05:10.357761Z",
+        "status": "True",
+        "type": "RoutesReady"
+      }
+    ],
+    "latestCreatedRevisionName": "zipcheck-ai-00069-2wp",
+    "latestReadyRevisionName": "zipcheck-ai-00063-djg",
+    "observedGeneration": 72,
+    "traffic": [
+      {
+        "percent": 100,
+        "revisionName": "zipcheck-ai-00063-djg"
+      }
+    ],
+    "url": "https://zipcheck-ai-ov5n6pt46a-du.a.run.app"
+  }
+}

@@ -40,6 +40,48 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
     return () => clearInterval(interval);
   }, [recentExpanded]);
 
+  // Listen to auth state changes and load reports when authenticated
+  useEffect(() => {
+    let authListener: any = null;
+
+    const setupAuthListener = async () => {
+      const { getBrowserSupabase } = await import('../../lib/supabaseBrowser');
+      const supabase = getBrowserSupabase();
+
+      // Listen to auth state changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        console.log('[Sidebar] Auth state changed:', event, !!session);
+
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          // Wait a bit for session to be fully established
+          setTimeout(() => {
+            if (myKnowledgeExpanded) {
+              loadMyReports();
+            }
+          }, 500);
+        } else if (event === 'SIGNED_OUT') {
+          setMyReports([]);
+        }
+      });
+
+      authListener = subscription;
+
+      // Also load reports immediately if already authenticated
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session && myKnowledgeExpanded) {
+        loadMyReports();
+      }
+    };
+
+    setupAuthListener();
+
+    return () => {
+      if (authListener) {
+        authListener.unsubscribe();
+      }
+    };
+  }, [myKnowledgeExpanded]);
+
   // Load my reports when My Knowledge section is expanded
   useEffect(() => {
     if (myKnowledgeExpanded) {

@@ -282,20 +282,41 @@ async def get_current_user(
     Usage:
         @app.get("/protected")
         async def protected_route(user: dict = Depends(get_current_user)):
-            user_id = user["sub"]
+            user_id = user["sub"]  # 또는 user["id"]
             return {"message": f"Hello, {user_id}"}
 
     Args:
         credentials: Bearer 토큰
 
     Returns:
-        사용자 정보 (JWT 페이로드)
+        사용자 정보 (JWT 페이로드, 표준화된 형식)
+        - "id": 사용자 UUID (표준화)
+        - "sub": 사용자 UUID (호환성)
+        - "email": 이메일
+        - "role": 역할
     """
     logger.info(f"get_current_user() called")
     logger.info(f"Credentials received: scheme={credentials.scheme}, token_preview={credentials.credentials[:20]}...")
 
     token = credentials.credentials
-    return verify_token_with_fallback(token)
+    user = verify_token_with_fallback(token)
+
+    # ✅ 표준화: id/sub 모두 지원 (방어적 코딩)
+    uid = user.get("id") or user.get("sub") or user.get("user_id")
+
+    if not uid:
+        logger.error(f"JWT payload missing user ID: {user.keys()}")
+        raise HTTPException(status_code=401, detail="Invalid token: missing user ID")
+
+    # ✅ 표준화된 형식으로 반환
+    return {
+        "id": uid,  # ★ 표준 필드
+        "sub": uid,  # 호환성 유지
+        "email": user.get("email"),
+        "role": user.get("role"),
+        "app_metadata": user.get("app_metadata", {}),
+        "raw": user,  # 원본 페이로드
+    }
 
 
 async def get_optional_user(

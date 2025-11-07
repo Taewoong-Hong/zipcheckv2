@@ -323,7 +323,7 @@ def extract_seizures(text: str) -> List[SeizureInfo]:
 
         # 금액 찾기 (있을 경우)
         amount = None
-        amount_pattern = f'{keyword}[^0-9]{{0,100}}금?\s*([\d,]+)\s*원'
+        amount_pattern = rf'{keyword}[^0-9]{{0,100}}금?\s*([\d,]+)\s*원'
         amount_match = re.search(amount_pattern, text)
         if amount_match:
             amount_str = amount_match.group(1).replace(',', '')
