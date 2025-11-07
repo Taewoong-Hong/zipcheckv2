@@ -26,7 +26,7 @@ function HomePageContent() {
     setIsHydrated(true);
 
     // URL 쿼리 파라미터 확인 (?login=true)
-    const loginParam = searchParams.get('login');
+    const loginParam = searchParams?.get('login');
     if (loginParam === 'true') {
       setIsLoginModalOpen(true);
       // URL에서 쿼리 파라미터 제거 (선택사항)
@@ -98,6 +98,18 @@ function HomePageContent() {
       subscription.unsubscribe();
     };
   }, [searchParams, router]);
+
+  // Hydration 전에는 로딩 표시 (SSR/CSR 불일치 방지)
+  if (!isHydrated) {
+    return (
+      <div className="flex h-screen bg-neutral-50 items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" />
+          <p className="mt-4 text-sm text-gray-600">로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-neutral-50">
@@ -250,9 +262,17 @@ function HomePageContent() {
   );
 }
 
+// Next.js 15 호환: useSearchParams를 사용하는 컴포넌트는 Suspense로 감싸야 함
 export default function HomePage() {
   return (
-    <Suspense fallback={<div className="flex h-screen bg-neutral-50 items-center justify-center">로딩 중...</div>}>
+    <Suspense fallback={
+      <div className="flex h-screen bg-neutral-50 items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" />
+          <p className="mt-4 text-sm text-gray-600">로딩 중...</p>
+        </div>
+      </div>
+    }>
       <HomePageContent />
     </Suspense>
   );
