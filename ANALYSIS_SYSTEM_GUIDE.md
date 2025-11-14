@@ -413,56 +413,238 @@ async def fetch_building_ledger(building_code: str) -> BuildingLedgerData:
     )
 ```
 
-#### 4️⃣ 규칙 엔진 (Risk Scoring)
+#### 4️⃣ 평가 엔진 (Evaluation Engine) - ⚠️ **v2.0 재설계 완료**
 
-**파일**: `services/ai/core/risk_engine.py`
+> 📘 **상세 문서**: [CORE_LOGIC_REDESIGN.md](CORE_LOGIC_REDESIGN.md) 참조
 
+**파일**: `services/ai/core/evaluation_engine.py` (신규)
+
+**핵심 변경사항**:
+- 계약 유형별 분기 처리: **RENT (임대차)** vs **SALE (매매)**
+- 객체 가치 산정 공식: `(실거래가 - 하자금액) × 낙찰가율`
+- 안전도 점수 (0~100): 보증금/가치 비율, 선순위 채권, 하자 플래그
+- 투자 점수 (0~100): 가격 괴리도 + 지역 경쟁력 (학군/직장/거래량/성장률)
+
+**RENT 계약 평가 로직**:
 ```python
-def calculate_risk_score(
-    registry: RegistryData,
-    market: MarketData,
-    contract_type: str
-) -> Tuple[int, str, List[str]]:
+def evaluate_rent_contract(
+    deposit: int,              # 보증금 (만원)
+    real_price: int,           # 실거래가 (만원)
+    defect_amount: int,        # 하자금액 (만원)
+    auction_rate: float,       # 낙찰가율 (0.0~1.0)
+    senior_ratio: float,       # 선순위 채권 비율 (0.0~1.0)
+    has_seizure: bool,         # 압류 여부
+    has_provisional_seizure: bool,  # 가압류 여부
+    has_tax_arrears: bool,     # 체납 여부
+    is_illegal_building: bool  # 위반건축물 여부
+) -> dict:
     """
-    리스크 점수 계산
+    임대차 계약 평가
 
     Returns:
-        (score, band, reasons)
+        {
+            "contractType": "RENT",
+            "safetyScore": 75,
+            "grade": "양호",
+            "reasons": ["보증금/가치 비율 80%로 적정"],
+            "flags": ["근저당 과다"]
+        }
     """
-    score = 0
+    # 1) 객체 가치 계산
+    object_value = (real_price - defect_amount) * auction_rate
+
+    # 2) 안전도 점수 계산 (100점 만점)
+    score = 100
+    flags = []
     reasons = []
 
-    # 규칙 1: 선순위 채권 비율
-    if registry.total_liens / market.estimated_value > 0.85:
-        score += 30
-        reasons.append("선순위 채권이 추정가치의 85%를 초과합니다")
-
-    # 규칙 2: 전세가율 (전세 계약 시)
-    if contract_type == '전세':
-        jeonse_ratio = registry.jeonse_amount / market.actual_trades[0].price * 100
-        if jeonse_ratio > 90:
-            score += 25
-            reasons.append(f"전세가율이 {jeonse_ratio:.1f}%로 매우 높습니다")
-
-    # 규칙 3: 위반건축물
-    if building.violation:
-        score += 15
-        reasons.append("위반건축물로 등록되어 있습니다")
-
-    # ... 추가 규칙
-
-    # 밴드 결정
-    if score >= 80:
-        band = 'VHIGH'
-    elif score >= 60:
-        band = 'HIGH'
-    elif score >= 40:
-        band = 'MID'
+    # 보증금/가치 비율
+    deposit_ratio = deposit / object_value
+    if deposit_ratio <= 0.7:
+        score -= 0
+        reasons.append(f"보증금/가치 비율 {deposit_ratio*100:.1f}%로 안전")
+    elif deposit_ratio <= 0.9:
+        score -= 15
+        reasons.append(f"보증금/가치 비율 {deposit_ratio*100:.1f}%로 적정")
+    elif deposit_ratio <= 1.0:
+        score -= 35
+        flags.append("보증금 과다")
+        reasons.append(f"보증금/가치 비율 {deposit_ratio*100:.1f}%로 위험")
     else:
-        band = 'LOW'
+        score -= 60
+        flags.append("보증금 초과")
+        reasons.append(f"보증금이 객체 가치를 {(deposit_ratio-1)*100:.1f}% 초과")
 
-    return score, band, reasons
+    # 선순위 채권 비율
+    if senior_ratio > 0.6:
+        score -= 20
+        flags.append("근저당 과다")
+    elif senior_ratio > 0.4:
+        score -= 10
+        flags.append("근저당 주의")
+
+    # 하자 플래그들
+    if has_seizure:
+        score -= 15
+        flags.append("압류")
+    if has_provisional_seizure:
+        score -= 10
+        flags.append("가압류")
+    if has_tax_arrears:
+        score -= 8
+        flags.append("세금 체납")
+    if is_illegal_building:
+        score -= 12
+        flags.append("위반건축물")
+
+    # 최종 점수 클램핑
+    score = max(0, min(100, score))
+
+    # 등급 결정
+    if score >= 90:
+        grade = "안전"
+    elif score >= 70:
+        grade = "양호"
+    elif score >= 50:
+        grade = "보통"
+    elif score >= 30:
+        grade = "주의"
+    else:
+        grade = "위험"
+
+    return {
+        "contractType": "RENT",
+        "safetyScore": score,
+        "grade": grade,
+        "reasons": reasons,
+        "flags": flags,
+        "objectValue": object_value,  # 계산된 객체 가치
+    }
 ```
+
+**SALE 계약 평가 로직**:
+```python
+def evaluate_sale_contract(
+    contract_price: int,       # 계약가 (만원)
+    recent_trades: list[dict], # 최근 3개월 실거래 내역
+    school_score: int,         # 학군 점수 (0~100)
+    job_demand_score: int,     # 직장 수요 (0~100)
+    trade_liquidity: int,      # 거래 빈도 (0~100)
+    growth_score: int          # 성장 지표 (0~100)
+) -> dict:
+    """
+    매매 계약 평가
+
+    Returns:
+        {
+            "contractType": "SALE",
+            "safetyScore": 85,
+            "investmentScore": 72,
+            "grade": "양호",
+            "reasons": ["시세 대비 5% 저렴"],
+            "flags": []
+        }
+    """
+    # 1) 최근 3개월 실거래가 필터링 (이상치 제거)
+    filtered_prices = []
+    for trade in recent_trades:
+        if not trade.get('is_direct_trade'):  # 직거래 제외
+            filtered_prices.append(trade['deal_amount'])
+
+    # 2σ 이상치 제거
+    mean_price = sum(filtered_prices) / len(filtered_prices)
+    std_dev = (sum((p - mean_price)**2 for p in filtered_prices) / len(filtered_prices)) ** 0.5
+    normal_prices = [p for p in filtered_prices if abs(p - mean_price) <= 2 * std_dev]
+
+    # 중앙값 계산
+    fair_price = sorted(normal_prices)[len(normal_prices) // 2]
+
+    # 2) 가격 괴리율 계산
+    price_gap_ratio = (contract_price - fair_price) / fair_price
+
+    # 3) 안전도 점수 (가격 적정성)
+    safety_score = 100
+    if price_gap_ratio > 0.2:
+        safety_score -= 40
+    elif price_gap_ratio > 0.1:
+        safety_score -= 25
+    elif price_gap_ratio > 0.05:
+        safety_score -= 15
+    elif price_gap_ratio <= -0.1:
+        safety_score = 100  # 시세 대비 저렴
+
+    # 4) 투자 점수 (가격 괴리 30점 + 지역 경쟁력 70점)
+    investment_score = 0
+
+    # 가격 괴리 (최대 30점)
+    if price_gap_ratio <= -0.1:
+        investment_score += 30
+    elif price_gap_ratio <= -0.05:
+        investment_score += 20
+    elif price_gap_ratio <= 0:
+        investment_score += 10
+
+    # 지역 경쟁력 (70점)
+    competitiveness = (
+        0.3 * school_score +
+        0.3 * job_demand_score +
+        0.2 * trade_liquidity +
+        0.2 * growth_score
+    )
+    investment_score += int(competitiveness * 0.7)
+
+    # 5) 등급 결정
+    final_score = (safety_score + investment_score) / 2
+    if final_score >= 90:
+        grade = "안전"
+    elif final_score >= 70:
+        grade = "양호"
+    elif final_score >= 50:
+        grade = "보통"
+    elif final_score >= 30:
+        grade = "주의"
+    else:
+        grade = "위험"
+
+    return {
+        "contractType": "SALE",
+        "safetyScore": safety_score,
+        "investmentScore": investment_score,
+        "grade": grade,
+        "reasons": [
+            f"시세 대비 {price_gap_ratio*100:.1f}% {'저렴' if price_gap_ratio < 0 else '고가'}",
+            f"지역 경쟁력 {competitiveness:.1f}점"
+        ],
+        "flags": [],
+        "fairPrice": fair_price,
+    }
+```
+
+**통합 라우터**:
+```python
+def evaluate_contract(contract_type: str, **kwargs) -> dict:
+    """
+    계약 유형에 따라 적절한 평가 로직 실행
+
+    Args:
+        contract_type: "RENT" | "SALE"
+        **kwargs: 계약 유형별 필요 파라미터
+
+    Returns:
+        EvaluationResult 딕셔너리
+    """
+    if contract_type == "RENT":
+        return evaluate_rent_contract(**kwargs)
+    elif contract_type == "SALE":
+        return evaluate_sale_contract(**kwargs)
+    else:
+        raise ValueError(f"Unknown contract type: {contract_type}")
+```
+
+**기존 risk_engine.py와의 호환성**:
+- `risk_engine.py`는 레거시 지원용으로 유지
+- 새 코드는 `evaluation_engine.py` 사용 권장
+- 마이그레이션 가이드: [CORE_LOGIC_REDESIGN.md](CORE_LOGIC_REDESIGN.md#phase-2-시스템-통합-4시간)
 
 #### 5️⃣ LLM 라우터 (ChatGPT → Claude)
 
@@ -735,5 +917,98 @@ describe('StateMachine', () => {
 
 ---
 
-**마지막 업데이트**: 2025-01-27
-**다음 작업**: FastAPI 라우터 구현 시작
+## 🔄 평가 엔진 v2.0 마이그레이션 로드맵
+
+> 📘 **상세 가이드**: [CORE_LOGIC_REDESIGN.md](CORE_LOGIC_REDESIGN.md)
+
+### Phase 1: 평가 엔진 구현 (8시간)
+
+**작업 범위**:
+1. `services/ai/core/evaluation_engine.py` 신규 생성
+   - `evaluate_rent_contract()` - 임대차 평가 로직
+   - `evaluate_sale_contract()` - 매매 평가 로직
+   - `evaluate_contract()` - 통합 라우터
+   - `calculate_object_value()` - 객체 가치 계산
+   - `calculate_fair_price_3m()` - 3개월 평균 실거래가 (이상치 제거)
+
+2. `services/ai/core/rent_calculator.py` 신규 생성
+   - `calculate_rent_safety_score()` - 안전도 점수 계산
+   - `extract_rent_flags()` - 하자 플래그 추출
+   - `calculate_deposit_ratio()` - 보증금/가치 비율 계산
+
+3. `services/ai/core/sale_calculator.py` 신규 생성
+   - `calculate_sale_safety_score()` - 가격 적정성 점수
+   - `calculate_investment_score()` - 투자 점수 계산
+   - `calculate_cagr()` - 연평균 성장률 계산
+
+**테스트**:
+```bash
+cd services/ai
+pytest tests/test_evaluation_engine.py -v
+```
+
+### Phase 2: 시스템 통합 (4시간)
+
+**작업 범위**:
+1. `routes/analysis.py` 업데이트
+   - 기존 `analyze_risks()` 호출을 `evaluate_contract()` 호출로 변경
+   - 리포트 생성 로직 업데이트 (새 출력 포맷 반영)
+
+2. `core/report_generator.py` 업데이트
+   - 채팅형 요약 템플릿 변경
+   - 상세 리포트 섹션 추가 (객체 가치, 투자 점수)
+
+3. 레거시 호환 레이어
+   - `risk_engine.py` 유지 (기존 코드 호환)
+   - `evaluation_engine.py`로 점진적 마이그레이션
+
+**데이터베이스**:
+- `v2_reports` 테이블의 `report_data` 컬럼 스키마 확장
+  - `objectValue` (임대차 전용)
+  - `fairPrice` (매매 전용)
+  - `investmentScore` (매매 전용)
+
+### Phase 3: LLM Fine-tuning (8시간)
+
+**작업 범위**:
+1. `training/generate_dataset.py` 신규 생성
+   - 기존 케이스 데이터 → JSONL 변환
+   - 평가 결과 → JSON 직렬화
+   - 최소 100개 샘플 생성
+
+2. OpenAI Fine-tuning API 호출
+   ```bash
+   openai api fine_tuning.jobs.create \
+     --training-file file-abc123 \
+     --model gpt-4o-2024-08-06
+   ```
+
+3. `core/llm_router.py` 업데이트
+   - Fine-tuned 모델로 교체
+   - 기본 모델 fallback 유지
+
+**예상 성능 개선**:
+- 분석 속도: 30% 향상 (토큰 사용량 감소)
+- 일관성: 90% → 95% (구조화된 출력)
+- 비용: 20% 절감 (gpt-4o-mini → gpt-4o fine-tuned)
+
+### Phase 4: 프로덕션 배포 (2시간)
+
+**체크리스트**:
+- [ ] 단위 테스트 100% 통과
+- [ ] 통합 테스트 (E2E 시나리오 5개 이상)
+- [ ] 성능 테스트 (응답 시간 <3초)
+- [ ] 레거시 시스템과 병렬 운영 (1주일)
+- [ ] A/B 테스트 (기존 vs 신규 평가 로직)
+- [ ] 모니터링 대시보드 구축
+- [ ] 롤백 계획 수립
+
+**배포 전략**:
+1. **Canary 배포**: 신규 유저 10% → 신규 평가 엔진
+2. **점진적 확대**: 1주일 후 50% → 2주일 후 100%
+3. **롤백 트리거**: 에러율 >5% or 응답시간 >5초
+
+---
+
+**마지막 업데이트**: 2025-11-14 (평가 엔진 v2.0 재설계 완료)
+**다음 작업**: evaluation_engine.py 구현 시작 → [CORE_LOGIC_REDESIGN.md](CORE_LOGIC_REDESIGN.md) 참조

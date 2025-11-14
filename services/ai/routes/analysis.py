@@ -487,18 +487,56 @@ async def execute_analysis_pipeline(case_id: str):
                         property_value_estimate = sum(amounts) // len(amounts)
                         logger.info(f"실거래가 평균: {property_value_estimate}만원")
 
-        # registry_data 업데이트
-        if registry_data and property_value_estimate:
-            registry_data.property_value = property_value_estimate
-
         # 4️⃣ 리스크 엔진 실행 (계약 타입에 따라 분기)
         contract_type = case.get('contract_type', '전세')
+
+        # ContractData 생성 (property_type, sido, sigungu 포함)
+        from core.risk_engine import PropertyType, get_default_auction_rate
+
+        # TODO: property_type, sido, sigungu를 case metadata 또는 주소 파싱에서 가져오기
+        # 임시로 기본값 설정 (향후 프론트엔드에서 전달받거나 주소 파싱으로 추출)
+        property_type = case.get('metadata', {}).get('property_type')  # 예: "아파트"
+        sido = case.get('metadata', {}).get('sido')  # 예: "서울특별시"
+        sigungu = case.get('metadata', {}).get('sigungu')  # 예: "강남구"
+        auction_rate_override = case.get('metadata', {}).get('auction_rate_override')  # 수동 지정값
+
         contract_data = ContractData(
             contract_type=contract_type,
             deposit=case.get('metadata', {}).get('deposit'),
             price=case.get('metadata', {}).get('price'),
             property_address=case.get('property_address') if contract_type == '매매' else None,
+            property_type=PropertyType(property_type) if property_type else None,
+            sido=sido,
+            sigungu=sigungu,
+            auction_rate_override=auction_rate_override,
         )
+
+        # registry_data 업데이트 (임대차 계약인 경우 낙찰가율 적용)
+        if registry_data and property_value_estimate and contract_type in ["전세", "월세"]:
+            # 낙찰가율 결정
+            auction_rate = 0.70  # 기본값
+
+            if auction_rate_override is not None:
+                # 수동 지정값 우선 사용
+                auction_rate = auction_rate_override
+                logger.info(f"낙찰가율 (수동 지정): {auction_rate * 100:.1f}%")
+            elif property_type and sido and sigungu:
+                # 자동 결정
+                auction_rate = get_default_auction_rate(
+                    property_type=PropertyType(property_type),
+                    sido=sido,
+                    sigungu=sigungu
+                )
+                logger.info(f"낙찰가율 (자동 결정): {auction_rate * 100:.1f}% (타입={property_type}, 지역={sido} {sigungu})")
+            else:
+                logger.warning(f"낙찰가율 정보 부족 (기본값 70% 사용): property_type={property_type}, sido={sido}, sigungu={sigungu}")
+
+            # 물건 가치 계산: 실거래가 × 낙찰가율
+            registry_data.property_value = int(property_value_estimate * auction_rate)
+            logger.info(f"물건 가치 계산: {property_value_estimate}만원 × {auction_rate * 100:.1f}% = {registry_data.property_value}만원")
+        elif registry_data and property_value_estimate:
+            # 매매 계약은 낙찰가율 미적용
+            registry_data.property_value = property_value_estimate
 
         risk_result = None
         market_data = None  # 모든 케이스에서 정의

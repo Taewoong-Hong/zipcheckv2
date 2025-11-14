@@ -24,6 +24,12 @@ class ContractData(BaseModel):
     # 매매 전용 필드
     property_address: Optional[str] = None  # 주소 (매매 필수)
 
+    # 낙찰가율 자동 결정용 필드 (임대차 전용)
+    property_type: Optional["PropertyType"] = None  # 물건 종류 (아파트/빌라/단독주택)
+    sido: Optional[str] = None  # 시도 (예: "서울특별시", "경기도")
+    sigungu: Optional[str] = None  # 시군구 (예: "강남구", "수원시 영통구")
+    auction_rate_override: Optional[float] = None  # 수동 낙찰가율 지정 (0.0~1.0)
+
 
 class RegistryData(BaseModel):
     """등기부 데이터 (선택적)"""
@@ -94,6 +100,100 @@ class RiskAnalysisResult(BaseModel):
     risk_score: RiskScore
     negotiation_points: List[NegotiationPoint]
     recommendations: List[str]
+
+
+# ===========================
+# 낙찰가율 자동 결정 함수 (MVP용)
+# ===========================
+from enum import Enum
+
+
+class PropertyType(str, Enum):
+    """물건 종류"""
+    APT = "아파트"
+    VILLA = "빌라"
+    DETACHED = "단독주택"
+
+
+# 서울 강남6구
+SEOUL_GANGNAM6 = {"강남구", "서초구", "송파구", "마포구", "용산구", "성동구"}
+
+# 경기 동남부권
+GYEONGGI_SOUTHEAST = {
+    "성남시", "성남시 분당구", "용인시", "용인시 수지구", "용인시 기흥구", "용인시 처인구",
+    "수원시", "수원시 영통구", "수원시 팔달구", "수원시 권선구", "수원시 장안구",
+    "화성시", "평택시", "오산시", "안성시", "이천시", "여주시", "하남시", "광주시",
+}
+
+# 경기 서북부권
+GYEONGGI_NORTHWEST = {
+    "고양시", "고양시 일산동구", "고양시 일산서구", "고양시 덕양구",
+    "파주시", "김포시", "의정부시", "양주시", "동두천시", "연천군"
+}
+
+
+def get_default_auction_rate(
+    property_type: PropertyType,
+    sido: str,
+    sigungu: str
+) -> float:
+    """
+    초기 MVP용 한국 낙찰가율 고정값 로직
+
+    Args:
+        property_type: 물건 종류 (APT, VILLA, DETACHED)
+        sido: 시도 (예: "서울특별시", "경기도", "부산광역시")
+        sigungu: 시군구 (예: "강남구", "수원시 영통구")
+
+    Returns:
+        낙찰가율 (0.0~1.0)
+
+    낙찰가율 규칙:
+    1) 아파트:
+       - 서울 강남6구: 90%
+       - 서울 기타: 85%
+       - 경기 동남부: 80%
+       - 경기 서북부: 75%
+       - 기타 경기: 75%
+       - 그 외 지방: 70%
+
+    2) 빌라/다세대/단독주택:
+       - 수도권 (서울/경기/인천): 70%
+       - 지방: 60%
+    """
+    sido = sido.strip()
+    sigungu = sigungu.strip()
+
+    # 1) 아파트
+    if property_type == PropertyType.APT:
+        # 서울
+        if "서울" in sido:
+            if sigungu in SEOUL_GANGNAM6:
+                return 0.90
+            return 0.85
+
+        # 경기도
+        if "경기도" in sido or "경기" in sido:
+            if sigungu in GYEONGGI_SOUTHEAST:
+                return 0.80
+            if sigungu in GYEONGGI_NORTHWEST:
+                return 0.75
+            # 그 밖의 경기 지역은 일단 0.75로 처리 (MVP 기준, 나중에 테이블화 가능)
+            return 0.75
+
+        # 그 외 지방
+        return 0.70
+
+    # 2) 빌라/다세대/단독
+    if property_type in {PropertyType.VILLA, PropertyType.DETACHED}:
+        # 수도권: 서울/경기(+ 인천 가정)
+        if "서울" in sido or "경기도" in sido or "경기" in sido or "인천" in sido:
+            return 0.70
+        # 지방
+        return 0.60
+
+    # 기본값 (혹시 타입 누락 시)
+    return 0.70
 
 
 # ===========================
