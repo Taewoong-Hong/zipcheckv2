@@ -194,6 +194,41 @@ class ChatStorage {
   }
 
   /**
+   * Update current session with conversationId
+   */
+  async updateSessionConversationId(conversationId: string): Promise<boolean> {
+    await this.ensureReady();
+
+    if (!this.db || !this.currentSessionId) return false;
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction([STORE_SESSIONS], 'readwrite');
+      const store = tx.objectStore(STORE_SESSIONS);
+      const request = store.get(this.currentSessionId!);
+
+      request.onsuccess = () => {
+        const session = request.result as ChatSession;
+        if (session) {
+          session.conversationId = conversationId;
+          session.synced = true;
+          session.updatedAt = new Date();
+
+          const putRequest = store.put(session);
+          putRequest.onsuccess = () => {
+            console.log('[ChatStorage] Session updated with conversationId:', conversationId);
+            resolve(true);
+          };
+          putRequest.onerror = () => reject(putRequest.error);
+        } else {
+          resolve(false);
+        }
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  /**
    * Add message to current session (local + server sync)
    *
    * @param message Message to add
@@ -247,8 +282,13 @@ class ChatStorage {
    * Sync user message to Supabase API
    *
    * Uses idempotency key (client_message_id) to prevent duplicates
+   *
+   * ⚠️ TEMPORARILY DISABLED - 서버 동기화 임시 비활성화
    */
   private async syncMessageToServer(message: Message): Promise<void> {
+    console.log('[ChatStorage] ⚠️ Server sync disabled - skipping');
+    return; // ✅ 일단 서버 동기화 건너뛰기
+
     try {
       const session = await this.getCurrentSession();
       if (!session?.conversationId) {

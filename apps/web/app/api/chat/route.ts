@@ -91,7 +91,8 @@ export async function POST(request: NextRequest) {
   }
 
   const saveResult = await saveResponse.json();
-  console.log('메시지 저장 완료:', saveResult);
+  const userMessageId = saveResult.message_id; // ✨ 백엔드에서 반환된 message_id
+  console.log('메시지 저장 완료:', saveResult, 'message_id:', userMessageId);
 
   // 2. 단계 게이트: 주소/계약유형 수집 전에는 LLM 호출하지 않고 안내만 반환
   try {
@@ -491,10 +492,12 @@ export async function POST(request: NextRequest) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
-        // Send meta event first (e.g., newConversationId)
-        if (newConversationId) {
-          const meta = JSON.stringify({ newConversationId, done: false, meta: true });
-          controller.enqueue(encoder.encode(`data: ${meta}\n\n`));
+        // Send meta event first (e.g., newConversationId, userMessageId)
+        const metaEvent: any = { done: false, meta: true };
+        if (newConversationId) metaEvent.newConversationId = newConversationId;
+        if (userMessageId) metaEvent.user_message_id = userMessageId; // ✨ 사용자 메시지 ID 포함
+        if (newConversationId || userMessageId) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(metaEvent)}\n\n`));
         }
 
         // Send tool calls if any (for v2)

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Upload, Send, Search, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
@@ -145,15 +145,21 @@ export default function ChatInterface({
 
   // Ensure a conversation id exists (single-flight + latest token)
   const getOrCreateConversationId = async (): Promise<string> => {
-    if (conversationId) return conversationId;
+    // 이미 존재하면 바로 반환
+    if (conversationId) {
+      console.log('[getOrCreateConversationId] ⚡ Fast path: using existing conversationId=', conversationId);
+      return conversationId;
+    }
 
-    // 최신 ?�큰 ?�보 (?�션 prop???�래?�었?????�음)
+    // 최신 토큰 정보 (세션 prop이 오래되었을 수 있음)
     const supabase = getBrowserSupabase();
     const { data } = await supabase.auth.getSession();
     const latestToken = data.session?.access_token || session?.access_token;
     if (!latestToken) throw new Error('NO_SESSION');
 
+    // 이미 init 중이면 기다림 (single-flight)
     if (conversationInitPromiseRef.current) {
+      console.log('[getOrCreateConversationId] Reusing existing init promise');
       return await conversationInitPromiseRef.current;
     }
 
@@ -161,7 +167,9 @@ export default function ChatInterface({
     initAbortRef.current?.abort();
     initAbortRef.current = new AbortController();
 
+    // single-flight 시작
     conversationInitPromiseRef.current = (async () => {
+      // 1) init API 호출
       const res = await fetch('/api/chat/init', {
         method: 'POST',
         headers: {
@@ -175,12 +183,35 @@ export default function ChatInterface({
       if (!res.ok) throw new Error(`init failed: ${res.status}`);
       const payload = await res.json();
       const id: string = payload.conversation_id;
+
+      // 2) DB 반영 확인 (최대 3회 시도, 150ms 간격)
+      console.log('[getOrCreateConversationId] Verifying conversation in DB:', id);
+      for (let i = 0; i < 3; i++) {
+        const { data: convData, error } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (convData && !error) {
+          console.log(`[getOrCreateConversationId] DB verified (attempt ${i + 1}/3)`);
+          break;
+        }
+
+        if (i < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+      }
+
+      // 3) 상태에 반영
       setConversationId(id);
+      console.log('[getOrCreateConversationId] Conversation initialized:', id);
       return id;
     })();
 
     try {
-      return await conversationInitPromiseRef.current;
+      const cid = await conversationInitPromiseRef.current;
+      return cid;
     } finally {
       conversationInitPromiseRef.current = null;
     }
@@ -241,6 +272,9 @@ export default function ChatInterface({
     chatStorage.addMessage(userMessage);
 
     try {
+      // ✨ Ensure conversation exists BEFORE creating case
+      const convId = await getOrCreateConversationId();
+
       // Create case with selected address
       const addressInfo: AddressInfo = {
         road: address.roadAddr,
@@ -254,8 +288,8 @@ export default function ChatInterface({
 
       // Update conversation's property_address for gating logic
       try {
-        if (conversationId && session?.access_token) {
-          await fetch(`/api/chat/conversation/${conversationId}`, {
+        if (session?.access_token) {
+          await fetch(`/api/chat/conversation/${convId}`, {
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
@@ -263,6 +297,7 @@ export default function ChatInterface({
             },
             body: JSON.stringify({ property_address: addressInfo.road }),
           });
+          console.log('[handleAddressSelect] Conversation updated with address:', addressInfo.road);
         }
       } catch (e) {
         console.warn('[ChatInterface] conversation address update failed:', e);
@@ -597,7 +632,7 @@ export default function ChatInterface({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (content?: string, e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     // 중복 제출 방지 (디바운싱)
@@ -612,61 +647,128 @@ export default function ChatInterface({
       return;
     }
 
-    if (inputValue.trim() && !isLoading) {
-      const content = inputValue.trim();
-      setInputValue("");
+    // ✅ content를 직접 인자로 받거나 inputValue 사용
+    const text = (content ?? inputValue).trim();
+    if (!text || isLoading) {
+      return; // 빈 입력이거나 로딩 중이면 early return
+    }
+
+    setInputValue(""); // 입력창 즉시 클리어
 
       // 제출 중 상태 설정 (500ms 동안 추가 제출 차단)
       setIsSubmitting(true);
 
-      // Add user message
-      const userMessage: MessageType = {
-        id: Date.now().toString(),
-        role: 'user',
-        content,
-        timestamp: new Date(),
-      };
-
-      setMessages(prev => [...prev, userMessage]);
-      chatStorage.addMessage(userMessage); // Save to storage
-
-      // 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
-      const processingMessageId = `processing-${Date.now()}`;
-      const processingMessage: MessageType = {
-        id: processingMessageId,
-        role: 'assistant',
-        content: '메시지를 처리하고 있습니다...',
-        timestamp: new Date(),
-        isStreaming: true,
-      };
-      setMessages(prev => [...prev, processingMessage]);
-
       setIsLoading(true);
 
-      // Check current state and detect analysis triggers
-      const currentState = stateMachine.getState();
+      // ✅ Declare variables at function scope (accessible in try, catch, and subsequent code)
+      let tempId: string;
+      let userMessage: MessageType;
+      let processingMessageId: string;
 
-      // Handle based on current state
-      if (currentState === 'init' && isAddressInput(content)) {
-        // User entered an address - show address search selector
-        stateMachine.transition('address_pick');
+      try {
+        // ✅ Strategy 3: Ensure session + conversation FIRST (BEFORE any message operations)
+        const sb = getBrowserSupabase();
+        const { data: sbData } = await sb.auth.getSession();
+        const accessToken = sbData.session?.access_token || session?.access_token;
+        if (!accessToken) {
+          throw new Error('Session expired. Please refresh the page.');
+        }
 
-        const aiMessage: MessageType = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: '\uC8FC\uC18C\uB97C \uAC80\uC0C9\uD574 \uC8FC\uC138\uC694. \uC815\uD655\uD55C \uC8FC\uC18C\uB97C \uC120\uD0DD\uD558\uBA74 \uBD84\uC11D\uC774 \uB354 \uC815\uD655\uD569\uB2C8\uB2E4.',
+        // Ensure conversation exists (awaits init if needed)
+        const convId = await getOrCreateConversationId();
+        console.log('[handleSubmit] ✅ Strategy 3: convId=', convId, 'state conversationId=', conversationId, 'input=', text.substring(0, 30));
+
+        // ✅ Update chatStorage session with conversation ID (if not already set)
+        // THIS MUST HAPPEN BEFORE addMessage() to prevent sync failures
+        const currentSession = await chatStorage.getCurrentSession();
+        if (!currentSession?.conversationId && convId) {
+          console.log('[handleSubmit] 🔧 Updating chatStorage session with conversationId:', convId);
+          // Create or update session with conversation ID
+          if (!currentSession) {
+            await chatStorage.createSession(text, convId);
+          } else {
+            // Update existing session with conversationId
+            const updated = await chatStorage.updateSessionConversationId(convId);
+            if (updated) {
+              console.log('[handleSubmit] ✅ Session updated with conversationId:', convId);
+            } else {
+              console.warn('[handleSubmit] ⚠️ Failed to update session with conversationId');
+            }
+          }
+        } else if (currentSession?.conversationId) {
+          console.log('[handleSubmit] ✅ Session already has conversationId:', currentSession.conversationId);
+        }
+
+        // ✨ NOW add user message with optimistic update (임시 ID)
+        // Session is guaranteed to have conversationId at this point
+        tempId = `temp-${Date.now()}`;
+        userMessage = {
+          id: tempId,
+          role: 'user',
+          content: text,
           timestamp: new Date(),
-          componentType: 'address_search',
-          componentData: { initialAddress: content },
+          pending: true, // ✨ 서버 저장 대기 중
         };
-        // Remove the temporary processing message and append the address search message
+
+        setMessages(prev => [...prev, userMessage]);
+        // ✨ 임시 ID로 즉시 저장 (tool_call로 인한 메시지 유실 방지)
+        // This will now succeed because session has conversationId
+        chatStorage.addMessage(userMessage);
+
+        // 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
+        processingMessageId = `processing-${Date.now()}`;
+        const processingMessage: MessageType = {
+          id: processingMessageId,
+          role: 'assistant',
+          content: '메시지를 처리하고 있습니다...',
+          timestamp: new Date(),
+          isStreaming: true,
+        };
+        setMessages(prev => [...prev, processingMessage]);
+
+        // ✅ Strategy 1: Frontend controls address modal (no LLM call)
+        const currentState = stateMachine.getState();
+        if (currentState === 'init' && isAddressInput(text)) {
+          // Frontend directly opens modal - bypasses LLM completely
+          stateMachine.transition('address_pick');
+
+          const aiMessage: MessageType = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: '주소를 검색해 주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
+            timestamp: new Date(),
+            componentType: 'address_search',
+            componentData: { initialAddress: text },
+          };
+          // Remove the temporary processing message and append the address search message
+          setMessages(prev => {
+            const filtered = prev.filter(msg => msg.id !== processingMessageId);
+            return [...filtered, aiMessage];
+          });
+          chatStorage.addMessage(aiMessage);
+          setIsLoading(false);
+          // allow next submit
+          setTimeout(() => setIsSubmitting(false), 0);
+          return; // ← No LLM call!
+        }
+      } catch (error: any) {
+        // Handle session/conversation initialization failures
+        console.error('[handleSubmit] Session/Conversation error:', error);
+
         setMessages(prev => {
           const filtered = prev.filter(msg => msg.id !== processingMessageId);
-          return [...filtered, aiMessage];
+          const errorMessage: MessageType = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: error.message === 'NO_SESSION'
+              ? '세션이 만료되었습니다. 페이지를 새로고침해주세요.'
+              : '세션 초기화 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+            timestamp: new Date(),
+            isError: true,
+          };
+          return [...filtered, errorMessage];
         });
-        chatStorage.addMessage(aiMessage);
         setIsLoading(false);
-        // allow next submit
         setTimeout(() => setIsSubmitting(false), 0);
         return;
       }
@@ -677,7 +779,10 @@ export default function ChatInterface({
       // 처리 중 메시지 제거하고 새로운 AI 메시지 추가
       setMessages(prev => {
         // processing-으로 시작하는 ID를 가진 메시지 제거
-        const filtered = prev.filter(msg => !msg.id.startsWith('processing-'));
+        const filtered = prev.filter(msg => {
+          // msg.id가 문자열인 경우에만 startsWith 체크
+          return !(typeof msg.id === 'string' && msg.id.startsWith('processing-'));
+        });
         // 새로운 AI 메시지 추가
         const aiMessage: MessageType = {
           id: aiMessageId,
@@ -690,7 +795,7 @@ export default function ChatInterface({
       });
 
       // Check if input is "test" - run simulation
-      if (content.toLowerCase() === 'test') {
+      if (text.toLowerCase() === 'test') {
         try {
           let accumulatedContent = '';
 
@@ -741,7 +846,7 @@ export default function ChatInterface({
       }
 
       try {
-        // Ensure we have a valid access token (session prop may be stale)
+        // ✅ Re-fetch session for LLM call path (separate from Strategy 3 early return)
         const sb = getBrowserSupabase();
         const { data: sbData } = await sb.auth.getSession();
         const accessToken = sbData.session?.access_token || session?.access_token;
@@ -749,8 +854,10 @@ export default function ChatInterface({
           throw new Error('Session expired. Please refresh the page.');
         }
 
-        // Ensure conversation exists (awaits init if needed)
+        // ✅ Reuse the convId from Strategy 3 block (same instance, not state)
+        // Strategy 3 already called getOrCreateConversationId() above (line 691)
         const convId = await getOrCreateConversationId();
+        console.log('[handleSubmit] 🚀 LLM call: convId=', convId, 'state conversationId=', conversationId);
 
         // Create abort controller for cancellation
         abortControllerRef.current = new AbortController();
@@ -760,7 +867,7 @@ export default function ChatInterface({
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
           body: JSON.stringify({
             conversation_id: convId,
-            content,
+            content: text,
             session: { access_token: accessToken },
             // Include case_id when available for downstream processing
             case_id: (analysisContext as any)?.caseId,
@@ -788,6 +895,9 @@ export default function ChatInterface({
           setConversationId(newConvId);
         }
 
+        // ✨ 서버에서 반환된 message_id를 받을 변수
+        let serverMessageId: string | null = null;
+
         // Handle streaming response
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -806,6 +916,12 @@ export default function ChatInterface({
               try {
                 const data = JSON.parse(line.slice(6));
 
+                // ✨ Extract user_message_id from metadata event
+                if (data.meta && data.user_message_id) {
+                  serverMessageId = data.user_message_id;
+                  console.log('[ChatInterface] Received server message_id:', serverMessageId);
+                }
+
                 if (data.done) {
                   // Streaming complete
                   setMessages(prev => prev.map(msg =>
@@ -813,6 +929,27 @@ export default function ChatInterface({
                       ? { ...msg, isStreaming: false }
                       : msg
                   ));
+
+                  // ✨ Replace temp ID with server ID after stream completes
+                  if (serverMessageId) {
+                    const confirmedId = serverMessageId; // Type narrowing
+                    setMessages(prev =>
+                      prev.map(m =>
+                        m.id === tempId
+                          ? { ...m, id: confirmedId, pending: false }
+                          : m
+                      )
+                    );
+
+                    // ✨ Now save to localStorage with real ID
+                    const finalUserMessage: MessageType = {
+                      ...userMessage,
+                      id: confirmedId,
+                      pending: false
+                    };
+                    chatStorage.addMessage(finalUserMessage);
+                    console.log('[ChatInterface] User message saved with server ID:', confirmedId);
+                  }
                 } else if (data.toolCall) {
                   // Handle tool call from GPT-4o-mini
                   console.log('[ChatInterface] Tool call received:', data.toolCall);
@@ -978,14 +1115,11 @@ export default function ChatInterface({
   };
 
   const handleChatSubmit = (content: string, files?: File[]) => {
-    setInputValue(content);
-    // 즉시 submit ?�행
-    setTimeout(() => handleSubmit(), 0);
+    handleSubmit(content);
   };
 
   const handleExampleClick = (prompt: string) => {
-    setInputValue(prompt);
-    setTimeout(() => handleSubmit(), 0);
+    handleSubmit(prompt);
   };
 
   // 파일 업로드 상태 추가
@@ -1291,4 +1425,3 @@ export default function ChatInterface({
     </div>
   );
 }
-

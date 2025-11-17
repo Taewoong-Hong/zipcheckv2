@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { Copy, Check, Download } from 'lucide-react';
 
 interface AnalysisReportProps {
@@ -91,7 +94,10 @@ export default function AnalysisReport({ content, contractType, address }: Analy
           prose-a:text-red-600 prose-a:no-underline hover:prose-a:underline
           prose-hr:border-gray-300 prose-hr:my-6
         ">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+          >
             {content}
           </ReactMarkdown>
         </div>

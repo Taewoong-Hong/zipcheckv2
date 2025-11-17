@@ -1,68 +1,151 @@
 # ZipCheck v2 데이터베이스 설정 가이드
 
+## 📁 Directory Structure
+
+```
+db/
+├── migrations/         # 순차적 스키마 변경 (001-014)
+├── schema/            # 참조용 스키마 스냅샷
+├── admin/             # 관리자 설정 스크립트
+├── utils/             # 유틸리티 SQL 스크립트
+└── seed.sql           # 개발용 시드 데이터
+```
+
 ## 📊 데이터베이스 구조
 
 ZipCheck v2는 Supabase (PostgreSQL + pgvector)를 사용합니다.
 
-### 테이블 구조
+### V2 테이블 구조
 
 | 테이블 | 설명 | 주요 컬럼 |
 |--------|------|-----------|
-| `profiles` | 사용자 프로필 | user_id, name, email |
-| `contracts` | 계약서 메타데이터 | contract_id, user_id, addr, status |
-| `documents` | 문서 원본 및 텍스트 | contract_id, text, file_path |
-| `embeddings` | 벡터 임베딩 | embedding vector(3072), chunk_text |
-| `reports` | 분석 리포트 | contract_id, result_json, mode |
+| `v2_profiles` | 사용자 프로필 | user_id, name, email, credit |
+| `v2_cases` | 분석 케이스 | case_id, user_id, property_address, current_state |
+| `v2_artifacts` | 업로드 파일 | artifact_id, case_id, artifact_type, file_url |
+| `v2_reports` | 분석 리포트 | report_id, case_id, risk_score, content |
+| `conversations` | 채팅 대화 | conversation_id, user_id, title |
+| `messages` | 채팅 메시지 | message_id, conversation_id, role, content |
+
+---
+
+## 🔄 Migrations
+
+마이그레이션 파일은 순차적으로 번호가 매겨져 있습니다:
+
+- **001-007**: 초기 스키마 및 핵심 기능
+- **008**: Artifacts bucket RLS 정책
+- **012**: Registry support (등기부 지원)
+- **013**: RLS security 강화
+- **014**: Storage security policies
+
+### Migration 실행 순서
+
+```bash
+# Supabase CLI 사용 (권장)
+cd c:/dev/zipcheckv2
+supabase db push
+
+# 또는 SQL Editor에서 순차적으로 실행
+# 001 → 002 → ... → 014 순서로 실행
+```
+
+### Migration 작성 규칙
+
+1. **순차적 번호**: 마지막 번호 + 1 (다음은 015)
+2. **파일명 형식**: `###_description.sql` (예: `015_add_new_feature.sql`)
+3. **Rollback 고려**: 가능한 경우 `-- Rollback` 섹션 포함
+4. **주석 필수**: 변경 사유 및 영향 범위 명시
+
+---
+
+## 📋 Schema Snapshots
+
+참조용 스키마 스냅샷 (`schema/`):
+
+- **schema_v2.sql**: 전체 v2 스키마 (v2_cases, v2_reports, v2_artifacts 등)
+- **schema_realestate.sql**: 부동산 관련 테이블 참조
+
+⚠️ **주의**: 스키마 파일은 참조용이며, 실제 변경은 `migrations/`에서 수행합니다.
+
+---
+
+## 👤 Admin Scripts
+
+관리자 계정 및 권한 설정 (`admin/`):
+
+1. **20250123_01_set_admin_ghdxodnd.sql**: 관리자 사용자 생성
+2. **20250123_02_check_email_exists.sql**: 이메일 검증 함수
+3. **20250124000001_add_admin_role_and_logs.sql**: 관리자 역할 및 감사 로그
+4. **20250124000002_add_missing_admin_support.sql**: 추가 관리자 지원 기능
+
+### 실행 순서
+
+```bash
+# SQL Editor에서 순서대로 실행
+cd admin/
+# 1 → 2 → 3 → 4 순서로 실행
+```
+
+---
+
+## 🛠️ Utility Scripts
+
+유틸리티 스크립트 (`utils/`):
+
+- **check_view.sql**: 뷰 존재 여부 및 정의 확인
+- **update_artifacts_mime.sql**: Artifacts MIME 타입 일괄 업데이트
+
+### 사용 예시
+
+```sql
+-- check_view.sql
+-- recent_conversations 뷰 확인용
+
+-- update_artifacts_mime.sql
+-- PDF MIME 타입 수정용
+UPDATE storage.objects
+SET metadata = jsonb_set(metadata, '{mimetype}', '"application/pdf"')
+WHERE bucket_id = 'artifacts' AND name LIKE '%.pdf';
+```
+
+---
+
+## 🌱 Seed Data
+
+**seed.sql**: 개발 환경 테스트용 샘플 데이터
+
+```bash
+# 로컬 개발 환경에서만 사용
+psql -h localhost -U postgres -d zipcheck -f db/seed.sql
+```
+
+⚠️ **경고**: 프로덕션 환경에서는 절대 실행하지 마세요.
 
 ---
 
 ## 🚀 Supabase 설정 방법
 
-### 1. Supabase 프로젝트 생성
-
-1. [Supabase 대시보드](https://app.supabase.com) 접속
-2. **New Project** 클릭
-3. 프로젝트 정보 입력:
-   - Name: `zipcheck-v2`
-   - Database Password: 안전한 비밀번호 설정
-   - Region: 가까운 지역 선택 (예: Northeast Asia - Seoul)
-4. **Create new project** 클릭
-
-### 2. pgvector 확장 활성화
-
-#### 방법 1: SQL Editor 사용 (권장)
-
-1. Supabase 대시보드 → **SQL Editor**
-2. 다음 SQL 실행:
+### 1. pgvector 확장 활성화
 
 ```sql
+-- SQL Editor에서 실행
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-3. **Run** 클릭
+### 2. 마이그레이션 실행
 
-#### 방법 2: Database Settings 사용
+```bash
+# Supabase CLI
+supabase db push
 
-1. **Database** → **Extensions**
-2. `vector` 검색
-3. **Enable** 클릭
+# 또는 SQL Editor에서 migrations/ 파일 순차 실행
+```
 
-### 3. 스키마 적용
+### 3. 관리자 설정
 
-#### 옵션 A: 전체 스키마 한 번에 적용 (권장)
-
-1. Supabase 대시보드 → **SQL Editor**
-2. **New query** 클릭
-3. `db/schema.sql` 파일 내용 전체 복사
-4. SQL Editor에 붙여넣기
-5. **Run** 클릭
-
-#### 옵션 B: 마이그레이션 파일 사용
-
-1. Supabase 대시보드 → **SQL Editor**
-2. `db/migrations/001_initial_schema.sql` 파일 내용 복사
-3. SQL Editor에 붙여넣기
-4. **Run** 클릭
+```bash
+# admin/ 스크립트 순차 실행 (1→2→3→4)
+```
 
 ### 4. 스키마 검증
 

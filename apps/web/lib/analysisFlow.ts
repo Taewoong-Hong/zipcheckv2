@@ -30,35 +30,45 @@ export interface AnalysisContext {
 
 /**
  * 사용자 입력이 주소 입력인지 감지
+ *
+ * 전략: 매우 보수적으로 감지 - 명확한 주소 형태만 감지
+ * - "강남 부동산 알아보는 중" → ❌ 감지 안함 (단순 키워드)
+ * - "서울시 강남구 테헤란로 123" → ✅ 감지 (명확한 주소)
  */
 export function isAddressInput(input: string): boolean {
   const s = (input || '').trim();
   if (s.length < 3) return false;
 
-  // 키워드/행정구역 기반
-  const addressKeywords = ['주소', '위치', '아파트', '빌라', '오피스텔', '주택', '원룸'];
-  const hasKeyword = addressKeywords.some((k) => s.includes(k));
+  // 1. 명확한 주소 패턴 (도로명/지번)
+  const roadPattern = /(로|길)\s*\d{1,4}/;  // "테헤란로 123"
+  const lotPattern = /\d{1,4}번지/;          // "123번지"
 
-  // 행정구역/도로명/지번 패턴 (조금 더 포괄적으로)
-  const adminPattern = /(시|도|군|구|읍|면|동|리)/;
-  const roadPattern = /(로|길)\s*\d{1,4}/;
-  const lotPattern = /(번지|지번)/;
-  const unitPattern = /(동|층|호)\s*\d{1,4}/;
+  if (roadPattern.test(s) || lotPattern.test(s)) {
+    return true;
+  }
 
-  // 숫자와 한글이 함께 있고 공백이 포함된 일반적인 주소 형태
-  const hasKorean = /[가-힣]/.test(s);
+  // 2. 행정구역 + 숫자 조합 (최소한의 주소 형태)
+  const adminPattern = /(특별시|광역시|시|도|군|구|읍|면|동|리)/;
+  const hasAdmin = adminPattern.test(s);
   const hasNumber = /\d/.test(s);
-  const hasSpace = /\s/.test(s);
-  const genericShape = hasKorean && hasNumber && hasSpace && s.length >= 6;
 
-  return (
-    hasKeyword ||
-    adminPattern.test(s) ||
-    roadPattern.test(s) ||
-    lotPattern.test(s) ||
-    unitPattern.test(s) ||
-    genericShape
-  );
+  if (hasAdmin && hasNumber && s.length >= 8) {
+    // "서울시 강남구 123" 같은 형태만 허용
+    return true;
+  }
+
+  // 3. 건물명 + 행정구역 조합 (아파트/빌라는 반드시 행정구역과 함께)
+  const buildingKeywords = ['아파트', '빌라', '오피스텔'];
+  const hasBuildingKeyword = buildingKeywords.some(k => s.includes(k));
+
+  if (hasBuildingKeyword && hasAdmin) {
+    // "강남구 래미안아파트" 같은 형태만 허용
+    // "강남 부동산"은 행정구역이 없으므로 제외됨
+    return true;
+  }
+
+  // 4. 그 외는 모두 false (보수적 접근)
+  return false;
 }
 
 /**

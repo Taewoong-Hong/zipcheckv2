@@ -10,6 +10,10 @@ import AddressSearchSelector from "@/components/chat/AddressSearchSelector";
 import PriceInput, { PriceData } from "@/components/chat/PriceInput";
 import AnalysisReport from "@/components/chat/AnalysisReport";
 import type { ContractType, RegistryMethod } from "@/types/analysis";
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 interface AddressResult {
   roadAddr: string;
@@ -200,13 +204,22 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
                   </p>
                 </div>
               ) : (
-                <div className="prose prose-sm md:prose-base prose-neutral max-w-none">
-                  <p className="whitespace-pre-wrap break-words text-neutral-800 text-base md:text-lg">
+                <div className="prose prose-sm md:prose-base prose-neutral max-w-none
+                  prose-headings:text-neutral-900 prose-headings:font-semibold
+                  prose-p:text-neutral-800 prose-p:leading-relaxed
+                  prose-strong:text-neutral-900 prose-strong:font-semibold
+                  prose-a:text-red-600 prose-a:no-underline hover:prose-a:underline
+                  prose-code:bg-neutral-100 prose-code:text-red-600 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm
+                ">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                  >
                     {displayedContent}
-                    {message.isStreaming && (
-                      <span className="inline-block w-1 h-4 ml-1 bg-neutral-400 animate-pulse" />
-                    )}
-                  </p>
+                  </ReactMarkdown>
+                  {message.isStreaming && (
+                    <span className="inline-block w-1 h-4 ml-1 bg-neutral-400 animate-pulse" />
+                  )}
                 </div>
               )}
             </div>

@@ -5,6 +5,7 @@ export interface Message {
   timestamp: Date;
   isStreaming?: boolean;
   isError?: boolean;
+  pending?: boolean; // ✨ 낙관적 업데이트: 서버 저장 대기 중
 
   // 분석 플로우용 확장
   componentType?: 'address_search' | 'contract_selector' | 'price_input' | 'registry_choice' | 'progress' | 'report';
