@@ -5,7 +5,7 @@
  * Used by chatStorage.syncMessageToServer()
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
 export async function POST(request: NextRequest) {
@@ -25,7 +25,31 @@ export async function POST(request: NextRequest) {
 
     // Create Supabase client with cookies
     const cookieStore = await cookies();
-    const supabase = createServerClient(cookieStore);
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
+          set(name: string, value: string, options: any) {
+            try {
+              cookieStore.set({ name, value, ...options });
+            } catch (error) {
+              console.warn(`[POST /api/chat/message] Cookie set failed for ${name}:`, error);
+            }
+          },
+          remove(name: string, options: any) {
+            try {
+              cookieStore.set({ name, value: '', ...options });
+            } catch (error) {
+              console.warn(`[POST /api/chat/message] Cookie remove failed for ${name}:`, error);
+            }
+          },
+        },
+      }
+    );
 
     // Check auth
     const { data: { session }, error: authError } = await supabase.auth.getSession();
