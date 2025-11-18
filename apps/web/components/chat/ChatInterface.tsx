@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Upload, Send, Search, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
@@ -43,8 +43,7 @@ export default function ChatInterface({
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // 중복 제출 방지 상태 추가
   const [inputValue, setInputValue] = useState("");
-  // 채팅 화면에서 이전 대화 ID를 자동 복구하려 하는데
-  // (이전 세션의 상태가 남아 주소 단계를 건너뛰는 이슈 방지)
+  // 채팅 화면에서 이전 대화 ID를 자동 복구하려 하는가  // (이전 세션의 상태가 남아 주소 선택을 건너뛰는 이슈 방지)
   const [conversationId, setConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -127,7 +126,7 @@ export default function ChatInterface({
     };
 
     initConversation();
-  }, [session, conversationId]); // ???�존??보강
+  }, [session, conversationId]); // 세션 변경 모니터링
 
   // Abort any in-flight init on unmount
   useEffect(() => {
@@ -147,17 +146,17 @@ export default function ChatInterface({
   const getOrCreateConversationId = async (): Promise<string> => {
     // 이미 존재하면 바로 반환
     if (conversationId) {
-      console.log('[getOrCreateConversationId] ⚡ Fast path: using existing conversationId=', conversationId);
+      console.log('[getOrCreateConversationId] ??Fast path: using existing conversationId=', conversationId);
       return conversationId;
     }
 
-    // 최신 토큰 정보 (세션 prop이 오래되었을 수 있음)
+    // 최신 토큰 확보 (세션 prop이 오래되었을 수 있음)
     const supabase = getBrowserSupabase();
     const { data } = await supabase.auth.getSession();
     const latestToken = data.session?.access_token || session?.access_token;
     if (!latestToken) throw new Error('NO_SESSION');
 
-    // 이미 init 중이면 기다림 (single-flight)
+      // 이미 init 중이면 기다림(single-flight)
     if (conversationInitPromiseRef.current) {
       console.log('[getOrCreateConversationId] Reusing existing init promise');
       return await conversationInitPromiseRef.current;
@@ -184,7 +183,7 @@ export default function ChatInterface({
       const payload = await res.json();
       const id: string = payload.conversation_id;
 
-      // 2) DB 반영 확인 (최대 3회 시도, 150ms 간격)
+      // 2) DB 반영 확인 (최대 3번 시도, 150ms 간격)
       console.log('[getOrCreateConversationId] Verifying conversation in DB:', id);
       for (let i = 0; i < 3; i++) {
         const { data: convData, error } = await supabase
@@ -234,7 +233,7 @@ export default function ChatInterface({
     chatStorage.createSession();
 
     // Create new conversation
-    // ??prop?�로 받�? session ?�용
+  // prop으로 받은 session 사용
     if (isLoggedIn && session && session.access_token) {
       try {
         const response = await fetch('/api/chat/init', {
@@ -272,7 +271,7 @@ export default function ChatInterface({
     chatStorage.addMessage(userMessage);
 
     try {
-      // ✨ Ensure conversation exists BEFORE creating case
+      // ??Ensure conversation exists BEFORE creating case
       const convId = await getOrCreateConversationId();
 
       // Create case with selected address
@@ -395,7 +394,7 @@ export default function ChatInterface({
     // Format message based on contract type
     let content = '';
     if (contractType === '매매') {
-      content = `매매가: ${data.deposit?.toLocaleString('ko-KR')}만원`;
+      content = `매매가: ${data.deposit?.toLocaleString('ko-KR')}만원`;
     } else if (contractType === '전세') {
       content = `보증금: ${data.deposit?.toLocaleString('ko-KR')}만원`;
     } else {
@@ -465,7 +464,7 @@ export default function ChatInterface({
     const userMessage: MessageType = {
       id: Date.now().toString(),
       role: 'user',
-      content: method === 'issue' ? '등기부등본 발급 신청' : '등기부등본 업로드',
+      content: method === 'issue' ? '등기부등본 발급 선택' : '등기부등본 업로드',
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, userMessage]);
@@ -520,7 +519,7 @@ export default function ChatInterface({
       const retryMessage: MessageType = {
         id: (Date.now() + 2).toString(),
         role: 'assistant',
-        content: 'PDF를 다시 업로드해 주세요.',
+        content: 'PDF를 다시 업로드해 주세요',
         timestamp: new Date(),
         componentType: 'registry_choice',
         componentData: { userCredits: analysisContext.userCredits ?? 0, registryCost: 10 },
@@ -632,459 +631,461 @@ export default function ChatInterface({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSubmit = async (content?: string, e?: React.FormEvent) => {
+  const handleSubmit = async (content?: string, e?: React.FormEvent): Promise<boolean> => {
     if (e) e.preventDefault();
 
+    console.log('[handleSubmit] isSubmitting=', isSubmitting, 'isLoading=', isLoading, 'text=', (content ?? inputValue).trim());
     // 중복 제출 방지 (디바운싱)
     if (isSubmitting) {
       console.log('[ChatInterface] Already submitting, ignoring duplicate');
-      return;
+      return false;
     }
 
-    // 비로그인 상태에서 로그인 유도
+    // 비로그인 상태에서 로그인 시도
     if (!isLoggedIn) {
       onLoginRequired?.();
-      return;
+      return false;
     }
 
-    // ✅ content를 직접 인자로 받거나 inputValue 사용
+    // content를 직접 인자로 받거나 inputValue 사용
     const text = (content ?? inputValue).trim();
     if (!text || isLoading) {
-      return; // 빈 입력이거나 로딩 중이면 early return
+      return false; // 빈 입력이거나 로딩 중이면 early return
     }
 
     setInputValue(""); // 입력창 즉시 클리어
+    // 제출 중 상태 설정 (500ms 동안 추가 제출 차단)
+    setIsSubmitting(true);
 
-      // 제출 중 상태 설정 (500ms 동안 추가 제출 차단)
-      setIsSubmitting(true);
+    setIsLoading(true);
 
-      setIsLoading(true);
+    // ??Declare variables at function scope (accessible in try, catch, and subsequent code)
+    let tempId: string;
+    let userMessage: MessageType;
+    let processingMessageId: string;
+    let accepted = false;
 
-      // ✅ Declare variables at function scope (accessible in try, catch, and subsequent code)
-      let tempId: string;
-      let userMessage: MessageType;
-      let processingMessageId: string;
+    try {
+      // ??Strategy 3: Ensure session + conversation FIRST (BEFORE any message operations)
+      const sb = getBrowserSupabase();
+      const { data: sbData } = await sb.auth.getSession();
+      const accessToken = sbData.session?.access_token || session?.access_token;
+      if (!accessToken) {
+        throw new Error('Session expired. Please refresh the page.');
+      }
 
-      try {
-        // ✅ Strategy 3: Ensure session + conversation FIRST (BEFORE any message operations)
-        const sb = getBrowserSupabase();
-        const { data: sbData } = await sb.auth.getSession();
-        const accessToken = sbData.session?.access_token || session?.access_token;
-        if (!accessToken) {
-          throw new Error('Session expired. Please refresh the page.');
-        }
+      // Ensure conversation exists (awaits init if needed)
+      const convId = await getOrCreateConversationId();
+      console.log('[handleSubmit] ??Strategy 3: convId=', convId, 'state conversationId=', conversationId, 'input=', text.substring(0, 30));
 
-        // Ensure conversation exists (awaits init if needed)
-        const convId = await getOrCreateConversationId();
-        console.log('[handleSubmit] ✅ Strategy 3: convId=', convId, 'state conversationId=', conversationId, 'input=', text.substring(0, 30));
-
-        // ✅ Update chatStorage session with conversation ID (if not already set)
-        // THIS MUST HAPPEN BEFORE addMessage() to prevent sync failures
-        const currentSession = await chatStorage.getCurrentSession();
-        if (!currentSession?.conversationId && convId) {
-          console.log('[handleSubmit] 🔧 Updating chatStorage session with conversationId:', convId);
-          // Create or update session with conversation ID
-          if (!currentSession) {
-            await chatStorage.createSession(text, convId);
+      // ??Update chatStorage session with conversation ID (if not already set)
+      // THIS MUST HAPPEN BEFORE addMessage() to prevent sync failures
+      const currentSession = await chatStorage.getCurrentSession();
+      if (!currentSession?.conversationId && convId) {
+        console.log('[handleSubmit] Updating chatStorage session with conversationId:' , convId);
+        // Create or update session with conversation ID
+        if (!currentSession) {
+          await chatStorage.createSession(text, convId);
+        } else {
+          // Update existing session with conversationId
+          const updated = await chatStorage.updateSessionConversationId(convId);
+          if (updated) {
+            console.log('[handleSubmit] ??Session updated with conversationId:', convId);
           } else {
-            // Update existing session with conversationId
-            const updated = await chatStorage.updateSessionConversationId(convId);
-            if (updated) {
-              console.log('[handleSubmit] ✅ Session updated with conversationId:', convId);
-            } else {
-              console.warn('[handleSubmit] ⚠️ Failed to update session with conversationId');
-            }
+            console.warn('[handleSubmit] Failed to update session with conversationId');
           }
-        } else if (currentSession?.conversationId) {
-          console.log('[handleSubmit] ✅ Session already has conversationId:', currentSession.conversationId);
         }
+      } else if (currentSession?.conversationId) {
+        console.log('[handleSubmit] ??Session already has conversationId:', currentSession.conversationId);
+      }
 
-        // ✨ NOW add user message with optimistic update (임시 ID)
-        // Session is guaranteed to have conversationId at this point
-        tempId = `temp-${Date.now()}`;
-        userMessage = {
-          id: tempId,
-          role: 'user',
-          content: text,
-          timestamp: new Date(),
-          pending: true, // ✨ 서버 저장 대기 중
-        };
+      // NOW add user message with optimistic update (임시 ID)
+      // Session is guaranteed to have conversationId at this point
+      tempId = `temp-${Date.now()}`;
+      userMessage = {
+        id: tempId,
+        role: 'user',
+        content: text,
+        timestamp: new Date(),
+        pending: true, // 서버 확인 대기 중
+      };
 
-        setMessages(prev => [...prev, userMessage]);
-        // ✨ 임시 ID로 즉시 저장 (tool_call로 인한 메시지 유실 방지)
-        // This will now succeed because session has conversationId
-        chatStorage.addMessage(userMessage);
+      setMessages(prev => [...prev, userMessage]);
+      // 임시 ID로 즉시 추가 (tool_call로 동기화된 메시지 중단 방지)
+      // This will now succeed because session has conversationId
+      chatStorage.addMessage(userMessage);
+      accepted = true;
 
-        // 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
-        processingMessageId = `processing-${Date.now()}`;
-        const processingMessage: MessageType = {
-          id: processingMessageId,
+      // 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
+      processingMessageId = `processing-${Date.now()}`;
+      const processingMessage: MessageType = {
+        id: processingMessageId,
+        role: 'assistant',
+        content: '메시지를 처리하고 있습니다...',
+        timestamp: new Date(),
+        isStreaming: true,
+      };
+      setMessages(prev => [...prev, processingMessage]);
+
+      // ??Strategy 1: Frontend controls address modal (no LLM call)
+      const currentState = stateMachine.getState();
+      if (currentState === 'init' && isAddressInput(text)) {
+        // Frontend directly opens modal - bypasses LLM completely
+        stateMachine.transition('address_pick');
+
+        const aiMessage: MessageType = {
+          id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: '메시지를 처리하고 있습니다...',
+          content: '주소를 검색해 주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
           timestamp: new Date(),
-          isStreaming: true,
+          componentType: 'address_search',
+          componentData: { initialAddress: text },
         };
-        setMessages(prev => [...prev, processingMessage]);
-
-        // ✅ Strategy 1: Frontend controls address modal (no LLM call)
-        const currentState = stateMachine.getState();
-        if (currentState === 'init' && isAddressInput(text)) {
-          // Frontend directly opens modal - bypasses LLM completely
-          stateMachine.transition('address_pick');
-
-          const aiMessage: MessageType = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: '주소를 검색해 주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
-            timestamp: new Date(),
-            componentType: 'address_search',
-            componentData: { initialAddress: text },
-          };
-          // Remove the temporary processing message and append the address search message
-          setMessages(prev => {
-            const filtered = prev.filter(msg => msg.id !== processingMessageId);
-            return [...filtered, aiMessage];
-          });
-          chatStorage.addMessage(aiMessage);
-          setIsLoading(false);
-          // allow next submit
-          setTimeout(() => setIsSubmitting(false), 0);
-          return; // ← No LLM call!
-        }
-      } catch (error: any) {
-        // Handle session/conversation initialization failures
-        console.error('[handleSubmit] Session/Conversation error:', error);
-
+        // Remove the temporary processing message and append the address search message
         setMessages(prev => {
           const filtered = prev.filter(msg => msg.id !== processingMessageId);
-          const errorMessage: MessageType = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: error.message === 'NO_SESSION'
-              ? '세션이 만료되었습니다. 페이지를 새로고침해주세요.'
-              : '세션 초기화 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
-            timestamp: new Date(),
-            isError: true,
-          };
-          return [...filtered, errorMessage];
+          return [...filtered, aiMessage];
         });
+        chatStorage.addMessage(aiMessage);
         setIsLoading(false);
+        // allow next submit
         setTimeout(() => setIsSubmitting(false), 0);
-        return;
+        return true; // 주소 선택 안내 메시지만 표시 (No LLM call)
       }
+    } catch (error: any) {
+      // Handle session/conversation initialization failures
+      console.error('[handleSubmit] Session/Conversation error:', error);
 
-      // 처리 중 메시지를 제거 AI 응답으로 교체
-      const aiMessageId = (Date.now() + 1).toString();
-
-      // 처리 중 메시지 제거하고 새로운 AI 메시지 추가
       setMessages(prev => {
-        // processing-으로 시작하는 ID를 가진 메시지 제거
-        const filtered = prev.filter(msg => {
-          // msg.id가 문자열인 경우에만 startsWith 체크
-          return !(typeof msg.id === 'string' && msg.id.startsWith('processing-'));
-        });
-        // 새로운 AI 메시지 추가
-        const aiMessage: MessageType = {
-          id: aiMessageId,
+        const filtered = prev.filter(msg => msg.id !== processingMessageId);
+        const errorMessage: MessageType = {
+          id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: '',
+          content: error.message === 'NO_SESSION'
+            ? '세션이 만료되었습니다. 페이지를 새로고침해주세요.'
+            : '세션 초기화 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
           timestamp: new Date(),
-          isStreaming: true,
+          isError: true,
         };
-        return [...filtered, aiMessage];
+        return [...filtered, errorMessage];
       });
+      setIsLoading(false);
+      setTimeout(() => setIsSubmitting(false), 0);
+      return false;
+    }
 
-      // Check if input is "test" - run simulation
-      if (text.toLowerCase() === 'test') {
-        try {
-          let accumulatedContent = '';
+    // 처리 중 메시지를 제거하고 AI 응답으로 교체
+    const aiMessageId = (Date.now() + 1).toString();
 
-          await simulateTestResponse(
-            // onChunk callback
-            (chunk: string) => {
-              accumulatedContent += chunk;
-              setMessages(prev => prev.map(msg =>
-                msg.id === aiMessageId
-                  ? { ...msg, content: accumulatedContent }
-                  : msg
-              ));
-            },
-            // onComplete callback
-            () => {
-              setMessages(prev => prev.map(msg =>
-                msg.id === aiMessageId
-                  ? { ...msg, isStreaming: false }
-                  : msg
-              ));
-              // Save final message
-              const finalMsg = {
-                id: aiMessageId,
-                role: 'assistant' as const,
-                content: accumulatedContent,
-                timestamp: new Date(),
-                isStreaming: false,
-              };
-              chatStorage.addMessage(finalMsg);
-              setIsLoading(false);
-            }
-          );
-        } catch (error) {
-          console.error('Test simulation error:', error);
-          setMessages(prev => prev.map(msg =>
-            msg.id === aiMessageId
-              ? {
-                  ...msg,
-                  content: '테스트 시뮬레이션 중 오류가 발생했습니다.',
-                  isError: true,
-                  isStreaming: false,
-                }
-              : msg
-          ));
-          setIsLoading(false);
-        }
-        return; // Exit early for test mode
-      }
+    // 처리 중 메시지 제거하고 새로운 AI 메시지 추가
+    setMessages(prev => {
+      // processing-으로 시작하는 ID를 가진 메시지 제거
+      const filtered = prev.filter(msg => {
+        // msg.id가 문자열인 경우에만 startsWith 체크
+        return !(typeof msg.id === 'string' && msg.id.startsWith('processing-'));
+      });
+      // 새로운 AI 메시지 추가
+      const aiMessage: MessageType = {
+        id: aiMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        isStreaming: true,
+      };
+      return [...filtered, aiMessage];
+    });
 
+    // Check if input is "test" - run simulation
+    if (text.toLowerCase() === 'test') {
       try {
-        // ✅ Re-fetch session for LLM call path (separate from Strategy 3 early return)
-        const sb = getBrowserSupabase();
-        const { data: sbData } = await sb.auth.getSession();
-        const accessToken = sbData.session?.access_token || session?.access_token;
-        if (!accessToken) {
-          throw new Error('Session expired. Please refresh the page.');
-        }
-
-        // ✅ Reuse the convId from Strategy 3 block (same instance, not state)
-        // Strategy 3 already called getOrCreateConversationId() above (line 691)
-        const convId = await getOrCreateConversationId();
-        console.log('[handleSubmit] 🚀 LLM call: convId=', convId, 'state conversationId=', conversationId);
-
-        // Create abort controller for cancellation
-        abortControllerRef.current = new AbortController();
-
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
-          body: JSON.stringify({
-            conversation_id: convId,
-            content: text,
-            session: { access_token: accessToken },
-            // Include case_id when available for downstream processing
-            case_id: (analysisContext as any)?.caseId,
-            // Enable GPT v2 mode for better conversational experience
-            useGPTv2: true,
-            property_address: analysisContext?.address?.road,
-            contract_type: analysisContext?.contractType,
-          }),
-          credentials: 'include',
-          signal: abortControllerRef.current.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        if (!response.body) {
-          throw new Error('No response body');
-        }
-
-        // 응답 헤더에서 conversation_id 확인
-        const newConvId = response.headers.get('X-New-Conversation-Id');
-        if (newConvId && newConvId !== conversationId) {
-          console.log('[ChatInterface] Received new conversation ID from server:', newConvId);
-          setConversationId(newConvId);
-        }
-
-        // ✨ 서버에서 반환된 message_id를 받을 변수
-        let serverMessageId: string | null = null;
-
-        // Handle streaming response
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
         let accumulatedContent = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-
-                // ✨ Extract user_message_id from metadata event
-                if (data.meta && data.user_message_id) {
-                  serverMessageId = data.user_message_id;
-                  console.log('[ChatInterface] Received server message_id:', serverMessageId);
-                }
-
-                if (data.done) {
-                  // Streaming complete
-                  setMessages(prev => prev.map(msg =>
-                    msg.id === aiMessageId
-                      ? { ...msg, isStreaming: false }
-                      : msg
-                  ));
-
-                  // ✨ Replace temp ID with server ID after stream completes
-                  if (serverMessageId) {
-                    const confirmedId = serverMessageId; // Type narrowing
-                    setMessages(prev =>
-                      prev.map(m =>
-                        m.id === tempId
-                          ? { ...m, id: confirmedId, pending: false }
-                          : m
-                      )
-                    );
-
-                    // ✨ Now save to localStorage with real ID
-                    const finalUserMessage: MessageType = {
-                      ...userMessage,
-                      id: confirmedId,
-                      pending: false
-                    };
-                    chatStorage.addMessage(finalUserMessage);
-                    console.log('[ChatInterface] User message saved with server ID:', confirmedId);
-                  }
-                } else if (data.toolCall) {
-                  // Handle tool call from GPT-4o-mini
-                  console.log('[ChatInterface] Tool call received:', data.toolCall);
-
-                  // Parse the tool call
-                  const toolName = data.toolCall.function?.name;
-                  const toolArgs = data.toolCall.function?.arguments ?
-                    JSON.parse(data.toolCall.function.arguments) : {};
-
-                  // Handle different tool calls to trigger UI modals
-                  if (toolName === 'search_address') {
-                    // Trigger address search modal
-                    const addressQuery = toolArgs.query || '';
-                    stateMachine.transition('address_pick');
-
-                    const modalMessage: MessageType = {
-                      id: `modal-${Date.now()}`,
-                      role: 'assistant',
-                      content: toolArgs.message || '주소를 검색해주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
-                      timestamp: new Date(),
-                      componentType: 'address_search',
-                      componentData: { initialAddress: addressQuery },
-                    };
-
-                    setMessages(prev => {
-                      // Remove the current streaming message and add modal message
-                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
-                      return [...filtered, modalMessage];
-                    });
-                    chatStorage.addMessage(modalMessage);
-                    setIsLoading(false);
-
-                  } else if (toolName === 'select_contract_type') {
-                    // Trigger contract type selector
-                    stateMachine.transition('contract_type');
-
-                    const modalMessage: MessageType = {
-                      id: `modal-${Date.now()}`,
-                      role: 'assistant',
-                      content: toolArgs.message || getStateResponseMessage('contract_type', { address: analysisContext?.address }),
-                      timestamp: new Date(),
-                      componentType: 'contract_selector',
-                    };
-
-                    setMessages(prev => {
-                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
-                      return [...filtered, modalMessage];
-                    });
-                    chatStorage.addMessage(modalMessage);
-                    setIsLoading(false);
-
-                  } else if (toolName === 'input_price') {
-                    // Trigger price input modal
-                    stateMachine.transition('price_input');
-
-                    const modalMessage: MessageType = {
-                      id: `modal-${Date.now()}`,
-                      role: 'assistant',
-                      content: toolArgs.message || getStateResponseMessage('price_input', { contractType: analysisContext?.contractType }),
-                      timestamp: new Date(),
-                      componentType: 'price_input',
-                      componentData: { contractType: analysisContext?.contractType },
-                    };
-
-                    setMessages(prev => {
-                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
-                      return [...filtered, modalMessage];
-                    });
-                    chatStorage.addMessage(modalMessage);
-                    setIsLoading(false);
-
-                  } else if (toolName === 'upload_registry') {
-                    // Trigger registry upload modal
-                    stateMachine.transition('registry_choice');
-
-                    const modalMessage: MessageType = {
-                      id: `modal-${Date.now()}`,
-                      role: 'assistant',
-                      content: toolArgs.message || getStateResponseMessage('registry_choice', analysisContext),
-                      timestamp: new Date(),
-                      componentType: 'registry_choice',
-                      componentData: {
-                        userCredits: analysisContext?.userCredits ?? 0,
-                        registryCost: 10
-                      },
-                    };
-
-                    setMessages(prev => {
-                      const filtered = prev.filter(msg => msg.id !== aiMessageId);
-                      return [...filtered, modalMessage];
-                    });
-                    chatStorage.addMessage(modalMessage);
-                    setIsLoading(false);
-
-                  } else if (toolName === 'start_analysis') {
-                    // Start the analysis process
-                    await startAnalysis();
-
-                  } else {
-                    // Unknown tool call - show as regular message
-                    console.warn('[ChatInterface] Unknown tool call:', toolName);
-                    accumulatedContent = `시스템: ${toolName} 기능을 실행하려 했으나 아직 구현되지 않았습니다.`;
-                  }
-
-                  // Exit the streaming loop after handling tool call
-                  if (toolName && toolName !== 'start_analysis') {
-                    break;
-                  }
-
-                } else if (data.content) {
-                  // Accumulate content
-                  accumulatedContent += data.content;
-
-                  // Update message with accumulated content
-                  setMessages(prev => {
-                    const updated = prev.map(msg =>
-                      msg.id === aiMessageId
-                        ? { ...msg, content: accumulatedContent }
-                        : msg
-                    );
-                    // Save to storage when content updates
-                    const aiMsg = updated.find(m => m.id === aiMessageId);
-                    if (aiMsg) {
-                      chatStorage.addMessage(aiMsg);
-                    }
-                    return updated;
-                  });
-                }
-              } catch (e) {
-                // Ignore parsing errors for incomplete chunks
+        await simulateTestResponse(
+          // onChunk callback
+          (chunk: string) => {
+            accumulatedContent += chunk;
+            setMessages(prev => prev.map(msg =>
+              msg.id === aiMessageId
+                ? { ...msg, content: accumulatedContent }
+                : msg
+            ));
+          },
+          // onComplete callback
+          () => {
+            setMessages(prev => prev.map(msg =>
+              msg.id === aiMessageId
+                ? { ...msg, isStreaming: false }
+                : msg
+            ));
+            // Save final message
+            const finalMsg = {
+              id: aiMessageId,
+              role: 'assistant' as const,
+              content: accumulatedContent,
+              timestamp: new Date(),
+              isStreaming: false,
+            };
+            chatStorage.addMessage(finalMsg);
+            setIsLoading(false);
+          }
+        );
+      } catch (error) {
+        console.error('Test simulation error:', error);
+        setMessages(prev => prev.map(msg =>
+          msg.id === aiMessageId
+            ? {
+                ...msg,
+                content: '테스트 시뮬레이션 중 오류가 발생했습니다.',
+                isError: true,
+                isStreaming: false,
               }
+            : msg
+        ));
+        setIsLoading(false);
+      }
+      return true; // Exit early for test mode
+    }
+
+    try {
+      // ??Re-fetch session for LLM call path (separate from Strategy 3 early return)
+      const sb = getBrowserSupabase();
+      const { data: sbData } = await sb.auth.getSession();
+      const accessToken = sbData.session?.access_token || session?.access_token;
+      if (!accessToken) {
+        throw new Error('Session expired. Please refresh the page.');
+      }
+
+      // ??Reuse the convId from Strategy 3 block (same instance, not state)
+      // Strategy 3 already called getOrCreateConversationId() above (line 691)
+      const convId = await getOrCreateConversationId();
+      console.log('[handleSubmit] ?? LLM call: convId=', convId, 'state conversationId=', conversationId);
+
+      // Create abort controller for cancellation
+      abortControllerRef.current = new AbortController();
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
+        body: JSON.stringify({
+          conversation_id: convId,
+          content: text,
+          session: { access_token: accessToken },
+          // Include case_id when available for downstream processing
+          case_id: (analysisContext as any)?.caseId,
+          // Enable GPT v2 mode for better conversational experience
+          useGPTv2: true,
+          property_address: analysisContext?.address?.road,
+          contract_type: analysisContext?.contractType,
+        }),
+        credentials: 'include',
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      // 응답 헤더에서 conversation_id 확인
+      const newConvId = response.headers.get('X-New-Conversation-Id');
+      if (newConvId && newConvId !== conversationId) {
+        console.log('[ChatInterface] Received new conversation ID from server:', newConvId);
+        setConversationId(newConvId);
+      }
+
+      // 서버에서 반환된 message_id를 받을 변수
+      let serverMessageId: string | undefined;
+
+      // Handle streaming response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              // ??Extract user_message_id from metadata event
+              if (data.meta && data.user_message_id) {
+                serverMessageId = data.user_message_id;
+                console.log('[ChatInterface] Received server message_id:', serverMessageId);
+              }
+
+              if (data.done) {
+                // Streaming complete
+                setMessages(prev => prev.map(msg =>
+                  msg.id === aiMessageId
+                    ? { ...msg, isStreaming: false }
+                    : msg
+                ));
+
+                // ??Replace temp ID with server ID after stream completes
+                if (serverMessageId) {
+                  const confirmedId = serverMessageId; // Type narrowing
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === tempId
+                        ? { ...m, id: confirmedId, pending: false }
+                        : m
+                    )
+                  );
+
+                  // ??Now save to localStorage with real ID
+                  const finalUserMessage: MessageType = {
+                    ...userMessage,
+                    id: confirmedId,
+                    pending: false
+                  };
+                  chatStorage.addMessage(finalUserMessage);
+                  console.log('[ChatInterface] User message saved with server ID:', confirmedId);
+                }
+              } else if (data.toolCall) {
+                // Handle tool call from GPT-4o-mini
+                console.log('[ChatInterface] Tool call received:', data.toolCall);
+
+                // Parse the tool call
+                const toolName = data.toolCall.function?.name;
+                const toolArgs = data.toolCall.function?.arguments ?
+                  JSON.parse(data.toolCall.function.arguments) : {};
+
+                // Handle different tool calls to trigger UI modals
+                if (toolName === 'search_address') {
+                  // Trigger address search modal
+                  const addressQuery = toolArgs.query || '';
+                  stateMachine.transition('address_pick');
+
+                  const modalMessage: MessageType = {
+                    id: `modal-${Date.now()}`,
+                    role: 'assistant',
+                    content: toolArgs.message || '주소를 검색해 주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
+                    timestamp: new Date(),
+                    componentType: 'address_search',
+                    componentData: { initialAddress: addressQuery },
+                  };
+
+                  setMessages(prev => {
+                    // Remove the current streaming message and add modal message
+                    const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                    return [...filtered, modalMessage];
+                  });
+                  chatStorage.addMessage(modalMessage);
+                  setIsLoading(false);
+
+                } else if (toolName === 'select_contract_type') {
+                  // Trigger contract type selector
+                  stateMachine.transition('contract_type');
+
+                  const modalMessage: MessageType = {
+                    id: `modal-${Date.now()}`,
+                    role: 'assistant',
+                    content: toolArgs.message || getStateResponseMessage('contract_type', { address: analysisContext?.address }),
+                    timestamp: new Date(),
+                    componentType: 'contract_selector',
+                  };
+
+                  setMessages(prev => {
+                    const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                    return [...filtered, modalMessage];
+                  });
+                  chatStorage.addMessage(modalMessage);
+                  setIsLoading(false);
+
+                } else if (toolName === 'input_price') {
+                  // Trigger price input modal
+                  stateMachine.transition('price_input');
+
+                  const modalMessage: MessageType = {
+                    id: `modal-${Date.now()}`,
+                    role: 'assistant',
+                    content: toolArgs.message || getStateResponseMessage('price_input', { contractType: analysisContext?.contractType }),
+                    timestamp: new Date(),
+                    componentType: 'price_input',
+                    componentData: { contractType: analysisContext?.contractType },
+                  };
+
+                  setMessages(prev => {
+                    const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                    return [...filtered, modalMessage];
+                  });
+                  chatStorage.addMessage(modalMessage);
+                  setIsLoading(false);
+
+                } else if (toolName === 'upload_registry') {
+                  // Trigger registry upload modal
+                  stateMachine.transition('registry_choice');
+
+                  const modalMessage: MessageType = {
+                    id: `modal-${Date.now()}`,
+                    role: 'assistant',
+                    content: toolArgs.message || getStateResponseMessage('registry_choice', analysisContext),
+                    timestamp: new Date(),
+                    componentType: 'registry_choice',
+                    componentData: {
+                      userCredits: analysisContext?.userCredits ?? 0,
+                      registryCost: 10
+                    },
+                  };
+
+                  setMessages(prev => {
+                    const filtered = prev.filter(msg => msg.id !== aiMessageId);
+                    return [...filtered, modalMessage];
+                  });
+                  chatStorage.addMessage(modalMessage);
+                  setIsLoading(false);
+
+                } else if (toolName === 'start_analysis') {
+                  // Start the analysis process
+                  await startAnalysis();
+
+                } else {
+                  // Unknown tool call - show as regular message
+                  console.warn('[ChatInterface] Unknown tool call:', toolName);
+                  accumulatedContent = `시스템 ${toolName} 기능을 실행하려 했으나 아직 구현되지 않았습니다.`;
+                }
+
+                // Exit the streaming loop after handling tool call
+                if (toolName && toolName !== 'start_analysis') {
+                  break;
+                }
+
+              } else if (data.content) {
+                // Accumulate content
+                accumulatedContent += data.content;
+
+                // Update message with accumulated content
+                setMessages(prev => {
+                  const updated = prev.map(msg =>
+                    msg.id === aiMessageId
+                      ? { ...msg, content: accumulatedContent }
+                      : msg
+                  );
+                  // Save to storage when content updates
+                  const aiMsg = updated.find(m => m.id === aiMessageId);
+                  if (aiMsg) {
+                    chatStorage.addMessage(aiMsg);
+                  }
+                  return updated;
+                });
+              }
+            } catch (e) {
+              // Ignore parsing errors for incomplete chunks
             }
           }
         }
-      } catch (error: any) {
+      }
+    } catch (error: any) {
         if (error.name === 'AbortError') {
           console.log('Request was cancelled');
         } else {
@@ -1095,27 +1096,29 @@ export default function ChatInterface({
             msg.id === aiMessageId
               ? {
                   ...msg,
-                  content: '죄송합니다. 답변을 생성하는 중 오류가 발생했습니다. 다시 시도해 주세요.',
+                  content: '죄송합니다. 응답을 생성하는 중 오류가 발생했습니다. 다시 시도해 주세요.',
                   isError: true,
                   isStreaming: false,
                 }
               : msg
           ));
         }
+        accepted = false;
       } finally {
         setIsLoading(false);
         abortControllerRef.current = null;
 
-        // 500ms 후 제출 가능 상태로 변경 (디바운싱)
+        // 500ms 후 제출 가능 상태로 변경(디바운싱)
         setTimeout(() => {
           setIsSubmitting(false);
         }, 500);
       }
-    }
+
+    return accepted;
   };
 
-  const handleChatSubmit = (content: string, files?: File[]) => {
-    handleSubmit(content);
+  const handleChatSubmit = async (content: string, files?: File[]) => {
+    return await handleSubmit(content);
   };
 
   const handleExampleClick = (prompt: string) => {
@@ -1133,14 +1136,14 @@ export default function ChatInterface({
     }
   };
 
-  // 파일 업로드 처리 함수
+  // 파일 업로드泥섎━ ?⑥닔
   const handleFileUpload = async (files: File[]) => {
     if (files.length === 0) return;
 
-    // 비로그인 상태에서 로그인 유도
+    // 비로그인 상태에서 로그인 시도
     if (!isLoggedIn) {
       onLoginRequired?.();
-      return;
+      return false;
     }
 
     setUploadingFiles(files);
@@ -1172,7 +1175,7 @@ export default function ChatInterface({
         msg.id === uploadMessage.id
           ? {
               ...msg,
-              content: `파일 ${files.length}개가 업로드되었습니다:\n${files.map(f => `- ${f.name} (${(f.size / 1024).toFixed(1)}KB)`).join('\n')}`,
+              content: `파일 ${files.length}개가 업로드되었습니다:${files.map(f => `- ${f.name} (${(f.size / 1024).toFixed(1)}KB)`).join('')}`,
               role: 'system' as const,
             }
           : msg
@@ -1180,13 +1183,13 @@ export default function ChatInterface({
 
       // 파일 정보를 채팅 컨텍스트에 추가
       const fileContext = `업로드된 파일: ${files.map(f => f.name).join(', ')}`;
-      setInputValue(prev => prev ? `${prev}\n${fileContext}` : fileContext);
+      setInputValue(prev => prev ? `${prev}${fileContext}` : fileContext);
 
     } catch (error) {
       console.error('파일 업로드 실패:', error);
       setUploadingFiles([]);
 
-      // 에러 메시지로 교체
+      // 오류 메시지로 교체
       setMessages(prev => prev.map(msg =>
         msg.id === uploadMessage.id
           ? {
@@ -1200,10 +1203,10 @@ export default function ChatInterface({
     }
   };
 
-  // 드래그 앤 드롭 상태 추가
+  // 드래그앤드롭 상태 추가
   const [isDragging, setIsDragging] = useState(false);
 
-  // 드래그 앤 드롭 이벤트 핸들러
+  // 드래그앤드롭 이벤트 핸들러
   const handleDragEnter = (e: React.DragEvent) => {
     // 파일 드래그가 아닌 텍스트 드래그 선택 등에는 반응하지 않도록 가드
     const hasFiles = Array.from(e.dataTransfer?.types || []).includes('Files');
@@ -1237,7 +1240,7 @@ export default function ChatInterface({
 
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
-      // PDF 및 문서 파일을 필터링
+      // PDF 및 문서 파일만 필터링
       const validFiles = files.filter(file => {
         const ext = file.name.split('.').pop()?.toLowerCase();
         return ['pdf', 'doc', 'docx', 'hwp', 'txt'].includes(ext || '');
@@ -1259,7 +1262,7 @@ export default function ChatInterface({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* 드래그 앤 드롭 오버레이 */}
+      {/* 드래그앤드롭 오버레이 */}
       {isDragging && (
         <div className="absolute inset-0 z-50 bg-brand-primary/10 border-2 border-dashed border-brand-primary flex items-center justify-center">
           <div className="bg-white rounded-xl p-8 shadow-lg">
@@ -1277,12 +1280,12 @@ export default function ChatInterface({
             <div className="text-center mb-12 md:mb-16">
               <h1 className="mb-2 md:mb-3 text-neutral-800">
                 <span className="text-3xl md:text-[3.125rem] font-medium block mb-4 md:mb-10">주소를 입력하시면</span>
-                <span className="text-xl md:text-[2.625rem] font-medium block">부동산 계약을 분석해드릴게요</span>
+                <span className="text-xl md:text-[2.625rem] font-medium block">부동산 계약을 분석해드리겠어요</span>
               </h1>
             </div>
 
             {/* Input Section */}
-            <form onSubmit={handleSubmit} className="relative">
+            <form onSubmit={(e) => { e.preventDefault(); void handleSubmit(); }} className="relative">
               <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden md:rounded-3xl">
                 {/* Input Field */}
                 <div className="flex items-center p-2 md:p-3 gap-2">
@@ -1295,7 +1298,7 @@ export default function ChatInterface({
                         onLoginRequired?.();
                       }
                     }}
-                    placeholder="부동산 계약에 관련된 무엇이든 물어보세요"
+                    placeholder="부동산 계약과 관련된 무엇이든 물어보세요."
                     className="flex-1 outline-none text-neutral-800 placeholder-neutral-400 text-sm md:text-base pl-2"
                     disabled={isLoading}
                   />
@@ -1361,7 +1364,7 @@ export default function ChatInterface({
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
                 <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">매매 계약 검토 가이드</h3>
-                <p className="text-xs text-neutral-600">최적의 매매가와 협상 포인트 특약사항을 검토해드려요</p>
+                <p className="text-xs text-neutral-600">최적의 매매가 협상 시점과 특약사항을 검토해드려요</p>
               </button>
 
               <button
@@ -1377,7 +1380,7 @@ export default function ChatInterface({
                 className="text-left p-2 md:p-3 bg-white rounded-lg md:rounded-xl border border-neutral-200 hover:border-brand-primary hover:shadow-sm transition-all"
               >
                 <h3 className="font-medium text-neutral-800 mb-0.5 text-xs md:text-sm">전세사기 예방 가이드</h3>
-                <p className="text-xs text-neutral-600">피해 예방을 위한 단계적 가이드, 지식을 제공해드려요</p>
+                <p className="text-xs text-neutral-600">피해 예방을 위한 단계별 가이드, 지원책을 소개해드려요</p>
               </button>
             </div>
           </div>
@@ -1417,6 +1420,7 @@ export default function ChatInterface({
             <ChatInput
               onSubmit={handleChatSubmit}
               isLoading={isLoading}
+              isSubmitting={isSubmitting}
               placeholder="메시지를 입력하세요..."
             />
           </div>
@@ -1425,3 +1429,26 @@ export default function ChatInterface({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

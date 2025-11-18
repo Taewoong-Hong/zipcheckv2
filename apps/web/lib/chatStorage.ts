@@ -296,6 +296,9 @@ class ChatStorage {
         return;
       }
 
+      // TypeScript: session is guaranteed non-null here due to early return above
+      const conversationId = session!.conversationId;
+
       // Generate idempotency key if not exists
       const clientMessageId = message.id || this.generateULID();
 
@@ -306,7 +309,7 @@ class ChatStorage {
           'X-Idempotency-Key': clientMessageId,
         },
         body: JSON.stringify({
-          conversation_id: session.conversationId,
+          conversation_id: conversationId,
           content: message.content,
           client_message_id: clientMessageId,
         }),
