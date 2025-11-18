@@ -1,10 +1,14 @@
 """Supabase client for ZipCheck backend integration."""
 import httpx
 from typing import Dict, Any, Optional
+import time
+import logging
 
 from supabase import Client, create_client
 
 from .settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 class SupabaseAuthClient:
@@ -23,6 +27,38 @@ class SupabaseAuthClient:
     def auth_url(self) -> str:
         """Supabase Auth API base URL."""
         return f"{self.url}/auth/v1"
+
+    async def _retry_request(self, method: str, url: str, max_retries: int = 3, **kwargs):
+        """Retry HTTP requests with exponential backoff for 503 errors.
+
+        Args:
+            method: HTTP method (get, post, etc.)
+            url: Request URL
+            max_retries: Maximum number of retry attempts
+            **kwargs: Additional httpx request parameters
+
+        Returns:
+            httpx.Response object
+
+        Raises:
+            httpx.HTTPStatusError: If all retries fail
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for attempt in range(max_retries):
+                try:
+                    response = await getattr(client, method)(url, **kwargs)
+                    response.raise_for_status()
+                    return response
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 503 and attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                        logger.warning(
+                            f"Supabase 503 error (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                        continue
+                    raise
 
     async def create_or_update_user(
         self,
@@ -44,22 +80,21 @@ class SupabaseAuthClient:
         Raises:
             httpx.HTTPStatusError: If user creation fails
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.auth_url}/admin/users",
-                json={
-                    "email": email,
-                    "email_confirm": True,  # Auto-confirm OAuth emails
-                    "user_metadata": user_metadata or {},
-                },
-                headers={
-                    "apikey": self.service_role_key,
-                    "Authorization": f"Bearer {self.service_role_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self._retry_request(
+            "post",
+            f"{self.auth_url}/admin/users",
+            json={
+                "email": email,
+                "email_confirm": True,  # Auto-confirm OAuth emails
+                "user_metadata": user_metadata or {},
+            },
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        return response.json()
 
     async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """Get user by email using admin API.
@@ -70,18 +105,17 @@ class SupabaseAuthClient:
         Returns:
             User object if found, None otherwise
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.auth_url}/admin/users",
-                params={"filter": f"email.eq.{email}"},
-                headers={
-                    "apikey": self.service_role_key,
-                    "Authorization": f"Bearer {self.service_role_key}",
-                },
-            )
-            response.raise_for_status()
-            users = response.json().get("users", [])
-            return users[0] if users else None
+        response = await self._retry_request(
+            "get",
+            f"{self.auth_url}/admin/users",
+            params={"filter": f"email.eq.{email}"},
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+            },
+        )
+        users = response.json().get("users", [])
+        return users[0] if users else None
 
     async def generate_link_token(self, user_id: str) -> Dict[str, Any]:
         """Generate magic link token for user.
@@ -94,22 +128,21 @@ class SupabaseAuthClient:
         Returns:
             Dict with access_token and refresh_token
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.auth_url}/admin/generate_link",
-                json={
-                    "type": "magiclink",
-                    "email": "",  # Will be inferred from user_id
-                    "user_id": user_id,
-                },
-                headers={
-                    "apikey": self.service_role_key,
-                    "Authorization": f"Bearer {self.service_role_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self._retry_request(
+            "post",
+            f"{self.auth_url}/admin/generate_link",
+            json={
+                "type": "magiclink",
+                "email": "",  # Will be inferred from user_id
+                "user_id": user_id,
+            },
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        return response.json()
 
     async def sign_in_with_oauth(
         self,
@@ -133,21 +166,20 @@ class SupabaseAuthClient:
             Supabase client-side OAuth flow (redirect to supabase.co/auth/v1/callback).
             Only use this for custom server-side OAuth flows.
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.auth_url}/token",
-                params={"grant_type": "authorization_code"},
-                json={
-                    "auth_code": code,
-                    "provider": provider,
-                },
-                headers={
-                    "apikey": self.anon_key,
-                    "Content-Type": "application/json",
-                },
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self._retry_request(
+            "post",
+            f"{self.auth_url}/token",
+            params={"grant_type": "authorization_code"},
+            json={
+                "auth_code": code,
+                "provider": provider,
+            },
+            headers={
+                "apikey": self.anon_key,
+                "Content-Type": "application/json",
+            },
+        )
+        return response.json()
 
 
 class SupabaseStorageClient:
@@ -161,6 +193,38 @@ class SupabaseStorageClient:
     def storage_url(self) -> str:
         """Supabase Storage API base URL."""
         return f"{self.url}/storage/v1"
+
+    async def _retry_request(self, method: str, url: str, max_retries: int = 3, **kwargs):
+        """Retry HTTP requests with exponential backoff for 503 errors.
+
+        Args:
+            method: HTTP method (get, post, delete, etc.)
+            url: Request URL
+            max_retries: Maximum number of retry attempts
+            **kwargs: Additional httpx request parameters
+
+        Returns:
+            httpx.Response object
+
+        Raises:
+            httpx.HTTPStatusError: If all retries fail
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for attempt in range(max_retries):
+                try:
+                    response = await getattr(client, method)(url, **kwargs)
+                    response.raise_for_status()
+                    return response
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 503 and attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                        logger.warning(
+                            f"Supabase Storage 503 error (attempt {attempt + 1}/{max_retries}). "
+                            f"Retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                        continue
+                    raise
 
     async def upload_file(
         self,
@@ -183,18 +247,17 @@ class SupabaseStorageClient:
         Raises:
             httpx.HTTPStatusError: If upload fails
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.storage_url}/object/{bucket}/{path}",
-                content=file_data,
-                headers={
-                    "apikey": self.service_role_key,
-                    "Authorization": f"Bearer {self.service_role_key}",
-                    "Content-Type": content_type,
-                },
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self._retry_request(
+            "post",
+            f"{self.storage_url}/object/{bucket}/{path}",
+            content=file_data,
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Content-Type": content_type,
+            },
+        )
+        return response.json()
 
     async def get_public_url(self, bucket: str, path: str) -> str:
         """Get public URL for uploaded file.
@@ -218,15 +281,14 @@ class SupabaseStorageClient:
         Returns:
             Success response dict
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.delete(
-                f"{self.storage_url}/object/{bucket}/{path}",
-                headers={
-                    "apikey": self.service_role_key,
-                    "Authorization": f"Bearer {self.service_role_key}",
-                },
-            )
-        response.raise_for_status()
+        response = await self._retry_request(
+            "delete",
+            f"{self.storage_url}/object/{bucket}/{path}",
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+            },
+        )
         return response.json()
 
     async def get_signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str:
@@ -240,29 +302,28 @@ class SupabaseStorageClient:
         Returns:
             Signed URL string
         """
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.storage_url}/object/sign/{bucket}/{path}",
-                json={"expiresIn": expires_in},
-                headers={
-                    "apikey": self.service_role_key,
-                    "Authorization": f"Bearer {self.service_role_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            # Response includes 'signedURL' or 'signedUrl' depending on versions
-            url = data.get("signedURL") or data.get("signedUrl")
-            if not url:
-                # Some deployments return 'url'
-                url = data.get("url")
-            if not url:
-                raise ValueError("Failed to generate signed URL")
-            # If returned URL is relative, prefix host
-            if url.startswith("/"):
-                return f"{self.storage_url}{url}"
-            return url
+        resp = await self._retry_request(
+            "post",
+            f"{self.storage_url}/object/sign/{bucket}/{path}",
+            json={"expiresIn": expires_in},
+            headers={
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        data = resp.json()
+        # Response includes 'signedURL' or 'signedUrl' depending on versions
+        url = data.get("signedURL") or data.get("signedUrl")
+        if not url:
+            # Some deployments return 'url'
+            url = data.get("url")
+        if not url:
+            raise ValueError("Failed to generate signed URL")
+        # If returned URL is relative, prefix host
+        if url.startswith("/"):
+            return f"{self.storage_url}{url}"
+        return url
 
 
 # Singleton instances
