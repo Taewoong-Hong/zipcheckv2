@@ -4,15 +4,17 @@ import React, { useRef, useState, useEffect, KeyboardEvent } from "react";
 import { Send, Upload, Paperclip, Search, Loader2, X } from "lucide-react";
 
 interface ChatInputProps {
-  onSubmit: (message: string, files?: File[]) => void;
+  onSubmit: (message: string, files?: File[]) => Promise<boolean> | boolean;
   isLoading: boolean;
+  isSubmitting?: boolean;
   placeholder?: string;
 }
 
 export default function ChatInput({
   onSubmit,
   isLoading,
-  placeholder = "부동산 계약과 관련된 무엇이든 물어보세요"
+  isSubmitting = false,
+  placeholder = "부동산 계약과 관련된 무엇이든 물어보세요.",
 }: ChatInputProps) {
   const [inputValue, setInputValue] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -23,19 +25,26 @@ export default function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const handleSubmit = () => {
-    if (inputValue.trim() && !isLoading) {
-      onSubmit(inputValue.trim(), attachedFiles.length > 0 ? attachedFiles : undefined);
+  const handleSubmit = async () => {
+    if (isLoading || isSubmitting) return;
+    const trimmed = inputValue.trim();
+    if (!trimmed) return;
+
+    const accepted = await onSubmit(trimmed, attachedFiles.length > 0 ? attachedFiles : undefined);
+    if (accepted) {
       setInputValue("");
       setAttachedFiles([]);
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
     }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isLoading || isSubmitting) return;
+    // Check if IME composition is in progress
+    if ((e as any).isComposing || (e as any).nativeEvent?.isComposing) return;
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit();
+      void handleSubmit();
     }
   };
 
@@ -45,7 +54,7 @@ export default function ChatInput({
       setAttachedFiles(prev => [...prev, ...Array.from(files)]);
     }
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
@@ -57,7 +66,7 @@ export default function ChatInput({
     setInputValue(e.target.value);
 
     // Auto-resize textarea
-    e.target.style.height = 'auto';
+    e.target.style.height = "auto";
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
   };
 
@@ -98,20 +107,20 @@ export default function ChatInput({
   }, [inputValue]);
 
   const handlePickSuggestion = (item: any) => {
-    const addr = item?.roadAddr || item?.jibunAddr || '';
+    const addr = item?.roadAddr || item?.jibunAddr || "";
     if (!addr) return;
     setInputValue(addr);
     setShowSuggest(false);
     // Submit immediately with the picked address
-    setTimeout(() => handleSubmit(), 0);
+    setTimeout(() => void handleSubmit(), 0);
   };
 
   const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return "0 Bytes";
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ["Bytes", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
   };
 
   return (
@@ -154,7 +163,7 @@ export default function ChatInput({
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              disabled={isLoading}
+              disabled={isLoading || isSubmitting}
               className="flex-1 bg-transparent outline-none text-neutral-800 placeholder-neutral-400 resize-none min-h-[24px] max-h-[200px]"
               rows={1}
             />
@@ -165,8 +174,8 @@ export default function ChatInput({
               <button
                 type="button"
                 className="p-2 rounded-lg hover:bg-neutral-200 transition-colors group"
-                title="딥 서치"
-                disabled={isLoading}
+                title="검색"
+                disabled={isLoading || isSubmitting}
               >
                 <Search className="w-5 h-5 text-neutral-500 group-hover:text-brand-primary" />
               </button>
@@ -179,22 +188,22 @@ export default function ChatInput({
                 multiple
                 accept=".pdf,.doc,.docx,.hwp,.txt,.png,.jpg,.jpeg"
                 className="hidden"
-                disabled={isLoading}
+                disabled={isLoading || isSubmitting}
               />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="p-2 rounded-lg hover:bg-neutral-200 transition-colors group"
                 title="파일 업로드"
-                disabled={isLoading}
+                disabled={isLoading || isSubmitting}
               >
                 <Upload className="w-5 h-5 text-neutral-500 group-hover:text-brand-primary" />
               </button>
 
               {/* Submit Button */}
               <button
-                onClick={handleSubmit}
-                disabled={!inputValue.trim() || isLoading}
+                onClick={() => void handleSubmit()}
+                disabled={!inputValue.trim() || isLoading || isSubmitting}
                 className="p-2 rounded-lg bg-brand-primary text-white hover:bg-brand-secondary transition-all disabled:opacity-50 disabled:cursor-not-allowed ml-1"
               >
                 {isLoading ? (
@@ -216,11 +225,11 @@ export default function ChatInput({
                   className="w-full text-left px-3 py-2 hover:bg-neutral-100"
                 >
                   <div className="text-sm text-neutral-800">{s.roadAddr || s.jibunAddr}</div>
-                  <div className="text-xs text-neutral-500">{s.zipNo} · {s.bdNm || ''}</div>
+                  <div className="text-xs text-neutral-500">{s.zipNo} · {s.bdNm || ""}</div>
                 </button>
               ))}
               {loadingSuggest && (
-                <div className="px-3 py-2 text-xs text-neutral-500">검색 중...</div>
+                <div className="px-3 py-2 text-xs text-neutral-500">검색중...</div>
               )}
             </div>
           )}
@@ -235,7 +244,7 @@ export default function ChatInput({
           </p>
           {isLoading && (
             <p className="text-xs text-brand-primary animate-pulse">
-              AI가 답변을 생성하고 있습니다...
+              AI가 응답을 생성하고 있습니다...
             </p>
           )}
         </div>
