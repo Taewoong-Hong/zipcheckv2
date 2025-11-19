@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Upload, Send, Search, Loader2, ChevronRight, ChevronLeft } from "lucide-react";
 import { Message as MessageType } from "@/types/chat";
 import type { ContractType, RegistryMethod, AddressInfo, ChatState } from "@/types/analysis";
@@ -17,11 +18,12 @@ import {
   getStateResponseMessage,
   createCase,
   updateCase,
+  updateCaseState,
   uploadRegistry,
-  runAnalysis,
-  getReport,
+  streamAnalysis,
   getUserCredits,
   type AnalysisContext,
+  type AnalysisStreamEvent,
 } from "@/lib/analysisFlow";
 
 interface ChatInterfaceProps {
@@ -56,6 +58,7 @@ export default function ChatInterface({
   // Analysis flow state
   const [stateMachine] = useState(() => new StateMachine('init'));
   const [analysisContext, setAnalysisContext] = useState<AnalysisContext>({});
+  const router = useRouter();
 
   // Persist conversationId to localStorage when it changes
   useEffect(() => {
@@ -259,12 +262,13 @@ export default function ChatInterface({
   }, [isLoggedIn, session, stateMachine]);
 
   // Handle address selection
-  const handleAddressSelect = async (address: any) => {
-    // Add user selection message
+  const handleAddressSelect = async (address: any, detailAddress: string) => {
+    // Add user selection message with detail address
+    const fullAddress = detailAddress ? `${address.roadAddr} ${detailAddress}` : address.roadAddr;
     const userMessage: MessageType = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
-      content: `선택한 주소: ${address.roadAddr}`,
+      content: `선택한 주소: ${fullAddress}`,
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, userMessage]);
@@ -306,7 +310,7 @@ export default function ChatInterface({
       stateMachine.transition('contract_type');
 
       const aiMessage: MessageType = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: getStateResponseMessage('contract_type', { address: addressInfo }),
         timestamp: new Date(),
@@ -317,7 +321,7 @@ export default function ChatInterface({
     } catch (error) {
       console.error('Case creation error:', error);
       const errorMessage: MessageType = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: '케이스 생성 중 오류가 발생했습니다. 다시 시도해주세요.',
         timestamp: new Date(),
@@ -358,7 +362,7 @@ export default function ChatInterface({
 
     // Add user selection message
     const userMessage: MessageType = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
       content: `계약 유형: ${contractType}`,
       timestamp: new Date(),
@@ -371,7 +375,7 @@ export default function ChatInterface({
 
     // Add AI response with price input component
     const aiMessage: MessageType = {
-      id: (Date.now() + 1).toString(),
+      id: crypto.randomUUID(),
       role: 'assistant',
       content: getStateResponseMessage('price_input', { contractType }),
       timestamp: new Date(),
@@ -403,7 +407,7 @@ export default function ChatInterface({
 
     // Add user selection message
     const userMessage: MessageType = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
       content,
       timestamp: new Date(),
@@ -440,7 +444,7 @@ export default function ChatInterface({
 
     // Add AI response with registry choice component
     const aiMessage: MessageType = {
-      id: (Date.now() + 1).toString(),
+      id: crypto.randomUUID(),
       role: 'assistant',
       content: getStateResponseMessage('registry_choice', { ...analysisContext, contractType, userCredits: credits }),
       timestamp: new Date(),
@@ -462,7 +466,7 @@ export default function ChatInterface({
 
     // Add user selection message
     const userMessage: MessageType = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
       content: method === 'issue' ? '등기부등본 발급 선택' : '등기부등본 업로드',
       timestamp: new Date(),
@@ -481,7 +485,7 @@ export default function ChatInterface({
         stateMachine.transition('registry_ready');
 
         const aiMessage: MessageType = {
-          id: (Date.now() + 1).toString(),
+          id: crypto.randomUUID(),
           role: 'assistant',
           content: getStateResponseMessage('registry_ready'),
           timestamp: new Date(),
@@ -494,7 +498,7 @@ export default function ChatInterface({
       } else {
         // Issue registry (not implemented yet)
         const aiMessage: MessageType = {
-          id: (Date.now() + 1).toString(),
+          id: crypto.randomUUID(),
           role: 'assistant',
           content: '등기부등본 발급 기능은 아직 구현되지 않았습니다. PDF 파일을 업로드해주세요.',
           timestamp: new Date(),
@@ -506,7 +510,7 @@ export default function ChatInterface({
     } catch (error) {
       console.error('Registry handling error:', error);
       const aiMessage: MessageType = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: '등기부 처리 중 오류가 발생했습니다. 다시 시도해주세요.',
         timestamp: new Date(),
@@ -517,7 +521,7 @@ export default function ChatInterface({
 
       // Show the upload component again to allow retry
       const retryMessage: MessageType = {
-        id: (Date.now() + 2).toString(),
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: 'PDF를 다시 업로드해 주세요',
         timestamp: new Date(),
@@ -531,7 +535,7 @@ export default function ChatInterface({
     }
   };
 
-  // Start analysis
+  // Start analysis with streaming
   const startAnalysis = async () => {
     if (!analysisContext.caseId) {
       console.error('No case ID found');
@@ -541,45 +545,76 @@ export default function ChatInterface({
     // Transition to parse_enrich
     stateMachine.transition('parse_enrich');
 
+    // Create streaming progress message
+    const progressMessageId = crypto.randomUUID();
     const processingMessage: MessageType = {
-      id: Date.now().toString(),
+      id: progressMessageId,
       role: 'assistant',
-      content: getStateResponseMessage('parse_enrich'),
+      content: '분석을 시작합니다...',
       timestamp: new Date(),
+      isStreaming: true,
     };
     setMessages(prev => [...prev, processingMessage]);
     chatStorage.addMessage(processingMessage);
 
     try {
-      // Run analysis
-      await runAnalysis(analysisContext.caseId);
+      // Update database state BEFORE calling FastAPI
+      console.log('🔄 Updating case state to parse_enrich in DB...');
+      await updateCaseState(analysisContext.caseId, 'parse_enrich');
 
-      // Get report data
-      const reportData = await getReport(analysisContext.caseId);
+      // Run streaming analysis
+      let reportId: string | undefined;
 
-      // Transition to report
-      stateMachine.transition('report');
+      await streamAnalysis(
+        analysisContext.caseId,
+        (event: AnalysisStreamEvent) => {
+          // Handle streaming events
+          console.log('📊 Analysis event:', event);
 
-      const reportMessage: MessageType = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: getStateResponseMessage('report'),
-        timestamp: new Date(),
-        componentType: 'report',
-        componentData: {
-          reportContent: reportData.content,
-          contractType: reportData.contractType || analysisContext.contractType,
-          address: reportData.address || analysisContext.address?.road,
-        },
-      };
-      setMessages(prev => [...prev, reportMessage]);
-      chatStorage.addMessage(reportMessage);
+          // Handle error
+          if (event.error) {
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? {
+                    ...msg,
+                    content: `분석 중 오류가 발생했습니다: ${event.error}`,
+                    isError: true,
+                    isStreaming: false,
+                  }
+                : msg
+            ));
+            return;
+          }
+
+          // Update progress message with real-time events
+          if (event.message) {
+            const progressText = `${event.message}${event.progress ? ` (${Math.round(event.progress * 100)}%)` : ''}`;
+            setMessages(prev => prev.map(msg =>
+              msg.id === progressMessageId
+                ? { ...msg, content: progressText }
+                : msg
+            ));
+          }
+
+          // Store report ID when analysis completes
+          if (event.done && event.report_id) {
+            reportId = event.report_id;
+          }
+        }
+      );
+
+      // Navigate to report page where SSE will show real-time progress
+      router.push(`/report/${analysisContext.caseId}`);
+
     } catch (error) {
       console.error('Analysis error:', error);
       stateMachine.transition('error');
 
+      // Remove progress message
+      setMessages(prev => prev.filter(msg => msg.id !== progressMessageId));
+
       const errorMessage: MessageType = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: '분석 중 오류가 발생했습니다. 다시 시도해주세요.',
         timestamp: new Date(),
@@ -662,7 +697,6 @@ export default function ChatInterface({
     // ??Declare variables at function scope (accessible in try, catch, and subsequent code)
     let tempId: string;
     let userMessage: MessageType;
-    let processingMessageId: string;
     let accepted = false;
 
     try {
@@ -701,7 +735,7 @@ export default function ChatInterface({
 
       // NOW add user message with optimistic update (임시 ID)
       // Session is guaranteed to have conversationId at this point
-      tempId = `temp-${Date.now()}`;
+      tempId = crypto.randomUUID();
       userMessage = {
         id: tempId,
         role: 'user',
@@ -716,17 +750,6 @@ export default function ChatInterface({
       chatStorage.addMessage(userMessage);
       accepted = true;
 
-      // 사용자 메시지가 추가되면 즉시 "처리 중" 메시지 표시
-      processingMessageId = `processing-${Date.now()}`;
-      const processingMessage: MessageType = {
-        id: processingMessageId,
-        role: 'assistant',
-        content: '메시지를 처리하고 있습니다...',
-        timestamp: new Date(),
-        isStreaming: true,
-      };
-      setMessages(prev => [...prev, processingMessage]);
-
       // ??Strategy 1: Frontend controls address modal (no LLM call)
       const currentState = stateMachine.getState();
       if (currentState === 'init' && isAddressInput(text)) {
@@ -734,18 +757,15 @@ export default function ChatInterface({
         stateMachine.transition('address_pick');
 
         const aiMessage: MessageType = {
-          id: (Date.now() + 1).toString(),
+          id: crypto.randomUUID(),
           role: 'assistant',
           content: '주소를 검색해 주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
           timestamp: new Date(),
           componentType: 'address_search',
           componentData: { initialAddress: text },
         };
-        // Remove the temporary processing message and append the address search message
-        setMessages(prev => {
-          const filtered = prev.filter(msg => msg.id !== processingMessageId);
-          return [...filtered, aiMessage];
-        });
+        // Add address search message (no processing message to remove)
+        setMessages(prev => [...prev, aiMessage]);
         chatStorage.addMessage(aiMessage);
         setIsLoading(false);
         // allow next submit
@@ -756,44 +776,33 @@ export default function ChatInterface({
       // Handle session/conversation initialization failures
       console.error('[handleSubmit] Session/Conversation error:', error);
 
-      setMessages(prev => {
-        const filtered = prev.filter(msg => msg.id !== processingMessageId);
-        const errorMessage: MessageType = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: error.message === 'NO_SESSION'
-            ? '세션이 만료되었습니다. 페이지를 새로고침해주세요.'
-            : '세션 초기화 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
-          timestamp: new Date(),
-          isError: true,
-        };
-        return [...filtered, errorMessage];
-      });
+      const errorMessage: MessageType = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: error.message === 'NO_SESSION'
+          ? '세션이 만료되었습니다. 페이지를 새로고침해주세요.'
+          : '세션 초기화 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.',
+        timestamp: new Date(),
+        isError: true,
+      };
+      setMessages(prev => [...prev, errorMessage]);
       setIsLoading(false);
       setTimeout(() => setIsSubmitting(false), 0);
       return false;
     }
 
-    // 처리 중 메시지를 제거하고 AI 응답으로 교체
-    const aiMessageId = (Date.now() + 1).toString();
+    // AI 응답 메시지 생성 (로딩 인디케이터가 표시됨)
+    const aiMessageId = crypto.randomUUID();
 
-    // 처리 중 메시지 제거하고 새로운 AI 메시지 추가
-    setMessages(prev => {
-      // processing-으로 시작하는 ID를 가진 메시지 제거
-      const filtered = prev.filter(msg => {
-        // msg.id가 문자열인 경우에만 startsWith 체크
-        return !(typeof msg.id === 'string' && msg.id.startsWith('processing-'));
-      });
-      // 새로운 AI 메시지 추가
-      const aiMessage: MessageType = {
-        id: aiMessageId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        isStreaming: true,
-      };
-      return [...filtered, aiMessage];
-    });
+    // 새로운 AI 스트리밍 메시지 추가
+    const aiMessage: MessageType = {
+      id: aiMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+    setMessages(prev => [...prev, aiMessage]);
 
     // Check if input is "test" - run simulation
     if (text.toLowerCase() === 'test') {
@@ -910,7 +919,7 @@ export default function ChatInterface({
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('');
+        const lines = chunk.split('\n\n');
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -967,7 +976,7 @@ export default function ChatInterface({
                   stateMachine.transition('address_pick');
 
                   const modalMessage: MessageType = {
-                    id: `modal-${Date.now()}`,
+                    id: crypto.randomUUID(),
                     role: 'assistant',
                     content: toolArgs.message || '주소를 검색해 주세요. 정확한 주소를 선택하면 분석이 더 정확합니다.',
                     timestamp: new Date(),
@@ -988,7 +997,7 @@ export default function ChatInterface({
                   stateMachine.transition('contract_type');
 
                   const modalMessage: MessageType = {
-                    id: `modal-${Date.now()}`,
+                    id: crypto.randomUUID(),
                     role: 'assistant',
                     content: toolArgs.message || getStateResponseMessage('contract_type', { address: analysisContext?.address }),
                     timestamp: new Date(),
@@ -1007,7 +1016,7 @@ export default function ChatInterface({
                   stateMachine.transition('price_input');
 
                   const modalMessage: MessageType = {
-                    id: `modal-${Date.now()}`,
+                    id: crypto.randomUUID(),
                     role: 'assistant',
                     content: toolArgs.message || getStateResponseMessage('price_input', { contractType: analysisContext?.contractType }),
                     timestamp: new Date(),
@@ -1027,7 +1036,7 @@ export default function ChatInterface({
                   stateMachine.transition('registry_choice');
 
                   const modalMessage: MessageType = {
-                    id: `modal-${Date.now()}`,
+                    id: crypto.randomUUID(),
                     role: 'assistant',
                     content: toolArgs.message || getStateResponseMessage('registry_choice', analysisContext),
                     timestamp: new Date(),
@@ -1150,7 +1159,7 @@ export default function ChatInterface({
 
     // 파일 업로드 상태 메시지 표시
     const uploadMessage: MessageType = {
-      id: `upload-${Date.now()}`,
+      id: crypto.randomUUID(),
       role: 'system',
       content: `파일 ${files.length}개를 업로드하고 있습니다...`,
       timestamp: new Date(),
@@ -1163,7 +1172,7 @@ export default function ChatInterface({
       const uploadedFileInfo = files.map(file => ({
         name: file.name,
         size: file.size,
-        id: `file-${Date.now()}-${Math.random()}`,
+        id: crypto.randomUUID(),
       }));
 
       // 업로드 완료 후 파일 목록 업데이트
