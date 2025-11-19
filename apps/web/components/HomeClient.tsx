@@ -5,14 +5,23 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/sidebar/Sidebar";
 import ChatInterface from "@/components/chat/ChatInterface";
 import LoginModal from "@/components/auth/LoginModal";
-import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function HomeClient() {
   const router = useRouter();
 
-  // 실제 Supabase 세션 상태로 로그인 확인
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [session, setSession] = useState<any>(null);
+  // ✅ AuthProvider에서 인증 상태 가져오기
+  const { session, isLoading, isLoggedIn } = useAuth();
+
+  // 디버깅: 인증 상태 변화 추적
+  useEffect(() => {
+    console.log("[HomeClient] useAuth 상태 업데이트:", {
+      isLoading,
+      isLoggedIn,
+      email: session?.user?.email || "없음"
+    });
+  }, [isLoading, isLoggedIn, session]);
+
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
 
@@ -35,52 +44,6 @@ export default function HomeClient() {
       }
     }
 
-    // 로그인 상태 확인 (서버 API로 HTTP-only 쿠키 기반 세션 확인)
-    let mounted = true;
-    const checkAuth = async () => {
-      try {
-        const res = await fetch("/api/auth/session", { credentials: "include" });
-        const data = await res.json();
-
-        if (!mounted) return;
-
-        if (data.authenticated && data.session) {
-          console.log("[Auth] 서버 세션 확인:", data.session.user.email);
-          setIsLoggedIn(true);
-          setSession(data.session);
-
-          // Supabase 클라이언트에 세션 설정
-          const { error } = await supabase.auth.setSession({
-            access_token: data.session.access_token,
-            refresh_token: data.session.refresh_token,
-          });
-
-          if (error) {
-            console.error("[Auth] Supabase 클라이언트 세션 설정 실패:", error);
-          } else {
-            console.log("[Auth] Supabase 클라이언트 세션 설정 완료");
-          }
-        } else {
-          console.log("[Auth] 세션 없음");
-          setIsLoggedIn(false);
-        }
-      } catch (e) {
-        console.error("[Auth] 세션 확인 실패:", e);
-        setIsLoggedIn(false);
-      }
-    };
-    checkAuth();
-
-    // 로그인 상태 변경 감지
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      console.log("[Auth] 상태 변경:", _event, newSession?.user?.email);
-      setIsLoggedIn(!!newSession);
-      setSession(newSession);
-      if (newSession) {
-        setIsLoginModalOpen(false);
-      }
-    });
-
     // 모바일/태블릿 화면이면 사이드바 접기
     if (window.innerWidth < 1024) {
       setIsSidebarExpanded(false);
@@ -93,14 +56,12 @@ export default function HomeClient() {
 
     window.addEventListener('resize', handleResize);
     return () => {
-      mounted = false;
       window.removeEventListener('resize', handleResize);
-      subscription.unsubscribe();
     };
   }, []);
 
   // Hydration 전에는 로딩 표시 (SSR/CSR 불일치 방지)
-  if (!isHydrated) {
+  if (!isHydrated || isLoading) {
     return (
       <div className="flex h-screen bg-neutral-50 items-center justify-center">
         <div className="text-center">

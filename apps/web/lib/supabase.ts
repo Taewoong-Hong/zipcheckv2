@@ -2,10 +2,10 @@
  * Supabase client for ZipCheck v2
  *
  * This module provides a configured Supabase client for browser use.
- * Uses singleton pattern to prevent multiple GoTrueClient instances.
+ * Uses @supabase/ssr for Next.js App Router cookie-based session management.
  */
 
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -15,38 +15,18 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Singleton instance
-let supabaseInstance: ReturnType<typeof createSupabaseClient> | null = null;
+let supabaseInstance: ReturnType<typeof createBrowserClient> | null = null;
 
 /**
  * Get singleton Supabase client instance
+ * Uses @supabase/ssr for cookie-based session management
  * Prevents multiple GoTrueClient instances warning
  */
 function getSupabaseClient() {
   if (supabaseInstance) return supabaseInstance;
 
-  // localStorage 접근 가능 여부 체크
-  let storage: Storage | undefined;
-  if (typeof window !== 'undefined') {
-    try {
-      // localStorage 접근 테스트
-      window.localStorage.setItem('__test__', '1');
-      window.localStorage.removeItem('__test__');
-      storage = window.localStorage;
-    } catch (e) {
-      console.warn('[Supabase] localStorage 접근 불가, 메모리 스토리지 사용');
-      // localStorage 접근 불가 시 메모리 기반 스토리지 사용
-      storage = undefined;
-    }
-  }
-
-  supabaseInstance = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: storage !== undefined, // localStorage 없으면 세션 유지 안 함
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      storage: storage,
-    },
-  });
+  // ✅ createBrowserClient는 자동으로 쿠키 + localStorage를 모두 사용
+  supabaseInstance = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
   // 개발 환경 디버깅용
   if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
@@ -78,13 +58,13 @@ export const supabase = getSupabaseClient();
  * 토큰 갱신, 로그인, 로그아웃 이벤트를 자동으로 처리합니다.
  */
 if (typeof window !== 'undefined') {
-  supabase.auth.onAuthStateChange((event, session) => {
+  supabase.auth.onAuthStateChange((event: any, session: any) => {
     console.log('[Supabase 인증]', event, session?.user?.email);
 
     switch (event) {
       case 'TOKEN_REFRESHED':
         console.log('✅ 토큰 자동 갱신 성공');
-        // 새 토큰이 자동으로 localStorage에 저장됨 (autoRefreshToken: true)
+        // 새 토큰이 자동으로 쿠키 + localStorage에 저장됨
         break;
 
       case 'SIGNED_IN':
@@ -92,8 +72,8 @@ if (typeof window !== 'undefined') {
         break;
 
       case 'SIGNED_OUT':
-        console.log('🚪 사용자 로그아웃, localStorage 클리어');
-        // localStorage에서 세션 데이터 클리어 (Supabase가 자동으로 처리)
+        console.log('🚪 사용자 로그아웃, 세션 클리어');
+        // 쿠키 + localStorage에서 세션 데이터 클리어 (Supabase가 자동으로 처리)
         break;
 
       case 'USER_UPDATED':
@@ -107,16 +87,16 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Create a new Supabase client instance for server-side operations
+ * Create a new Supabase client instance (deprecated - use singleton instead)
  *
+ * @deprecated Use the singleton `supabase` instance instead
  * @example
  * ```ts
- * import { createClient } from '@/lib/supabase';
+ * import { supabase } from '@/lib/supabase';
  *
- * const supabase = createClient();
  * const { data, error } = await supabase.from('table').select();
  * ```
  */
 export function createClient() {
-  return createSupabaseClient(supabaseUrl, supabaseAnonKey);
+  return createBrowserClient(supabaseUrl, supabaseAnonKey);
 }
