@@ -28,17 +28,46 @@ export async function GET(
         { status: 500 }
       );
     }
+    // 인증 헤더 추출
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: 'Unauthorized - Missing authentication header' },
+        { status: 401 }
+      );
+    }
+
+    // 🔍 디버그 로깅
+    console.log('[DEBUG] API Route - caseId:', caseId);
+    console.log('[DEBUG] API Route - backendUrl:', backendUrl);
+    console.log('[DEBUG] API Route - authHeader:', authHeader ? 'present ✅' : 'missing ❌');
+    console.log('[DEBUG] API Route - Fetching:', `${backendUrl}/reports/${caseId}`);
+
     const response = await fetch(`${backendUrl}/reports/${caseId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': authHeader, // ✅ 인증 헤더 전달
       },
     });
 
+    console.log('[DEBUG] API Route - Response status:', response.status);
+    console.log('[DEBUG] API Route - Response ok:', response.ok);
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Failed to fetch report' }));
+      const text = await response.text(); // 그냥 text로 통째로 보기
+      console.error('[DEBUG] API Route - Error body:', text);
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {}
+
       return NextResponse.json(
-        { error: errorData.error || 'Failed to fetch report' },
+        {
+          error: 'Failed to fetch report',
+          detail: parsed?.detail ?? parsed ?? text,
+        },
         { status: response.status }
       );
     }
