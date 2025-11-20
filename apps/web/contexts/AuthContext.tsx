@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 2️⃣ 인증 상태 변경 구독 (단일 리스너)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, newSession) => {
+    } = supabase.auth.onAuthStateChange((event: any, newSession: any) => {
       console.log(
         "[AuthProvider] 인증 상태 변경:",
         event,

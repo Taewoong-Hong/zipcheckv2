@@ -23,6 +23,8 @@ export interface AddressSearchModalProps {
   initialQuery?: string;
 }
 
+type FlowStep = 'address' | 'floor' | 'unit';
+
 export default function AddressSearchModal({
   isOpen,
   onClose,
@@ -34,6 +36,15 @@ export default function AddressSearchModal({
   const [isLoading, setIsLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [error, setError] = useState<string>('');
+
+  // 층/호수 선택 플로우
+  const [currentStep, setCurrentStep] = useState<FlowStep>('address');
+  const [selectedAddress, setSelectedAddress] = useState<JusoSearchResult | null>(null);
+  const [floors, setFloors] = useState<string[]>([]);
+  const [selectedFloor, setSelectedFloor] = useState<string | null>(null);
+  const [units, setUnits] = useState<string[]>([]);
+  // floorHoMapping: { "1층": ["101호", "102호"], "2층": ["201호", "202호"] }
+  const [buildingDetails, setBuildingDetails] = useState<Record<string, string[]>>({});
 
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -91,10 +102,126 @@ export default function AddressSearchModal({
     return () => clearTimeout(timer);
   }, [query]);
 
-  // 주소 선택 처리
-  const handleSelect = (result: JusoSearchResult) => {
+  // 건물 상세 정보 조회 (동 리스트)
+  const fetchBuildingDetails = async (result: JusoSearchResult) => {
+    setIsLoading(true);
+    setError('');
+
+    try {
+      // 1단계: 동 리스트 조회 (searchType=dong)
+      const dongParams = new URLSearchParams({
+        admCd: result.admCd,
+        rnMgtSn: result.rnMgtSn,
+        udrtYn: result.udrtYn,
+        buldMnnm: String(result.buldMnnm),
+        buldSlno: String(result.buldSlno),
+        searchType: 'dong',
+      });
+
+      const dongResponse = await fetch(`/api/address/detail?${dongParams}`);
+
+      if (!dongResponse.ok) {
+        throw new Error('동 정보 조회에 실패했습니다.');
+      }
+
+      const dongData = await dongResponse.json();
+
+      // 동이 없는 경우 바로 층/호 조회
+      if (!dongData.hasDong || dongData.dongList[0].dongNm === "'동'없음") {
+        // 동 없는 건물 - 바로 층/호 조회 (dongNm='')
+        await fetchFloorHoList(result, '');
+      } else {
+        // 동이 있는 경우 - 동 선택 단계로 이동
+        setSelectedAddress(result);
+        // 동 리스트 표시 (현재는 바로 첫 번째 동으로 진행 - UI 개선 필요 시 동 선택 단계 추가)
+        await fetchFloorHoList(result, dongData.dongList[0].dongNm);
+      }
+    } catch (err) {
+      console.error('Building detail fetch error:', err);
+      // 에러 발생 시 층 정보 없이 주소만 확정
+      handleFinalSelect(result, null, null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 층/호 리스트 조회
+  const fetchFloorHoList = async (result: JusoSearchResult, dongNm: string) => {
+    try {
+      // 2단계: 층/호 리스트 조회 (searchType=floorho)
+      const floorHoParams = new URLSearchParams({
+        admCd: result.admCd,
+        rnMgtSn: result.rnMgtSn,
+        udrtYn: result.udrtYn,
+        buldMnnm: String(result.buldMnnm),
+        buldSlno: String(result.buldSlno),
+        searchType: 'floorho',
+        dongNm: dongNm,
+      });
+
+      const floorHoResponse = await fetch(`/api/address/detail?${floorHoParams}`);
+
+      if (!floorHoResponse.ok) {
+        throw new Error('층/호 정보 조회에 실패했습니다.');
+      }
+
+      const floorHoData = await floorHoResponse.json();
+
+      if (floorHoData.floorList && floorHoData.floorList.length > 0) {
+        // 층 정보가 있으면 층 선택 단계로 이동
+        setFloors(floorHoData.floorList);
+        setBuildingDetails(floorHoData.floorHoMapping);
+        setSelectedAddress(result);
+        setCurrentStep('floor');
+      } else {
+        // 층 정보가 없으면 바로 주소 확정
+        handleFinalSelect(result, null, null);
+      }
+    } catch (err) {
+      console.error('FloorHo fetch error:', err);
+      handleFinalSelect(result, null, null);
+    }
+  };
+
+  // 층 선택 처리
+  const handleFloorSelect = (floor: string) => {
+    setSelectedFloor(floor);
+
+    // buildingDetails는 Record<string, string[]> 구조
+    // { "1층": ["101호", "102호"], "2층": ["201호", "202호"] }
+    const floorUnits = buildingDetails[floor] || [];
+
+    if (floorUnits.length > 0) {
+      setUnits(floorUnits);
+      setCurrentStep('unit');
+    } else {
+      // 호수 정보가 없으면 층까지만 확정
+      handleFinalSelect(selectedAddress!, floor, null);
+    }
+  };
+
+  // 호수 선택 처리
+  const handleUnitSelect = (unit: string) => {
+    handleFinalSelect(selectedAddress!, selectedFloor!, unit);
+  };
+
+  // 최종 주소 확정
+  const handleFinalSelect = (
+    result: JusoSearchResult,
+    floor: string | null,
+    unit: string | null
+  ) => {
+    let finalAddress = result.roadAddr;
+
+    if (floor) {
+      finalAddress += ` ${floor}층`;
+    }
+    if (unit) {
+      finalAddress += ` ${unit}호`;
+    }
+
     const addressInfo: AddressInfo = {
-      road: result.roadAddr,
+      road: finalAddress,
       lot: result.jibunAddr,
       zipCode: result.zipNo,
       buildingCode: result.bdMgtSn,
@@ -103,6 +230,35 @@ export default function AddressSearchModal({
 
     onSelect(addressInfo);
     onClose();
+
+    // 상태 초기화
+    resetModal();
+  };
+
+  // 모달 상태 초기화
+  const resetModal = () => {
+    setCurrentStep('address');
+    setSelectedAddress(null);
+    setFloors([]);
+    setSelectedFloor(null);
+    setUnits([]);
+    setBuildingDetails({});  // Record<string, string[]> 타입에 맞게 빈 객체로 초기화
+  };
+
+  // 뒤로 가기
+  const handleBack = () => {
+    if (currentStep === 'unit') {
+      setCurrentStep('floor');
+      setUnits([]);
+    } else if (currentStep === 'floor') {
+      setCurrentStep('address');
+      resetModal();
+    }
+  };
+
+  // 주소 선택 처리 (수정)
+  const handleSelect = (result: JusoSearchResult) => {
+    fetchBuildingDetails(result);
   };
 
   // 키보드 네비게이션
@@ -186,12 +342,14 @@ export default function AddressSearchModal({
           </p>
         </div>
 
-        {/* 검색 결과 */}
+        {/* 검색 결과 / 상세 주소 선택 */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {isLoading && (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500" />
-              <span className="ml-3 text-neutral-600">검색 중...</span>
+              <span className="ml-3 text-neutral-600">
+                {currentStep === 'address' ? '검색 중...' : '호수 정보 조회 중...'}
+              </span>
             </div>
           )}
 
@@ -206,7 +364,8 @@ export default function AddressSearchModal({
             </div>
           )}
 
-          {!isLoading && !error && results.length === 0 && query.length >= 2 && (
+          {/* Step 1: 주소 검색 결과 */}
+          {currentStep === 'address' && !isLoading && !error && results.length === 0 && query.length >= 2 && (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <MapPin className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
@@ -218,7 +377,7 @@ export default function AddressSearchModal({
             </div>
           )}
 
-          {!isLoading && results.length > 0 && (
+          {currentStep === 'address' && !isLoading && results.length > 0 && (
             <div ref={resultsRef} className="space-y-2">
               {results.map((result, index) => (
                 <button
@@ -261,6 +420,110 @@ export default function AddressSearchModal({
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Step 2: 층 선택 (드롭다운) */}
+          {currentStep === 'floor' && !isLoading && selectedAddress && (
+            <div className="space-y-4">
+              {/* 선택된 주소 표시 */}
+              <div className="p-4 bg-neutral-50 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Building className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-semibold text-neutral-900">
+                      {selectedAddress.roadAddr}
+                    </p>
+                    {selectedAddress.bdNm && (
+                      <p className="text-sm text-neutral-600 mt-1">
+                        건물명: {selectedAddress.bdNm}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 층 선택 드롭다운 */}
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-2">
+                  층 선택 {floors.length > 0 && `(총 ${floors.length}개)`}
+                </label>
+                <select
+                  value={selectedFloor || ''}
+                  onChange={(e) => handleFloorSelect(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                >
+                  <option value="">층을 선택하세요</option>
+                  {floors.map((floor, index) => (
+                    <option key={index} value={floor}>
+                      {floor}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-sm text-neutral-500">
+                  💡 층을 선택하면 해당 층의 호수 목록이 표시됩니다.
+                </p>
+              </div>
+
+              {/* 뒤로 가기 버튼 */}
+              <button
+                onClick={handleBack}
+                className="w-full py-3 px-4 border-2 border-neutral-300 rounded-lg text-neutral-700 font-medium hover:bg-neutral-50 transition-colors"
+              >
+                ← 다른 주소 선택하기
+              </button>
+            </div>
+          )}
+
+          {/* Step 3: 호수 선택 (드롭다운) */}
+          {currentStep === 'unit' && !isLoading && selectedAddress && (
+            <div className="space-y-4">
+              {/* 선택된 주소 표시 */}
+              <div className="p-4 bg-neutral-50 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Building className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-semibold text-neutral-900">
+                      {selectedAddress.roadAddr}
+                    </p>
+                    {selectedAddress.bdNm && (
+                      <p className="text-sm text-neutral-600 mt-1">
+                        건물명: {selectedAddress.bdNm}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 호수 선택 드롭다운 */}
+              <div>
+                <label className="block text-sm font-medium text-neutral-700 mb-2">
+                  호수 선택 {units.length > 0 && `(총 ${units.length}개)`}
+                </label>
+                <select
+                  value=""
+                  onChange={(e) => handleUnitSelect(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                >
+                  <option value="">호수를 선택하세요</option>
+                  {units.map((unit, index) => (
+                    <option key={index} value={unit}>
+                      {unit}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-sm text-neutral-500">
+                  💡 호수를 선택하면 자동으로 완료됩니다.
+                </p>
+              </div>
+
+              {/* 뒤로 가기 버튼 */}
+              <button
+                onClick={handleBack}
+                className="w-full py-3 px-4 border-2 border-neutral-300 rounded-lg text-neutral-700 font-medium hover:bg-neutral-50 transition-colors"
+              >
+                ← 다른 주소 선택하기
+              </button>
             </div>
           )}
         </div>

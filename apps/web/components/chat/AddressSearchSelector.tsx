@@ -38,14 +38,21 @@ export default function AddressSearchSelector({
   const [selectedHo, setSelectedHo] = useState("");
   const [selectedFloor, setSelectedFloor] = useState("");
 
-  // 동/호수 선택지 (API 응답에서 추출)
+  // 동/층/호수 선택지 (JUSO API 또는 fallback에서 추출)
   const [dongOptions, setDongOptions] = useState<string[]>([]);
+  const [floorOptions, setFloorOptions] = useState<string[]>([]);
   const [hoOptions, setHoOptions] = useState<string[]>([]);
 
-  // 층 선택지 (1층~50층)
-  const floorOptions = Array.from({ length: 50 }, (_, i) => `${i + 1}`);
+  // 층별 호수 매핑 (floorho API 응답용)
+  const [floorHoMapping, setFloorHoMapping] = useState<Record<string, string[]>>({});
 
-  // 주소 검색 API 호출 (기존 GET API 사용)
+  // API 사용 가능 여부 (fallback 판단용)
+  const [useJusoAPI, setUseJusoAPI] = useState(true);
+
+  // 환경 감지: 프로덕션(Vercel)에서는 JUSO API 시도, 로컬에서는 Fallback 우선
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_VERCEL_ENV === 'production';
+
+  // 주소 검색 API 호출
   const searchAddress = async () => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
       setErrorMessage("검색어는 최소 2자 이상이어야 합니다.");
@@ -96,49 +103,172 @@ export default function AddressSearchSelector({
     }
   };
 
-  // 주소 선택 핸들러
-  const handleSelectAddress = (address: AddressResult) => {
+  // 주소 선택 핸들러 - 환경별 동작 분기
+  const handleSelectAddress = async (address: AddressResult) => {
     setSelectedAddress(address);
+    setSelectedDong("");
+    setSelectedHo("");
+    setSelectedFloor("");
+    setDongOptions([]);
+    setFloorOptions([]);
+    setHoOptions([]);
+    setFloorHoMapping({});
 
-    // detBdNmList에서 동/호 정보 추출
+    // 로컬 환경: Fallback 모드 우선 사용
+    if (!isProduction) {
+      console.log('🔧 로컬 환경 감지 - Fallback 모드 사용');
+      setUseJusoAPI(false);
+
+      if (address.detBdNmList) {
+        const details = address.detBdNmList.split(',').map(d => d.trim());
+
+        // 동 추출
+        const dongs = details
+          .filter(d => d.includes('동'))
+          .map(d => d.match(/\d+동/)?.[0])
+          .filter((d): d is string => !!d);
+
+        // 호 추출
+        const hos = details
+          .filter(d => d.includes('호'))
+          .map(d => d.match(/\d+호/)?.[0])
+          .filter((d): d is string => !!d);
+
+        setDongOptions([...new Set(dongs)]);
+        setHoOptions([...new Set(hos)]);
+
+        // 하드코딩 층 옵션 (1~50층)
+        const floors = Array.from({ length: 50 }, (_, i) => `${i + 1}층`);
+        setFloorOptions(floors);
+
+        console.log('✅ Fallback 파싱 완료 (로컬):', { dongs: dongs.length, hos: hos.length });
+      }
+      return;
+    }
+
+    // 프로덕션 환경: JUSO API 시도 + Fallback
+    console.log('🚀 프로덕션 환경 감지 - JUSO API 시도');
+
+    try {
+      const params = new URLSearchParams({
+        admCd: address.admCd,
+        rnMgtSn: address.rnMgtSn,
+        udrtYn: address.udrtYn || '0',
+        buldMnnm: address.buldMnnm,
+        buldSlno: address.buldSlno || '0',
+        searchType: 'dong',
+      });
+
+      const response = await fetch(`/api/address/detail?${params.toString()}`);
+
+      if (response.ok) {
+        const data = await response.json();
+
+        if (data.dongList && data.dongList.length > 0) {
+          // JUSO API 성공
+          const dongs = data.dongList.map((item: any) => item.dongNm);
+          setDongOptions(dongs);
+          setUseJusoAPI(true);
+          console.log('✅ JUSO API 동 목록 조회 성공:', dongs.length);
+          return;
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ JUSO API 실패, fallback 사용:', error);
+    }
+
+    // Fallback: detBdNmList 파싱
+    setUseJusoAPI(false);
     if (address.detBdNmList) {
       const details = address.detBdNmList.split(',').map(d => d.trim());
 
-      // 동 추출 (예: "101동", "102동")
+      // 동 추출
       const dongs = details
         .filter(d => d.includes('동'))
         .map(d => d.match(/\d+동/)?.[0])
         .filter((d): d is string => !!d);
 
-      // 호 추출 (예: "101호", "102호")
+      // 호 추출
       const hos = details
         .filter(d => d.includes('호'))
         .map(d => d.match(/\d+호/)?.[0])
         .filter((d): d is string => !!d);
 
-      setDongOptions([...new Set(dongs)]); // 중복 제거
+      setDongOptions([...new Set(dongs)]);
       setHoOptions([...new Set(hos)]);
+
+      // 하드코딩 층 옵션 (1~50층)
+      const floors = Array.from({ length: 50 }, (_, i) => `${i + 1}층`);
+      setFloorOptions(floors);
+
+      console.log('✅ Fallback 파싱 완료 (프로덕션):', { dongs: dongs.length, hos: hos.length });
+    }
+  };
+
+  // 동 선택 핸들러 - JUSO API로 층/호 조회
+  const handleDongSelect = async (dongNm: string) => {
+    setSelectedDong(dongNm);
+    setSelectedFloor("");
+    setSelectedHo("");
+    setFloorOptions([]);
+    setHoOptions([]);
+
+    if (!useJusoAPI || !selectedAddress) {
+      return; // Fallback 모드면 조회 안 함
     }
 
-    // 선택 초기화
-    setSelectedDong("");
-    setSelectedHo("");
-    setSelectedFloor("");
+    // JUSO API: 층/호 목록 조회
+    try {
+      const params = new URLSearchParams({
+        admCd: selectedAddress.admCd,
+        rnMgtSn: selectedAddress.rnMgtSn,
+        udrtYn: selectedAddress.udrtYn || '0',
+        buldMnnm: selectedAddress.buldMnnm,
+        buldSlno: selectedAddress.buldSlno || '0',
+        searchType: 'floorho',
+        dongNm: dongNm,
+      });
+
+      const response = await fetch(`/api/address/detail?${params.toString()}`);
+
+      if (response.ok) {
+        const data = await response.json();
+
+        if (data.floorList && data.floorHoMapping) {
+          setFloorOptions(data.floorList);
+          setFloorHoMapping(data.floorHoMapping);
+          console.log('✅ JUSO API 층/호 조회 성공:', data.floorList.length);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('❌ JUSO API floorho 조회 실패:', error);
+    }
+  };
+
+  // 층 선택 핸들러 - 해당 층의 호수 목록 표시
+  const handleFloorSelect = (floor: string) => {
+    setSelectedFloor(floor);
+
+    if (useJusoAPI && floorHoMapping[floor]) {
+      // JUSO API 모드: 층에 해당하는 호수 목록
+      setHoOptions(floorHoMapping[floor]);
+    }
+    // Fallback 모드: hoOptions는 이미 설정되어 있음
   };
 
   // 확인 버튼 핸들러
   const handleConfirm = () => {
     if (selectedAddress) {
-      // 층 필수 검증
-      if (!selectedFloor) {
+      // 프로덕션에서만 층 필수 검증
+      if (isProduction && !selectedFloor) {
         setErrorMessage("층을 선택해주세요.");
         return;
       }
 
-      // 에러 메시지 초기화
       setErrorMessage("");
 
-      // 선택한 동/호수/층수를 조합하여 상세주소 생성
+      // 선택한 동/층/호를 조합하여 상세주소 생성
       const details = [selectedDong, selectedFloor, selectedHo].filter(Boolean).join(' ');
       onAddressSelect(selectedAddress, details);
     }
@@ -225,7 +355,7 @@ export default function AddressSearchSelector({
         </div>
       )}
 
-      {/* 선택된 주소 확인 */}
+      {/* 선택된 주소 - 상세주소 입력 */}
       {selectedAddress && (
         <div className="mb-4 p-4 bg-brand-50 border border-brand-200 rounded-lg">
           <p className="text-sm font-medium text-neutral-700 mb-3">선택된 주소</p>
@@ -249,11 +379,14 @@ export default function AddressSearchSelector({
               상세주소
             </label>
 
-            {/* 동 선택/입력 (선택사항) */}
+            {/* 동 선택 (선택사항) */}
             {dongOptions.length > 0 ? (
               <select
                 value={selectedDong}
-                onChange={(e) => setSelectedDong(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  handleDongSelect(value);
+                }}
                 className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
               >
                 <option value="">동을 선택해주세요. (선택)</option>
@@ -271,7 +404,27 @@ export default function AddressSearchSelector({
               />
             )}
 
-            {/* 호 선택/입력 (선택사항) */}
+            {/* 층 선택 (필수) */}
+            {floorOptions.length > 0 ? (
+              <div>
+                <select
+                  value={selectedFloor}
+                  onChange={(e) => handleFloorSelect(e.target.value)}
+                  className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
+                >
+                  <option value="">층을 선택해주세요. (필수)</option>
+                  {!useJusoAPI && <option value="0층">지하(0층)</option>}
+                  {floorOptions.map((floor) => (
+                    <option key={floor} value={floor}>{floor}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-neutral-500">
+                  *층은 필수 선택 사항입니다.{!useJusoAPI && ' 지하의 경우 \'지하(0층)\'을 선택해주세요.'}
+                </p>
+              </div>
+            ) : null}
+
+            {/* 호 선택 (선택사항) */}
             {hoOptions.length > 0 ? (
               <select
                 value={selectedHo}
@@ -292,24 +445,6 @@ export default function AddressSearchSelector({
                 className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
               />
             )}
-
-            {/* 층 선택 (필수) */}
-            <div>
-              <select
-                value={selectedFloor}
-                onChange={(e) => setSelectedFloor(e.target.value)}
-                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent"
-              >
-                <option value="">층을 선택해주세요. (필수)</option>
-                <option value="0">지하(0층)</option>
-                {floorOptions.map((floor) => (
-                  <option key={floor} value={floor}>{floor}층</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-neutral-500">
-                *층은 필수 선택 사항입니다. 지하의 경우 &apos;지하(0층)&apos;을 선택해주세요.
-              </p>
-            </div>
           </div>
         </div>
       )}
@@ -326,7 +461,7 @@ export default function AddressSearchSelector({
         )}
         <button
           onClick={handleConfirm}
-          disabled={!selectedAddress || !selectedFloor}
+          disabled={!selectedAddress || (isProduction && !selectedFloor)}
           className="px-6 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           이 주소로 계속하기

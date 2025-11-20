@@ -151,7 +151,7 @@ export default function AdminDashboard() {
     checkAuthSession();
 
     // Auth state 변화 감지 (로그인 콜백 처리)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any,  session: any) => {
       if (session) {
         checkAuthSession();
       }

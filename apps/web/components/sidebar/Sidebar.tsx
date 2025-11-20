@@ -49,7 +49,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
       const supabase = getBrowserSupabase();
 
       // Listen to auth state changes
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event: any, session: any) => {
         console.log('[Sidebar] Auth state changed:', event, !!session);
 
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {

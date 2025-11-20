@@ -9,9 +9,15 @@ LLM으로 구조화 절대 금지! (hallucination + 불필요한 비용)
 """
 import logging
 import re
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 import fitz  # PyMuPDF
+from core.audit_logger import (
+    log_parsing_error,
+    log_parsing_success,
+    log_parsing_warning,
+    EventType
+)
 
 logger = logging.getLogger(__name__)
 
@@ -573,13 +579,28 @@ def structure_registry_with_llm(raw_text: str) -> RegistryDocument:
 # ===========================
 # 메인 파싱 함수 (리팩토링 완료)
 # ===========================
-async def parse_registry_pdf(pdf_path: str) -> RegistryDocument:
+async def parse_registry_pdf(
+    pdf_path: str,
+    case_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> RegistryDocument:
     """
     등기부 PDF 파싱 및 구조화
 
     전략:
     1. 텍스트 PDF → 정규식 파서 (LLM 없음, 비용 0, hallucination 없음)
     2. 이미지 PDF → Gemini Vision OCR → 정규식 파서
+
+    Args:
+        pdf_path: PDF 파일 경로
+        case_id: 케이스 UUID (선택, 감사 로그용)
+        user_id: 사용자 UUID (선택, 감사 로그용)
+
+    Returns:
+        RegistryDocument: 파싱된 등기부 데이터
+
+    Raises:
+        Exception: 파싱 실패 시 (감사 로그 자동 기록)
     """
     logger.info(f"📄 [PDF 파싱 시작] 파일: {pdf_path}")
 
@@ -593,12 +614,36 @@ async def parse_registry_pdf(pdf_path: str) -> RegistryDocument:
         # Step 2: 이미지 PDF면 Gemini Vision OCR
         if not is_text_pdf:
             logger.info("🖼️ [Step 2/3] 이미지 PDF 감지 → Gemini Vision OCR 시작")
-            raw_text = await ocr_with_gemini_vision(pdf_path)
 
-            logger.info(f"✅ [OCR 완료] 추출된 텍스트: {len(raw_text)}자")
+            try:
+                raw_text = await ocr_with_gemini_vision(pdf_path)
+                logger.info(f"✅ [OCR 완료] 추출된 텍스트: {len(raw_text)}자")
 
+            except Exception as ocr_error:
+                # OCR 실패 감사 로그
+                log_parsing_error(
+                    case_id=case_id or "unknown",
+                    error_message=f"Gemini Vision OCR 실패: {str(ocr_error)}",
+                    error_type=EventType.OCR_FAILED,
+                    user_id=user_id,
+                    metadata={"pdf_path": pdf_path, "error": str(ocr_error)}
+                )
+                raise
+
+            # OCR 결과 검증
             if not raw_text or len(raw_text) < 100:
-                logger.error(f"❌ [OCR 실패] 텍스트가 너무 짧음: {len(raw_text)}자")
+                error_msg = f"OCR 텍스트가 너무 짧음: {len(raw_text)}자 (최소 100자 필요)"
+                logger.error(f"❌ [OCR 실패] {error_msg}")
+
+                # 감사 로그 기록
+                log_parsing_error(
+                    case_id=case_id or "unknown",
+                    error_message=error_msg,
+                    error_type=EventType.PDF_TEXT_EXTRACTION_FAILED,
+                    user_id=user_id,
+                    metadata={"text_length": len(raw_text), "min_required": 100}
+                )
+
                 return RegistryDocument(raw_text=raw_text)
         else:
             logger.info("📝 [Step 2/3] 텍스트 PDF - OCR 생략")
@@ -620,19 +665,65 @@ async def parse_registry_pdf(pdf_path: str) -> RegistryDocument:
         logger.info(f"   └─ 전세권: {len(registry.lease_rights)}건")
 
         # 파싱 신뢰도 체크 (핵심 필드 누락 경고)
+        missing_fields = []
         if not registry.property_address:
             logger.warning("⚠️ [파싱 경고] 주소 추출 실패")
+            missing_fields.append("property_address")
         if not registry.owner:
             logger.warning("⚠️ [파싱 경고] 소유자 정보 추출 실패")
+            missing_fields.append("owner")
+
+        # 핵심 필드 누락 시 경고 로그
+        if missing_fields:
+            log_parsing_warning(
+                case_id=case_id or "unknown",
+                warning_message=f"핵심 필드 누락: {', '.join(missing_fields)}",
+                user_id=user_id,
+                metadata={
+                    "missing_fields": missing_fields,
+                    "text_length": len(raw_text),
+                    "mortgage_count": len(registry.mortgages),
+                    "seizure_count": len(registry.seizures)
+                }
+            )
+
+        # 성공 감사 로그
+        log_parsing_success(
+            case_id=case_id or "unknown",
+            message=f"등기부 파싱 완료 (주소: {registry.property_address or 'N/A'})",
+            user_id=user_id,
+            metadata={
+                "pdf_type": "text" if is_text_pdf else "image",
+                "text_length": len(raw_text),
+                "mortgage_count": len(registry.mortgages),
+                "seizure_count": len(registry.seizures),
+                "missing_fields": missing_fields
+            }
+        )
 
         return registry
 
     except Exception as e:
-        logger.error(f"❌ [파싱 실패] {str(e)}", exc_info=True)
+        error_msg = f"등기부 파싱 실패: {str(e)}"
+        logger.error(f"❌ [파싱 실패] {error_msg}", exc_info=True)
+
+        # 감사 로그 기록
+        log_parsing_error(
+            case_id=case_id or "unknown",
+            error_message=error_msg,
+            error_type=EventType.REGISTRY_PARSING_FAILED,
+            user_id=user_id,
+            metadata={"pdf_path": pdf_path, "error": str(e), "error_type": type(e).__name__}
+        )
+
         raise
 
 
-async def parse_registry_from_url(file_url: str) -> RegistryDocument:
+async def parse_registry_from_url(
+    file_url: str,
+    case_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> RegistryDocument:
     """
     Supabase Storage URL에서 등기부 파싱
 
@@ -641,6 +732,11 @@ async def parse_registry_from_url(file_url: str) -> RegistryDocument:
     - 버킷 화이트리스트 (artifacts만 허용)
     - SSRF 방지 (내부 IP 차단)
     - Content-Type 검증 (application/pdf만 허용)
+
+    Args:
+        file_url: Supabase Storage URL
+        case_id: 케이스 UUID (감사 로그용, 선택)
+        user_id: 사용자 UUID (감사 로그용, 선택)
     """
     import tempfile
     import httpx
@@ -769,8 +865,8 @@ async def parse_registry_from_url(file_url: str) -> RegistryDocument:
 
             logger.info(f"✅ [다운로드 완료] {total} bytes")
 
-        # 6) 파싱
-        registry = await parse_registry_pdf(tmp_path)
+        # 6) 파싱 (감사 로그 컨텍스트 전달)
+        registry = await parse_registry_pdf(tmp_path, case_id=case_id, user_id=user_id)
 
         # 7) 임시 파일 삭제
         try:

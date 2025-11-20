@@ -1,5 +1,5 @@
 /**
- * 분석 실행 API
+ * 분석 실행 API (v2)
  */
 
 
@@ -48,13 +48,9 @@ export async function POST(
       bearerToken = authHeader.slice('Bearer '.length).trim();
       console.log('[analysis] Using token from Authorization header');
 
-      // Verify token and get user info
-      const { data: { user }, error } = await supabase.auth.getUser(bearerToken);
-      if (error || !user) {
-        console.error('[analysis] Invalid token:', error);
-        return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-      }
-      userId = user.id;
+      // Skip token verification here - FastAPI will handle it with service role key
+      // This prevents token corruption that occurs during getUser() call
+      // userId will be extracted by FastAPI from the token
     } else {
       console.log('[analysis] Fetching session from Supabase...');
       const { data: { session } } = await supabase.auth.getSession();
@@ -92,44 +88,66 @@ export async function POST(
       }
     }
 
-    if (!bearerToken || !userId) {
+    if (!bearerToken) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id: caseId } = await params;
 
-    console.log(`[analysis] Looking for case: ${caseId}, user: ${userId}`);
+    // FastAPI handles case validation with service role key to avoid RLS issues
+    console.log(`[analysis] Starting analysis for case: ${caseId}`);
 
-    // 케이스 조회
-    const { data: caseData, error: caseError } = await supabase
-      .from('v2_cases')
-      .select('*')
-      .eq('id', caseId)
-      .eq('user_id', userId)
-      .single();
+    // ✅ FastAPI 백엔드로 분석 요청
+    const backendUrl = process.env.AI_API_URL;
+    console.log(`[analysis] AI_API_URL debug:`, backendUrl);
+    console.log(`[analysis] All env vars:`, {
+      AI_API_URL: process.env.AI_API_URL,
+      NEXT_PUBLIC_AI_API_URL: process.env.NEXT_PUBLIC_AI_API_URL
+    });
 
-    if (caseError || !caseData) {
-      console.error(`[analysis] Case not found. Error:`, caseError);
-      console.error(`[analysis] Data:`, caseData);
-      return NextResponse.json({ error: 'Case not found' }, { status: 404 });
+    if (!backendUrl) {
+      console.error('[analysis] AI_API_URL not configured - check .env.local');
+      return NextResponse.json({ error: 'Backend URL not configured' }, { status: 500 });
     }
 
-    console.log(`[analysis] Case found:`, caseData.id);
+    console.log(`[analysis] Calling FastAPI: ${backendUrl}/analyze/start`);
+    console.log(`[analysis] Token debug - length: ${bearerToken?.length}, first 50 chars: ${bearerToken?.substring(0, 50)}...`);
+    console.log(`[analysis] Token debug - last 50 chars: ...${bearerToken?.substring(bearerToken.length - 50)}`);
 
-    // TODO: 실제 백엔드 FastAPI 서버로 분석 요청
-    // const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
-    // const response = await fetch(`${backendUrl}/analyze/${caseId}`, {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    // });
+    try {
+      const response = await fetch(`${backendUrl}/analyze/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${bearerToken}`,
+        },
+        body: JSON.stringify({
+          case_id: caseId,
+        }),
+      });
 
-    // 임시: 케이스 상태를 report로 업데이트
-    await supabase
-      .from('v2_cases')
-      .update({ state: 'report' })
-      .eq('id', caseId);
+      console.log(`[analysis] FastAPI response status: ${response.status}`);
 
-    return NextResponse.json({ ok: true, caseId });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[analysis] FastAPI error:`, errorText);
+        return NextResponse.json(
+          { error: `Analysis failed: ${errorText}` },
+          { status: response.status }
+        );
+      }
+
+      const analysisResult = await response.json();
+      console.log(`[analysis] Analysis started:`, analysisResult);
+
+      return NextResponse.json({ ok: true, caseId, result: analysisResult });
+    } catch (fetchError) {
+      console.error('[analysis] FastAPI connection error:', fetchError);
+      return NextResponse.json(
+        { error: 'Failed to connect to analysis backend' },
+        { status: 503 }
+      );
+    }
   } catch (error) {
     console.error('Analysis error:', error);
     return NextResponse.json(

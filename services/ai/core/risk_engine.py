@@ -95,6 +95,57 @@ class NegotiationPoint(BaseModel):
     impact: str  # "높음" | "중간" | "낮음"
 
 
+class RegistryRiskFeatures(BaseModel):
+    """
+    등기부 리스크 특징 (코드로 100% 계산, LLM 사용 안 함)
+
+    LLM은 이 JSON을 읽고 '해석/설명/추천'만 하면 됨
+    """
+    # 기본 정보
+    property_address: Optional[str] = None
+    building_type: Optional[str] = None
+    area_m2: Optional[float] = None
+
+    # 소유권 정보 (마스킹)
+    owner_count: int = 0
+    owner_names_masked: List[str] = []
+
+    # 근저당권 분석
+    mortgage_count: int = 0
+    total_mortgage_amount: int = 0  # 만원
+    max_mortgage_ltv: Optional[float] = None  # 최대 근저당 LTV (%)
+    mortgage_creditors: List[str] = []  # 채권자 목록 (기업명만)
+
+    # 압류/가압류/가처분
+    has_seizure: bool = False  # 압류
+    has_provisional_attachment: bool = False  # 가압류
+    has_provisional_disposition: bool = False  # 가처분
+    seizure_count: int = 0
+    seizure_total_amount: int = 0  # 만원
+
+    # 질권
+    pledge_count: int = 0
+    pledge_total_amount: int = 0  # 만원
+
+    # 전세권
+    lease_right_count: int = 0
+    lease_right_total_amount: int = 0  # 만원
+
+    # 리스크 지표 (계산된 값)
+    jeonse_ratio: Optional[float] = None  # 전세가율 (%)
+    mortgage_ratio: Optional[float] = None  # 근저당 비율 (%)
+    total_encumbrance_ratio: Optional[float] = None  # 총 부담 비율 (%)
+
+    # 위험도 레벨 (규칙 기반 판정)
+    risk_level: str = "안전"  # "안전" | "주의" | "위험" | "심각"
+    risk_score: float = 0.0  # 0~100 (낮을수록 안전)
+
+    # 세부 점수 (임대차 전용)
+    jeonse_ratio_score: Optional[int] = None
+    mortgage_ratio_score: Optional[int] = None
+    encumbrance_score: Optional[int] = None
+
+
 class RiskAnalysisResult(BaseModel):
     """리스크 분석 결과"""
     risk_score: RiskScore

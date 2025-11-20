@@ -205,6 +205,128 @@ async def analyze(body: AskBody):
 
 ## 📝 작업 현황
 
+### ✅ 2025-01-19: 리포트 페이지 SSE 스트리밍 연결 구현 완료
+
+**핵심 성과**:
+- ✅ 리포트 페이지에 실시간 분석 진행 상태 표시 구현
+- ✅ EventSource API로 SSE 스트리밍 연결
+- ✅ 8단계 진행 메시지 + 프로그레스 바 표시
+- ✅ 폴링 방식 제거, 실시간 스트리밍으로 전환
+
+**구현 내용**:
+
+1. **SSE 스트리밍 연결 (`apps/web/app/report/[caseId]/page.tsx`)**
+   - EventSource API로 `/api/analysis/stream` 엔드포인트 연결
+   - 분석 진행 중일 때 (`isAnalyzing === true`) 자동 SSE 연결
+   - 실시간 메시지 수신 및 UI 업데이트
+
+2. **실시간 진행 상태 표시**
+   - 8단계 메시지 실시간 표시:
+     - 🚀 분석을 시작합니다... (10%)
+     - 📋 케이스 데이터 조회 중... (20%)
+     - 📄 등기부 파싱 중... (30%)
+     - 🔍 공공데이터 조회 중... (50%)
+     - 📊 리스크 점수 계산 중... (70%)
+     - 🤖 AI 리포트 생성 중... (80%)
+     - 💾 리포트 저장 중... (95%)
+     - ✅ 분석 완료! (100%)
+   - 애니메이션 프로그레스 바 (0-100%)
+   - 단계 카운터 (Step X/8)
+   - 정확한 퍼센트 표시
+
+3. **에러 처리 및 재연결**
+   - SSE 연결 실패 시 자동 재연결 (최대 3회)
+   - 재연결 간격: 2초, 4초, 6초 (점진적 증가)
+   - 사용자 친화적 에러 메시지 표시
+   - "다시 시도" 버튼으로 수동 재연결
+
+4. **자동 리포트 로딩**
+   - `done: true` 메시지 수신 시 자동 리포트 로드
+   - 1초 지연 후 로드 (서버 저장 시간 고려)
+   - SSE 연결 자동 종료
+
+**주요 코드**:
+```typescript
+// SSE 스트리밍 연결
+useEffect(() => {
+  if (!isAnalyzing) return;
+
+  const eventSource = new EventSource(`/api/analysis/stream?caseId=${caseId}`);
+
+  eventSource.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    setStreamStep(data.step || 0);
+    setStreamProgress(data.progress || 0);
+    setStreamMessage(data.message || '처리 중...');
+
+    if (data.done) {
+      eventSource.close();
+      setTimeout(() => loadReport(), 1000);
+    }
+  };
+
+  eventSource.onerror = (err) => {
+    // 자동 재연결 로직 (최대 3회)
+  };
+
+  return () => eventSource.close();
+}, [isAnalyzing, caseId, loadReport]);
+```
+
+**개선 효과**:
+
+**이전 (폴링 방식)**:
+- ❌ 3초마다 서버 요청 (비효율적)
+- ❌ 최대 20번 시도 후 타임아웃
+- ❌ 일반적인 "분석 진행 중..." 메시지만 표시
+
+**현재 (SSE 스트리밍)**:
+- ✅ 실시간 양방향 연결 (효율적)
+- ✅ 자동 재연결 (최대 3회)
+- ✅ 8단계 상세 진행 메시지 + 프로그레스 바
+- ✅ 사용자가 정확한 진행 상황 파악 가능
+
+**동작 플로우**:
+```
+1. /report/:caseId 접속 → GET /api/report/:caseId → 404
+2. isAnalyzing = true → EventSource 연결
+3. SSE 메시지 실시간 수신 (Step 1~8)
+4. done: true 수신 → SSE 종료 → 리포트 로드
+5. 리포트 화면 표시
+```
+
+---
+
+### ✅ 2025-11-18: 주소 모달 긍정 응답 처리 및 TypeScript 빌드 에러 수정
+
+**핵심 성과**:
+- ✅ 긍정 응답 후 주소 모달이 열리지 않는 문제 해결
+- ✅ TypeScript 정규식 플래그 호환성 에러 수정
+- ✅ 로컬 빌드 타입 에러 0개 달성
+
+**1. 주소 모달 긍정 응답 처리 수정**
+
+**문제**: 사용자가 "응" 응답 후 주소 모달이 열리지 않음
+
+**수정 파일**: `apps/web/app/api/chat/route.ts:354`
+```typescript
+// Before: if (isRealEstateAnalysisRequest(content) && (!addr || !ctype))
+// After:  if ((isRealEstateAnalysisRequest(content) || isPositiveResponse(content)) && (!addr || !ctype))
+```
+
+**2. TypeScript 정규식 플래그 호환성 수정**
+
+**수정 파일**: `apps/web/app/api/address/detail/route.ts:92`
+```typescript
+// Before: /\{.*\}/s  // ES2018+ only
+// After:  /\{[\s\S]*\}/  // ES5+ compatible
+```
+
+**3. 타입 체크 결과**: ✅ 에러 0개
+
+---
+
+
 ### ✅ 2025-11-07: 한글 인코딩 수정 및 TypeScript 타입 에러 전체 해결
 
 **핵심 성과**:

@@ -43,6 +43,12 @@ export async function GET(
       );
     }
 
+    // 🔍 디버그 로깅
+    console.log('[DEBUG] API Route - caseId:', caseId);
+    console.log('[DEBUG] API Route - backendUrl:', AI_API_URL);
+    console.log('[DEBUG] API Route - authHeader:', session.access_token ? 'present ✅' : 'missing ❌');
+    console.log('[DEBUG] API Route - Fetching:', `${AI_API_URL}/reports/${caseId}`);
+
     // Call FastAPI /reports/{case_id} endpoint
     const response = await fetch(`${AI_API_URL}/reports/${caseId}`, {
       method: 'GET',
@@ -52,14 +58,25 @@ export async function GET(
       },
     });
 
+    console.log('[DEBUG] API Route - Response status:', response.status);
+    console.log('[DEBUG] API Route - Response ok:', response.ok);
+
     if (!response.ok) {
-      if (response.status === 404) {
-        return NextResponse.json(
-          { error: 'NOT_FOUND', message: '리포트를 찾을 수 없습니다' },
-          { status: 404 }
-        );
-      }
-      throw new Error(`리포트 조회 실패: ${response.status}`);
+      const text = await response.text(); // 그냥 text로 통째로 보기
+      console.error('[DEBUG] API Route - Error body:', text);
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {}
+
+      return NextResponse.json(
+        {
+          error: 'Failed to fetch report',
+          detail: parsed?.detail ?? parsed ?? text,
+        },
+        { status: response.status }
+      );
     }
 
     const report = await response.json();

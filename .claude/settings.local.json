@@ -61,7 +61,15 @@
       "Bash(git rebase:*)",
       "Bash(git stash:*)",
       "Bash(gcloud run regions:*)",
-      "Bash(for pid in 16648 21008 18436 26180)"
+      "Bash(for pid in 16648 21008 18436 26180)",
+      "Bash(node -e:*)",
+      "Bash(node final_fix.js:*)",
+      "Bash(node fix_remaining_korean.js:*)",
+      "Bash(node:*)",
+      "Bash(iconv:*)",
+      "Bash(for pid in 25552 34196 40388 15124 8512)",
+      "Bash(do echo \"=== PID $pid ===\")",
+      "Bash(tasklist /FI \"PID eq $pid\" /FO TABLE)"
     ],
     "deny": [],
     "ask": []

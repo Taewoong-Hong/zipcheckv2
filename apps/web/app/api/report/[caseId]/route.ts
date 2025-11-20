@@ -43,25 +43,36 @@ export async function GET(
     console.log('[DEBUG] API Route - authHeader:', authHeader ? 'present ✅' : 'missing ❌');
     console.log('[DEBUG] API Route - Fetching:', `${backendUrl}/reports/${caseId}`);
 
-    const response = await fetch(`${backendUrl}/reports/${caseId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authHeader, // ✅ 인증 헤더 전달
-      },
-    });
+    let response;
+    try {
+      response = await fetch(`${backendUrl}/reports/${caseId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader, // ✅ 인증 헤더 전달
+        },
+      });
+      console.log('[DEBUG] API Route - Fetch succeeded');
+    } catch (fetchError) {
+      console.error('[DEBUG] API Route - Fetch FAILED before response:', fetchError);
+      throw fetchError; // Re-throw to be caught by outer catch
+    }
 
     console.log('[DEBUG] API Route - Response status:', response.status);
     console.log('[DEBUG] API Route - Response ok:', response.ok);
 
     if (!response.ok) {
       const text = await response.text(); // 그냥 text로 통째로 보기
-      console.error('[DEBUG] API Route - Error body:', text);
+      console.error('[DEBUG] API Route - Error body (length):', text.length);
+      console.error('[DEBUG] API Route - Error body (content):', text);
 
       let parsed: any = null;
       try {
         parsed = JSON.parse(text);
-      } catch {}
+        console.error('[DEBUG] API Route - Parsed JSON:', JSON.stringify(parsed, null, 2));
+      } catch (e) {
+        console.error('[DEBUG] API Route - JSON parse failed:', e);
+      }
 
       return NextResponse.json(
         {

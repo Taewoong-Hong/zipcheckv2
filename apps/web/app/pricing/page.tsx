@@ -23,7 +23,7 @@ export default function PricingPage() {
     checkAuth();
 
     // 로그인 상태 변경 감지
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
       setIsLoggedIn(!!session);
 
       // 로그인 성공 후 대기 중인 플랜이 있으면 체크아웃으로 이동

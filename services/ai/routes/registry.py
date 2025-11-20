@@ -125,8 +125,12 @@ async def upload_registry(
         text = parse_pdf_to_text(temp_path)
         logger.info(f"텍스트 추출 완료: {len(text)} chars")
 
-        # 구조화 파싱 (정규식/필요시 OCR)
-        registry_doc = await parse_registry_pdf(temp_path)
+        # 구조화 파싱 (정규식/필요시 OCR + Audit Log)
+        registry_doc = await parse_registry_pdf(
+            temp_path,
+            case_id=case_id,  # 감사 로그용
+            user_id=user_id   # 감사 로그용
+        )
         masked = registry_doc.to_masked_dict()
         section_count = 0
         section_count += len(masked.get("mortgages", []) or [])
@@ -248,7 +252,7 @@ async def upload_registry(
             text_length=len(text),
             property_address=property_address,
             artifact_id=locals().get('artifact_id'),
-            file_url=locals().get('signed_url'),
+            file_url=None,  # Deprecated: 동적 생성으로 변경
         )
 
     except HTTPException:

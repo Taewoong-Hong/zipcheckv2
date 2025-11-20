@@ -67,7 +67,7 @@ export default function UserProfileNew({ isExpanded }: UserProfileNewProps) {
     checkAuth();
 
     // 로그인 상태 변경 감지
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any,  session: any) => {
       setIsLoggedIn(!!session);
 
       if (session?.user) {

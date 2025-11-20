@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from core.supabase_client import get_supabase_client
+from core.supabase_client import get_supabase_client, supabase_storage
 from core.auth import get_current_user
 from core.risk_engine import analyze_risks  # ✅ 구현 완료
 from core.llm_router import dual_model_analyze  # ✅ 구현 완료
@@ -54,6 +54,24 @@ class CrosscheckRequest(BaseModel):
 class CrosscheckResponse(BaseModel):
     """교차검증 응답"""
     validation: str
+
+
+class AuditLogEntry(BaseModel):
+    """감사 로그 항목"""
+    id: str
+    event_type: str
+    event_category: str
+    message: str
+    severity: str
+    created_at: str
+    metadata: Optional[dict] = None
+
+
+class AuditLogsResponse(BaseModel):
+    """감사 로그 목록 응답"""
+    case_id: str
+    total_count: int
+    logs: list[AuditLogEntry]
 
 
 # ===========================
@@ -147,18 +165,22 @@ async def start_analysis(
     user: dict = Depends(get_current_user)
 ):
     """
-    분석 시작
+    분석 시작 (백그라운드)
 
-    - 케이스 상태를 "analysis"로 전환
-    - 백그라운드 작업 큐에 분석 태스크 등록 (TODO: P2에서 구현)
+    - 백그라운드 작업 큐에 분석 태스크 등록
+    - 실시간 진행 상황은 /analyze/stream 엔드포인트 사용
     """
-    supabase = get_supabase_client()
+    logger.info(f"▶ [start_analysis] 요청 받음")
+    logger.info(f"   └─ case_id={request.case_id}")
+    logger.info(f"   └─ user_id={user['sub']}")
+
+    supabase = get_supabase_client(service_role=True)
 
     # 케이스 조회
     case_response = supabase.table("v2_cases") \
         .select("*") \
-        .eq("id", request.case_id) \
-        .eq("user_id", user["sub"]) \
+        .eq("id", str(request.case_id)) \
+        .eq("user_id", str(user["sub"])) \
         .execute()
 
     if not case_response.data:
@@ -174,8 +196,6 @@ async def start_analysis(
             f"Cannot start analysis from state '{current_state}'. Expected 'parse_enrich'."
         )
 
-    # parse_enrich 상태 유지 (DB 상태 전환 없이 비동기 분석 시작)
-
     # 백그라운드에서 분석 파이프라인 실행 (비블로킹)
     import asyncio
     asyncio.create_task(execute_analysis_pipeline(request.case_id))
@@ -184,8 +204,323 @@ async def start_analysis(
         case_id=request.case_id,
         current_state="parse_enrich",
         progress=STATE_PROGRESS["parse_enrich"],
-        message="분석이 시작되었습니다. 잠시만 기다려주세요.",
+        message="분석이 시작되었습니다. 실시간 진행 상황은 /analyze/stream을 사용하세요.",
     )
+
+
+@router.get("/stream/{case_id}")
+async def stream_analysis(
+    case_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    실시간 분석 스트리밍 (Server-Sent Events)
+
+    - 등기부 파싱, 리스크 계산, LLM 생성 과정을 실시간으로 스트리밍
+    - ChatGPT처럼 생각하는 과정을 보여줌
+    """
+    from fastapi.responses import StreamingResponse
+    import json
+
+    async def event_generator():
+        """SSE 이벤트 스트림 생성"""
+        try:
+            # 1단계: 시작
+            yield f"data: {json.dumps({'step': 1, 'message': '🚀 분석을 시작합니다...', 'progress': 0.1}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0.5)
+
+            # 2단계: 케이스 데이터 조회
+            yield f"data: {json.dumps({'step': 2, 'message': '📋 케이스 데이터 조회 중...', 'progress': 0.2}, ensure_ascii=False)}\n\n"
+
+            supabase = get_supabase_client(service_role=True)
+            case_response = supabase.table("v2_cases").select("*").eq("id", case_id).execute()
+
+            if not case_response.data:
+                yield f"data: {json.dumps({'error': '케이스를 찾을 수 없습니다.'}, ensure_ascii=False)}\n\n"
+                return
+
+            case = case_response.data[0]
+            address = case.get("property_address", "N/A")
+            yield f"data: {json.dumps({'step': 2, 'message': f'✅ 케이스 조회 완료: {address}', 'progress': 0.25}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0.5)
+
+            # 3단계: 등기부 파싱
+            yield f"data: {json.dumps({'step': 3, 'message': '📄 등기부 파싱 중...', 'progress': 0.3}, ensure_ascii=False)}\n\n"
+
+            artifact_response = supabase.table("v2_artifacts") \
+                .select("*") \
+                .eq("case_id", case_id) \
+                .eq("artifact_type", "registry_pdf") \
+                .execute()
+
+            registry_data = None
+            registry_doc_masked = None
+            registry_doc = None
+
+            if artifact_response.data:
+                from ingest.registry_parser import parse_registry_from_url
+                from core.risk_engine import RegistryData
+
+                # 동적 Signed URL 생성 (1시간 만료)
+                file_path = artifact_response.data[0].get("file_path")
+                if file_path:
+                    bucket, path = file_path.split("/", 1)
+                    registry_url = await supabase_storage.get_signed_url(bucket, path, expires_in=3600)
+                    # 감사 로그 컨텍스트 전달
+                    registry_doc = await parse_registry_from_url(registry_url, case_id=case_id, user_id=case['user_id'])
+
+                    # RegistryData 모델로 변환
+                    registry_data = RegistryData(
+                        property_value=None,
+                        mortgage_total=sum([m.amount or 0 for m in registry_doc.mortgages]),
+                        seizure_exists=any(s.type == "압류" for s in registry_doc.seizures),
+                        provisional_attachment_exists=any(s.type == "가압류" for s in registry_doc.seizures),
+                        ownership_disputes=False
+                    )
+
+                    registry_doc_masked = registry_doc.to_masked_dict()
+
+                    # 등기부 요약 정보 전송
+                    summary = f"✅ 등기부 파싱 완료\n"
+                    summary += f"   📍 주소: {registry_doc.property_address or 'N/A'}\n"
+                    summary += f"   👤 소유자: {registry_doc_masked['owner']['name'] if registry_doc_masked.get('owner') else 'N/A'}\n"
+                    summary += f"   💰 근저당: {len(registry_doc.mortgages)}건 (총 {registry_data.mortgage_total:,}만원)\n"
+
+                    if registry_doc.seizures:
+                        summary += f"   ⚠️ 압류/가압류: {len(registry_doc.seizures)}건\n"
+
+                    yield f"data: {json.dumps({'step': 3, 'message': summary, 'progress': 0.4, 'registry_summary': registry_doc_masked}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(1.0)
+
+            # 4단계: 공공데이터 조회
+            yield f"data: {json.dumps({'step': 4, 'message': '🔍 공공데이터 조회 중 (실거래가, 법정동코드)...', 'progress': 0.5}, ensure_ascii=False)}\n\n"
+
+            from core.public_data_api import AptTradeAPIClient, LegalDongCodeAPIClient
+            from core.settings import settings
+            import httpx
+            from datetime import datetime
+
+            property_value_estimate = None
+            async with httpx.AsyncClient() as client:
+                legal_dong_client = LegalDongCodeAPIClient(
+                    api_key=settings.public_data_api_key,
+                    client=client
+                )
+                legal_dong_result = await legal_dong_client.get_legal_dong_code(
+                    keyword=case['property_address']
+                )
+
+                lawd_cd = None
+                if legal_dong_result['body']['items']:
+                    lawd_cd = legal_dong_result['body']['items'][0]['lawd5']
+                    yield f"data: {json.dumps({'step': 4, 'message': f'✅ 법정동코드: {lawd_cd}', 'progress': 0.55}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.5)
+
+                if lawd_cd:
+                    apt_trade_client = AptTradeAPIClient(
+                        api_key=settings.public_data_api_key,
+                        client=client
+                    )
+                    now = datetime.now()
+                    trade_result = await apt_trade_client.get_apt_trades(
+                        lawd_cd=lawd_cd,
+                        deal_ymd=f"{now.year}{now.month:02d}"
+                    )
+
+                    if trade_result['body']['items']:
+                        amounts = [item['dealAmount'] for item in trade_result['body']['items']
+                                  if item['dealAmount']]
+                        if amounts:
+                            property_value_estimate = sum(amounts) // len(amounts)
+                            yield f"data: {json.dumps({'step': 4, 'message': f'✅ 평균 실거래가: {property_value_estimate:,}만원 ({len(amounts)}건 분석)', 'progress': 0.6}, ensure_ascii=False)}\n\n"
+                            await asyncio.sleep(0.5)
+
+            # registry_data 업데이트
+            if registry_data and property_value_estimate:
+                from core.risk_engine import PropertyType, get_default_auction_rate
+
+                contract_type = case.get('contract_type', '전세')
+                property_type = case.get('metadata', {}).get('property_type')
+                sido = case.get('metadata', {}).get('sido')
+                sigungu = case.get('metadata', {}).get('sigungu')
+                auction_rate_override = case.get('metadata', {}).get('auction_rate_override')
+
+                if contract_type in ["전세", "월세"]:
+                    auction_rate = 0.70
+                    if auction_rate_override is not None:
+                        auction_rate = auction_rate_override
+                    elif property_type and sido and sigungu:
+                        auction_rate = get_default_auction_rate(
+                            property_type=PropertyType(property_type),
+                            sido=sido,
+                            sigungu=sigungu
+                        )
+
+                    registry_data.property_value = int(property_value_estimate * auction_rate)
+                    yield f"data: {json.dumps({'step': 4, 'message': f'✅ 물건 가치 계산: {property_value_estimate:,}만원 × {auction_rate * 100:.0f}% = {registry_data.property_value:,}만원', 'progress': 0.65}, ensure_ascii=False)}\n\n"
+                else:
+                    registry_data.property_value = property_value_estimate
+
+            # 5단계: 리스크 점수 계산
+            yield f"data: {json.dumps({'step': 5, 'message': '📊 리스크 점수 계산 중...', 'progress': 0.7}, ensure_ascii=False)}\n\n"
+
+            from core.risk_engine import analyze_risks, ContractData, PropertyType
+
+            contract_type = case.get('contract_type', '전세')
+            property_type = case.get('metadata', {}).get('property_type')
+            sido = case.get('metadata', {}).get('sido')
+            sigungu = case.get('metadata', {}).get('sigungu')
+            auction_rate_override = case.get('metadata', {}).get('auction_rate_override')
+
+            contract_data = ContractData(
+                contract_type=contract_type,
+                deposit=case.get('metadata', {}).get('deposit'),
+                price=case.get('metadata', {}).get('price'),
+                property_address=case.get('property_address') if contract_type == '매매' else None,
+                property_type=PropertyType(property_type) if property_type else None,
+                sido=sido,
+                sigungu=sigungu,
+                auction_rate_override=auction_rate_override,
+            )
+
+            risk_result = None
+            if contract_type == '매매':
+                from core.risk_engine import MarketData
+                market_data = MarketData(
+                    avg_trade_price=property_value_estimate,
+                    recent_trades=[],
+                    avg_price_per_pyeong=None,
+                ) if property_value_estimate else None
+
+                risk_result = analyze_risks(contract_data, registry=registry_data, market=market_data, property_value=None)
+            else:
+                if registry_data:
+                    risk_result = analyze_risks(contract_data, registry_data)
+
+            if risk_result:
+                risk_message = f"✅ 리스크 분석 완료\n"
+                risk_message += f"   📊 총점: {risk_result.risk_score.total_score:.1f}점\n"
+                risk_message += f"   🎯 위험 등급: {risk_result.risk_score.risk_level}\n"
+
+                if risk_result.risk_score.jeonse_ratio:
+                    risk_message += f"   💰 전세가율: {risk_result.risk_score.jeonse_ratio:.1f}%\n"
+
+                if risk_result.risk_score.mortgage_ratio:
+                    risk_message += f"   🏦 근저당 비율: {risk_result.risk_score.mortgage_ratio:.1f}%\n"
+
+                yield f"data: {json.dumps({'step': 5, 'message': risk_message, 'progress': 0.75, 'risk_score': risk_result.risk_score.dict()}, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(1.0)
+
+            # 6단계: LLM 리포트 생성 (스트리밍)
+            yield f"data: {json.dumps({'step': 6, 'message': '🤖 AI 리포트 생성 중 (GPT-4o-mini)...', 'progress': 0.8}, ensure_ascii=False)}\n\n"
+
+            from core.report_generator import build_risk_features_from_registry, build_llm_prompt
+            from langchain_openai import ChatOpenAI
+            from langchain_core.messages import HumanMessage
+
+            risk_features = None
+            if artifact_response.data and registry_url and registry_doc:
+                risk_features = build_risk_features_from_registry(
+                    registry_doc=registry_doc,
+                    contract_deposit=case.get('metadata', {}).get('deposit'),
+                    contract_price=case.get('metadata', {}).get('price'),
+                    property_value=registry_data.property_value if registry_data else None
+                )
+
+            llm_prompt = None
+            if risk_features:
+                llm_prompt = build_llm_prompt(
+                    risk_features=risk_features,
+                    contract_type=contract_type,
+                    contract_deposit=case.get('metadata', {}).get('deposit'),
+                    contract_price=case.get('metadata', {}).get('price'),
+                    monthly_rent=case.get('metadata', {}).get('monthly_rent')
+                )
+            else:
+                llm_prompt = f"""# 부동산 계약 분석 요청
+
+**주소**: {case['property_address']}
+**계약 유형**: {contract_type}
+
+**등기부 정보**: 없음
+
+위 정보만으로 간단한 분석을 제공하세요."""
+
+            # LLM 스트리밍 호출
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=4096, streaming=True)
+            messages = [HumanMessage(content=llm_prompt)]
+
+            # 스트리밍으로 리포트 생성 과정 실시간 전송
+            final_answer = ""
+            chunk_count = 0
+
+            async for chunk in llm.astream(messages):
+                if hasattr(chunk, 'content') and chunk.content:
+                    final_answer += chunk.content
+                    chunk_count += 1
+
+                    # 10개 청크마다 진행 상황 업데이트 (너무 자주 보내지 않도록)
+                    if chunk_count % 10 == 0:
+                        progress = 0.8 + (min(len(final_answer), 2000) / 2000) * 0.1  # 0.8 ~ 0.9
+                        event_data = {
+                            'step': 6,
+                            'message': f'📝 리포트 생성 중... ({len(final_answer)}자)',
+                            'progress': progress,
+                            'partial_content': final_answer[:200] + '...'
+                        }
+                        yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+            # 생성 완료
+            event_data_complete = {
+                'step': 6,
+                'message': f'✅ AI 리포트 생성 완료 ({len(final_answer)}자)',
+                'progress': 0.9
+            }
+            yield f"data: {json.dumps(event_data_complete, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(0.5)
+
+            # 7단계: 리포트 저장
+            yield f"data: {json.dumps({'step': 7, 'message': '💾 리포트 저장 중...', 'progress': 0.95}, ensure_ascii=False)}\n\n"
+
+            market_data = None
+            report_response = supabase.table("v2_reports").insert({
+                "case_id": case_id,
+                "user_id": case['user_id'],
+                "content": final_answer,
+                "risk_score": risk_result.risk_score.dict() if risk_result else {},
+                "registry_data": registry_doc_masked,
+                "report_data": {
+                    "summary": final_answer,
+                    "risk": risk_result.risk_score.dict() if risk_result else {},
+                    "registry": registry_doc_masked,
+                    "market": market_data.dict() if (contract_type == '매매' and market_data) else None
+                },
+                "metadata": {
+                    "model": "gpt-4o-mini",
+                    "confidence": 0.85,
+                }
+            }).execute()
+
+            if not report_response.data:
+                yield f"data: {json.dumps({'error': '리포트 저장 실패'}, ensure_ascii=False)}\n\n"
+                return
+
+            report_id = report_response.data[0]['id']
+
+            # 8단계: 상태 전환
+            supabase.table("v2_cases").update({
+                "current_state": "report",
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", case_id).execute()
+
+            # 완료
+            yield f"data: {json.dumps({'step': 8, 'message': '✅ 분석 완료!', 'progress': 1.0, 'report_id': report_id, 'done': True}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"스트리밍 분석 실패: {e}", exc_info=True)
+            yield f"data: {json.dumps({'error': f'분석 중 오류 발생: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # Alias: POST /analyze (guide compatibility)
@@ -365,10 +700,84 @@ async def crosscheck_draft(
     llm = ChatAnthropic(model="claude-3-5-sonnet-latest", temperature=0.1, max_tokens=4096)
     msgs = [
         SystemMessage(content=judge_prompt.format(draft=request.draft)),
-        HumanMessage(content="검증을 수행하세요."),
+        HumanMessage(content="검��을 수행하세요."),
     ]
     resp = llm.invoke(msgs)
     return CrosscheckResponse(validation=resp.content)
+
+
+@router.get("/audit-logs/{case_id}", response_model=AuditLogsResponse)
+async def get_audit_logs(
+    case_id: str,
+    severity: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 50,
+    user: dict = Depends(get_current_user)
+):
+    """
+    케이스 감사 로그 조회
+
+    - 파싱 에러, 경고, 성공 이벤트 등을 조회
+    - severity 필터: error, warning, info 등
+    - category 필터: parsing, registry, llm 등
+
+    Args:
+        case_id: 케이스 UUID
+        severity: 심각도 필터 (선택)
+        category: 카테고리 필터 (선택)
+        limit: 최대 결과 수 (기본값: 50)
+        user: 현재 사용자
+
+    Returns:
+        감사 로그 목록
+    """
+    supabase = get_supabase_client(service_role=True)
+
+    # 케이스 권한 확인
+    case_response = supabase.table("v2_cases") \
+        .select("id") \
+        .eq("id", case_id) \
+        .eq("user_id", user["sub"]) \
+        .execute()
+
+    if not case_response.data:
+        raise HTTPException(404, "Case not found")
+
+    # 감사 로그 조회
+    query = supabase.table("v2_audit_logs") \
+        .select("*") \
+        .eq("case_id", case_id) \
+        .order("created_at", desc=True) \
+        .limit(limit)
+
+    # 필터 적용
+    if severity:
+        query = query.eq("severity", severity)
+
+    if category:
+        query = query.eq("event_category", category)
+
+    logs_response = query.execute()
+
+    # 응답 변환
+    logs = [
+        AuditLogEntry(
+            id=log["id"],
+            event_type=log["event_type"],
+            event_category=log["event_category"],
+            message=log["message"],
+            severity=log["severity"],
+            created_at=log["created_at"],
+            metadata=log.get("metadata"),
+        )
+        for log in logs_response.data
+    ]
+
+    return AuditLogsResponse(
+        case_id=case_id,
+        total_count=len(logs),
+        logs=logs,
+    )
 
 
 # ===========================
@@ -430,10 +839,14 @@ async def execute_analysis_pipeline(case_id: str):
         registry_doc_masked = None  # 유저에게 보여줄 마스킹된 데이터
 
         if artifact_response.data:
-            registry_url = artifact_response.data[0].get("file_url")
-            if registry_url:
-                logger.info(f"등기부 파싱 시작: {registry_url}")
-                registry_doc = await parse_registry_from_url(registry_url)
+            # 동적 Signed URL 생성 (1시간 만료)
+            file_path = artifact_response.data[0].get("file_path")
+            if file_path:
+                bucket, path = file_path.split("/", 1)
+                registry_url = await supabase_storage.get_signed_url(bucket, path, expires_in=3600)
+                logger.info(f"등기부 파싱 시작: {file_path} (Signed URL 생성)")
+                # 감사 로그 컨텍스트 전달
+                registry_doc = await parse_registry_from_url(registry_url, case_id=case_id, user_id=case['user_id'])
 
                 # RegistryData 모델로 변환 (내부 분석용 - 원본 사용)
                 registry_data = RegistryData(
@@ -583,38 +996,53 @@ async def execute_analysis_pipeline(case_id: str):
                 logger.info(f"임대차 리스크 분석 완료: 점수={risk_result.risk_score.total_score}, "
                            f"레벨={risk_result.risk_score.risk_level}")
 
-        # 5️⃣ LLM 단일 시스템 (ChatGPT only - 테스트용)
+        # 5️⃣ 새 아키텍처: RegistryRiskFeatures 변환 + LLM 프롬프트 생성
+        from core.report_generator import build_risk_features_from_registry, build_llm_prompt
         from langchain_openai import ChatOpenAI
-        from langchain_core.messages import SystemMessage, HumanMessage
+        from langchain_core.messages import HumanMessage
 
-        context = f"""
-주소: {case['property_address']}
-계약 유형: {case['contract_type']}
+        # Step 1: RegistryDocument → RegistryRiskFeatures (코드로 100% 계산, LLM 없음)
+        risk_features = None
+        if artifact_response.data and registry_url:
+            risk_features = build_risk_features_from_registry(
+                registry_doc=registry_doc,
+                contract_deposit=case.get('metadata', {}).get('deposit'),
+                contract_price=case.get('metadata', {}).get('price'),
+                property_value=registry_data.property_value if registry_data else None
+            )
+            logger.info(f"리스크 특징 추출 완료 (코드 기반): 총점={risk_features.risk_score:.1f}, "
+                       f"전세가율={risk_features.jeonse_ratio or 'N/A'}, "
+                       f"근저당비율={risk_features.mortgage_ratio or 'N/A'}")
 
-등기부 정보:
-- 총 근저당: {registry_data.mortgage_total if registry_data else 0}만원
-- 압류: {'있음' if registry_data and registry_data.seizure_exists else '없음'}
-- 가압류: {'있음' if registry_data and registry_data.provisional_attachment_exists else '없음'}
+        # Step 2: RegistryRiskFeatures → LLM 프롬프트 (마크다운)
+        llm_prompt = None
+        if risk_features:
+            llm_prompt = build_llm_prompt(
+                risk_features=risk_features,
+                contract_type=contract_type,
+                contract_deposit=case.get('metadata', {}).get('deposit'),
+                contract_price=case.get('metadata', {}).get('price'),
+                monthly_rent=case.get('metadata', {}).get('monthly_rent')
+            )
+            logger.info(f"LLM 프롬프트 생성 완료: {len(llm_prompt)}자")
+        else:
+            # 등기부 없는 경우 기본 프롬프트
+            llm_prompt = f"""
+# 부동산 계약 분석 요청
 
-리스크 분석:
-- 총 점수: {risk_result.risk_score.total_score if risk_result else 0}점
-- 리스크 레벨: {risk_result.risk_score.risk_level if risk_result else '알 수 없음'}
-- 전세가율: {risk_result.risk_score.jeonse_ratio if risk_result and risk_result.risk_score.jeonse_ratio else 'N/A'}%
-- 위험 요인: {', '.join(risk_result.risk_score.risk_factors) if risk_result else 'N/A'}
+**주소**: {case['property_address']}
+**계약 유형**: {contract_type}
 
-협상 포인트:
-{chr(10).join([f'- [{p.category}] {p.point} (영향: {p.impact})' for p in risk_result.negotiation_points]) if risk_result else 'N/A'}
+**등기부 정보**: 없음
 
-권장 조치:
-{chr(10).join([f'- {r}' for r in risk_result.recommendations]) if risk_result else 'N/A'}
+위 정보만으로 간단한 분석을 제공하세요. 등기부가 없으므로 일반적인 주의사항을 안내해주세요.
 """
+            logger.warning("등기부 없음 - 기본 프롬프트 사용")
 
-        # 단일 모델로 간단히 테스트 (타임아웃/재시도)
+        # Step 3: LLM 호출 (해석만 수행, 파싱/계산 없음)
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=4096, max_retries=0, timeout=30)
-        messages = [
-            SystemMessage(content="너는 부동산 계약 리스크 점검 전문가이다. 위 정보를 바탕으로 종합 분석 리포트를 작성하라."),
-            HumanMessage(content=f"{context}\n\n위 부동산 계약의 종합 분석 리포트를 작성해주세요.")
-        ]
+        messages = [HumanMessage(content=llm_prompt)]
+
         import asyncio
         final_answer = None
         last_err = None
@@ -622,12 +1050,13 @@ async def execute_analysis_pipeline(case_id: str):
             try:
                 response = llm.invoke(messages)
                 final_answer = response.content
-                logger.info(f"LLM 분석 완료 (시도 {attempt})")
+                logger.info(f"LLM 해석 완료 (시도 {attempt}): {len(final_answer)}자")
                 break
             except Exception as e:
                 last_err = e
-                logger.warning(f"LLM 분석 시도 {attempt} 실패: {e}")
+                logger.warning(f"LLM 호출 시도 {attempt} 실패: {e}")
                 await asyncio.sleep(min(1 * attempt, 3))
+
         if final_answer is None:
             raise HTTPException(503, "분석이 지연됩니다. 잠시 후 다시 시도해주세요.")
 
@@ -673,3 +1102,5 @@ async def execute_analysis_pipeline(case_id: str):
             "updated_at": datetime.utcnow().isoformat(),
         }).eq("id", case_id).execute()
         raise
+
+# Reload trigger: 1763539083.3081586

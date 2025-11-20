@@ -207,6 +207,43 @@ export async function updateCase(
 }
 
 /**
+ * 케이스 상태 업데이트 (상태 머신 전환 시 DB 동기화용)
+ */
+export async function updateCaseState(
+  caseId: string,
+  state: ChatState,
+  accessToken?: string,
+): Promise<void> {
+  try {
+    let token = accessToken;
+    if (!token) {
+      const supabase = getBrowserSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token;
+    }
+    if (!token) throw new Error('NO_SESSION');
+
+    const response = await fetch(`/api/case/${caseId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ current_state: state }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update case state: ${response.status}`);
+    }
+
+    console.log(`✅ Case state updated in DB: ${caseId} → ${state}`);
+  } catch (error) {
+    console.error('Update case state error:', error);
+    throw error;
+  }
+}
+
+/**
  * 등기부 업로드 API 호출
  */
 export async function uploadRegistry(caseId: string, file: File, accessToken?: string): Promise<void> {
@@ -241,7 +278,33 @@ export async function uploadRegistry(caseId: string, file: File, accessToken?: s
 
 
 /**
- * 분석 실행 API 호출
+ * 분석 스트리밍 이벤트
+ */
+export interface AnalysisStreamEvent {
+  step?: number;           // 1~8
+  message?: string;        // 진행 메시지 (한국어)
+  progress?: number;       // 0.0 ~ 1.0
+  report_id?: string;      // 완료 시 리포트 ID
+  done?: boolean;          // 완료 여부
+  error?: string;          // 에러 메시지
+  partial_content?: string; // LLM 스트리밍 중 부분 컨텐츠 (step 6에서 사용)
+
+  // 세부 데이터 (optional)
+  address?: string;
+  owner?: string;
+  mortgages?: string;
+  seizures?: string;
+  lawd_cd?: string;
+  avg_trade_price?: string;
+  property_value?: string;
+  risk_score?: string;
+  risk_level?: string;
+  jeonse_ratio?: string;
+  mortgage_ratio?: string;
+}
+
+/**
+ * 분석 실행 API 호출 (레거시, 폴링 방식)
  */
 export async function runAnalysis(caseId: string, accessToken?: string): Promise<void> {
   try {
@@ -266,6 +329,88 @@ export async function runAnalysis(caseId: string, accessToken?: string): Promise
     console.error('Run analysis error:', error);
     throw error;
   }
+}
+
+/**
+ * 분석 실시간 스트리밍 (Server-Sent Events)
+ *
+ * @param caseId 케이스 ID
+ * @param onEvent 이벤트 핸들러 (진행 상황 수신)
+ * @param accessToken 인증 토큰 (optional)
+ */
+export async function streamAnalysis(
+  caseId: string,
+  onEvent: (event: AnalysisStreamEvent) => void,
+  accessToken?: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      let token = accessToken;
+
+      // 토큰 가져오기
+      const getToken = async () => {
+        if (!token) {
+          const supabase = getBrowserSupabase();
+          const { data: { session } } = await supabase.auth.getSession();
+          token = session?.access_token;
+        }
+        if (!token) throw new Error('NO_SESSION');
+        return token;
+      };
+
+      getToken().then((token) => {
+        // SSE 연결 URL
+        const url = `/api/analysis/stream?caseId=${caseId}&token=${encodeURIComponent(token)}`;
+        const eventSource = new EventSource(url);
+
+        // 이벤트 리스너 등록
+        eventSource.onmessage = (event) => {
+          try {
+            const data: AnalysisStreamEvent = JSON.parse(event.data);
+
+            // 에러 처리
+            if (data.error) {
+              console.error('❌ 스트리밍 에러:', data.error);
+              onEvent(data);
+              eventSource.close();
+              reject(new Error(data.error));
+              return;
+            }
+
+            // 정상 이벤트 전달
+            onEvent(data);
+
+            // 완료 시 연결 종료 및 Promise resolve
+            if (data.done) {
+              console.log('✅ 스트리밍 완료 - Promise resolve');
+              eventSource.close();
+              resolve(); // ⬅️ 완료 시 Promise를 resolve!
+            }
+          } catch (parseError) {
+            console.error('이벤트 파싱 오류:', parseError);
+            eventSource.close();
+            reject(parseError);
+          }
+        };
+
+        eventSource.onerror = (error) => {
+          console.error('❌ SSE 연결 오류:', error);
+          onEvent({ error: 'SSE 연결이 끊어졌습니다.' });
+          eventSource.close();
+          reject(new Error('SSE 연결 오류'));
+        };
+
+        // 연결 종료 핸들러 (브라우저가 페이지를 떠날 때)
+        window.addEventListener('beforeunload', () => {
+          eventSource.close();
+        });
+      }).catch(reject);
+
+    } catch (error) {
+      console.error('스트리밍 분석 오류:', error);
+      reject(error);
+    }
+  });
 }
 
 /**

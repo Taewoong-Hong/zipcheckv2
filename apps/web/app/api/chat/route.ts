@@ -99,11 +99,26 @@ export async function POST(request: NextRequest) {
     // Helper detectors to reduce race between message save and backend extraction
     const looksLikeAddress = (t: string) => {
       const s = (t || '').trim();
-      if (s.length < 5) return false;
-      return /(시|도|구|동|읍|면)\s*[^\s]*\s*\d{1,4}/.test(s) ||
-             /(로|길)\s*\d{1,4}/.test(s) ||
-             /\d{1,4}-\d{1,4}/.test(s) ||
-             /^\d{5}$/.test(s); // 5자리 우편번호 또는 지번
+      if (s.length < 4) return false;
+
+      // 패턴 1: 완전한 주소 (번지수 포함)
+      const hasCompleteAddress =
+        /(시|도|구|동|읍|면)\s*[^\s]*\s*\d{1,4}/.test(s) ||  // "강남구 테헤란로 123"
+        /(로|길)\s*\d{1,4}/.test(s) ||                        // "테헤란로 123"
+        /\d{1,4}-\d{1,4}/.test(s) ||                          // "123-45"
+        /^\d{5}$/.test(s);                                    // "06234"
+
+      // 패턴 2: 행정구역만 있는 주소 (번지수 없음) - "서울시 사당동", "강남구 역삼동" 등
+      const hasAdminRegion =
+        /[가-힣]+(시|도)\s+[가-힣]+(구|군)\s+[가-힣]+(동|읍|면|리|가)/u.test(s) ||  // "서울시 관악구 사당동"
+        /[가-힣]+(시|도)\s+[가-힣]+(동|읍|면|리|가)/u.test(s) ||                    // "서울시 사당동"
+        /[가-힣]+(구|군)\s+[가-힣]+(동|읍|면|리|가)/u.test(s) ||                    // "강남구 역삼동"
+        /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주).*(구|동|읍|면|리)/u.test(s);  // 광역시/도 포함
+
+      // 패턴 3: 도로명만 있는 경우도 허용 - "테헤란로", "강남대로"
+      const hasRoadName = /(로|길)$/u.test(s) && s.length >= 4;
+
+      return hasCompleteAddress || hasAdminRegion || hasRoadName;
     };
 
     // 부동산 분석 요청 감지 (registry_choice 모달 트리거)
@@ -156,7 +171,12 @@ export async function POST(request: NextRequest) {
 
       // 4. 주소만 입력한 경우 (기존 로직과 호환)
       // 주소가 있고, 비교/일반 질문이 아닌 경우
-      if (looksLikeAddress(t) && !isComparisonOrGeneralQuestion(t)) {
+      if (looksLikeAddress(t)) {
+        // 비교분석/일반질문이 명백한 경우에만 제외
+        if (isComparisonOrGeneralQuestion(t)) {
+          console.log('[분석 요청 감지 실패] 비교분석/일반질문으로 판단');
+          return false;
+        }
         console.log('[분석 요청 감지] 주소 입력 (비교/일반 아님)');
         return true;
       }
@@ -177,6 +197,9 @@ export async function POST(request: NextRequest) {
 
       // "~와 ~" 패턴
       if (/(와|과|랑|하고)\s*[^\s]*\s*(비교|어때|괜찮|추천)/.test(s)) return true;
+
+      // 간단한 인사말/감사 표현 (주소 없어도 LLM 응답)
+      if (/^(안녕|안녕하세요|하이|hello|hi|고마워|감사|thanks|thx)$/i.test(s.trim())) return true;
 
       // 일반 질문 패턴 (주소 특정 없이 일반 정보 요청)
       const generalQuestions = [
@@ -217,13 +240,22 @@ export async function POST(request: NextRequest) {
     let ctype: string | undefined = convRow?.contract_type?.trim();
 
     // If backend hasn't updated yet, try heuristics and update directly to avoid extra user turn
+    // BUT: 행정구역만 있는 경우는 확인 질문을 먼저 해야 하므로 즉시 업데이트하지 않음
     if (!addr && looksLikeAddress(content)) {
-      const upd = await supabase
-        .from('conversations')
-        .update({ property_address: content.trim() })
-        .eq('id', currentConversationId);
-      if (upd.error) console.warn('[api/chat] heuristic addr update failed:', upd.error);
-      else addr = content.trim();
+      // 구체적인 주소인지 체크 (번지수/아파트명 포함)
+      const hasSpecificDetails = /\d{1,4}(-\d{1,4})?/.test(content) || // 번지수
+                                /(아파트|빌라|오피스텔|주택|단지|타워|캐슬|파크|자이|푸르지오|래미안|힐스테이트|e편한세상|더샵)/i.test(content); // 아파트명
+
+      // 구체적인 주소만 즉시 업데이트
+      if (hasSpecificDetails) {
+        const upd = await supabase
+          .from('conversations')
+          .update({ property_address: content.trim() })
+          .eq('id', currentConversationId);
+        if (upd.error) console.warn('[api/chat] heuristic addr update failed:', upd.error);
+        else addr = content.trim();
+      }
+      // 행정구역만 있는 경우는 확인 질문 후 업데이트 (긍정 응답 시)
     }
     if (!ctype) {
       const d = detectContract(content);
@@ -252,7 +284,7 @@ export async function POST(request: NextRequest) {
     const norm = text.toLowerCase().replace(/\s+/g, '');
 
     function replyAddressPrompt(): string {
-      return '안녕하세요! 부동산 AI 서비스 집체크입니다. 검토하실 부동산 주소를 입력해주세요.';
+      return '안녕하세요! 부동산 AI 서비스 집체크입니다.\n\n검토하실 부동산의 **상세한 주소**를 입력해주세요.\n\n✅ 좋은 예시:\n- "경기도 파주시 야당동 62-24"\n- "서울 강남구 역삼동 테헤란로 123"\n- "부산 해운대구 우동 센텀파크"\n\n❌ 부족한 예시:\n- "파주시 야당" (동/번지 누락)\n- "강남구" (구체적 위치 없음)';
     }
 
     function replyContractPrompt(): string {
@@ -290,10 +322,36 @@ export async function POST(request: NextRequest) {
       return undefined;
     }
 
+    // 긍정 응답 감지 (하이브리드: 규칙 기반 + 패턴 매칭)
+    const isPositiveResponse = (t: string) => {
+      const s = t.toLowerCase().trim();
+
+      // 1차: 명시적 긍정 응답 (빠른 감지)
+      const explicitPositive = [
+        'ㅇ', 'ㅇㅇ', 'ㅇㅋ', 'ㅇㅇㅋ', // 한글 초성
+        '네', '예', '응', '어', '그래', '좋아', '좋', '오케이', 'ok', 'okay', 'yes', 'y',
+        '맞아', '맞음', '맞', '맞네', '맞습니다',
+        '해줘', '해주', '해', '부탁', '해봐', '알아봐', '찾아줘', '찾아', '조회',
+        '검색', '찾아봐', '알려줘', '알려', '보여줘', '보여',
+        '고고', 'ㄱㄱ', 'ㄱㄱㄱ', 'go', '시작'
+      ];
+
+      if (explicitPositive.includes(s)) return true;
+
+      // 2차: 접두사/접미사 패턴 (유연한 매칭)
+      const positivePatterns = [
+        /^(네|예|응|어|그래|좋|ㅇ+|ok|yes)/, // "네요", "응응", "좋아요"
+        /(해줘|해주세요|부탁|알려줘|찾아줘|검색|조회)$/, // "해줘요", "부탁해"
+        /^(맞|그래|좋).*/, // "맞아요", "그래요", "좋습니다"
+      ];
+
+      return positivePatterns.some(pattern => pattern.test(s));
+    };
+
     const guided: string | undefined = getFixedReply();
 
-    // 부동산 분석 요청이 감지되면 분석 플로우 시작
-    if (isRealEstateAnalysisRequest(content) && (!addr || !ctype)) {
+    // 부동산 분석 요청이 감지되거나 긍정 응답이면 분석 플로우 시작
+    if ((isRealEstateAnalysisRequest(content) || isPositiveResponse(content)) && (!addr || !ctype)) {
       console.log('[게이팅] 부동산 분석 시작 - 필수 정보 수집');
 
       const encoder = new TextEncoder();
@@ -301,19 +359,52 @@ export async function POST(request: NextRequest) {
         start(controller) {
           // 메시지와 함께 적절한 모달 트리거
           if (!addr) {
-            // 주소가 없으면 주소 입력 요청
-            const msg = '부동산 분석을 시작하겠습니다. 먼저 검토하실 부동산 주소를 입력해주세요.';
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
+            // 주소 구체성 체크: 번지수/아파트명이 있는지 확인
+            const hasSpecificDetails = /\d{1,4}(-\d{1,4})?/.test(content) || // 번지수
+                                      /(아파트|빌라|오피스텔|주택|단지|타워|캐슬|파크|자이|푸르지오|래미안|힐스테이트|e편한세상|더샵)/i.test(content); // 아파트명
 
-            // 주소가 입력 텍스트에 포함되어 있을 수 있으니 체크
-            if (looksLikeAddress(content)) {
+            // 1. 긍정 응답이면 즉시 모달 오픈
+            if (isPositiveResponse(content)) {
+              console.log('[게이팅] 긍정 응답 감지 → 주소 모달 오픈');
+              const msg = '상세 주소를 검색해드리겠습니다. 아파트명이나 번지수를 입력해주세요.';
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
+
+              // ✅ 주소 모달 트리거
               const metaAddr = JSON.stringify({
                 meta: true,
                 component: 'address_search',
-                initialQuery: content.trim(),
+                initialQuery: '',
                 options: []
               });
               controller.enqueue(encoder.encode(`data: ${metaAddr}\n\n`));
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+            }
+            // 2. 행정구역만 있고 구체적 주소 없음 → 더 구체적인 주소 요청
+            else if (looksLikeAddress(content) && !hasSpecificDetails) {
+              console.log('[게이팅] 행정구역만 감지 → 구체적 주소 요청');
+              const msg = `${content.trim()} 지역이시군요! 더 정확한 분석을 위해 **상세한 주소**를 입력해주세요.\n\n예시:\n- "파주시 야당동 62-24"\n- "파주시 야당동 이편한세상"\n- "경기도 파주시 야당동 123번지"`;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
+
+              // ✅ 확인 후 모달 트리거 (사용자가 "네" 또는 주소 입력 시 재진입)
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+            }
+            // 3. 구체적 주소 또는 일반 분석 요청 → 바로 모달 오픈
+            else {
+              console.log('[게이팅] 구체적 주소 또는 일반 요청 → 주소 모달 오픈');
+              const msg = '부동산 분석을 시작하겠습니다. 먼저 검토하실 부동산 주소를 입력해주세요.';
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
+
+              // ✅ 주소 모달 트리거
+              const metaAddr = JSON.stringify({
+                meta: true,
+                component: 'address_search',
+                initialQuery: looksLikeAddress(content) && hasSpecificDetails ? content.trim() : '',
+                options: []
+              });
+              controller.enqueue(encoder.encode(`data: ${metaAddr}\n\n`));
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
             }
           } else if (!ctype) {
             // 주소는 있지만 계약 타입이 없으면
@@ -326,9 +417,10 @@ export async function POST(request: NextRequest) {
               options: ['전세','월세','반전세','매매']
             });
             controller.enqueue(encoder.encode(`data: ${meta}\n\n`));
+
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
           }
 
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
           controller.close();
         },
       });

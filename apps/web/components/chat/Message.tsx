@@ -34,10 +34,20 @@ interface MessageProps {
   onContractTypeSelect?: (type: ContractType) => void;
   onPriceSubmit?: (data: PriceData) => void;
   onRegistryChoiceSelect?: (method: RegistryMethod, file?: File) => void;
-  onAddressSelect?: (address: AddressResult) => void;
+  onAddressSelect?: (address: AddressResult, detailAddress: string) => void;
 }
 
 export default function Message({ message, isTyping, onContractTypeSelect, onPriceSubmit, onRegistryChoiceSelect, onAddressSelect }: MessageProps) {
+  // 🔍 DEBUG: 메시지 렌더링 시작
+  console.log('🔍 [DEBUG Message.tsx] Message 컴포넌트 렌더링:', {
+    messageId: message.id,
+    role: message.role,
+    componentType: message.componentType,
+    hasContent: !!message.content,
+    contentPreview: message.content?.substring(0, 100),
+    isStreaming: message.isStreaming,
+    isError: message.isError,
+  });
   const [displayedContent, setDisplayedContent] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
@@ -102,7 +112,15 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
 
   // 특수 컴포넌트 렌더링
   const renderSpecialComponent = () => {
-    if (!message.componentType) return null;
+    if (!message.componentType) {
+      return null;
+    }
+
+    console.log('🔍 [DEBUG Message.tsx] renderSpecialComponent 호출:', {
+      componentType: message.componentType,
+      messageId: message.id,
+      hasComponentData: !!message.componentData,
+    });
 
     switch (message.componentType) {
       case 'contract_selector':
@@ -132,8 +150,8 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
           <div className="mt-4">
             <AddressSearchSelector
               initialAddress={message.componentData?.initialAddress}
-              onAddressSelect={(address) => {
-                onAddressSelect?.(address);
+              onAddressSelect={(address, detailAddress) => {
+                onAddressSelect?.(address, detailAddress);
               }}
             />
           </div>
@@ -152,13 +170,81 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
         );
 
       case 'report':
+        console.log('🔍 [DEBUG Message.tsx] report 케이스 진입:', {
+          address: message.componentData?.address,
+          contractType: message.componentData?.contract_type,
+          hasRiskScore: !!message.componentData?.risk_score,
+          contentLength: message.content?.length,
+        });
+
         return (
           <div className="mt-4">
-            <AnalysisReport
-              content={message.componentData?.reportContent || message.content}
-              contractType={message.componentData?.contractType}
-              address={message.componentData?.address}
-            />
+            <div className="bg-white rounded-lg shadow-sm border border-neutral-200 overflow-hidden">
+              {/* 리포트 헤더 */}
+              <div className="bg-gradient-to-r from-brand-primary to-brand-secondary px-6 py-4">
+                <div className="flex items-start justify-between text-white">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold mb-1">
+                      {message.componentData?.address || '부동산 분석 리포트'}
+                    </h3>
+                    <p className="text-sm opacity-90">
+                      {message.componentData?.contract_type || '전세'} 계약 분석
+                    </p>
+                  </div>
+                  {/* 리스크 배지 */}
+                  {message.componentData?.risk_score?.risk_level && (
+                    <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      message.componentData.risk_score.risk_level === '안전'
+                        ? 'bg-green-100 text-green-800'
+                        : message.componentData.risk_score.risk_level === '주의'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : message.componentData.risk_score.risk_level === '위험'
+                        ? 'bg-orange-100 text-orange-800'
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {message.componentData.risk_score.risk_level}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 리포트 본문 (마크다운) */}
+              <div className="px-6 py-6 prose prose-neutral max-w-none">
+                <ReactMarkdown
+                  remarkPlugins={[remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
+                >
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+
+              {/* 리포트 푸터 */}
+              <div className="px-6 py-4 bg-neutral-50 border-t border-neutral-200">
+                <div className="flex items-center justify-between text-sm text-neutral-600">
+                  <span>
+                    작성일: {message.componentData?.created_at
+                      ? new Date(message.componentData.created_at).toLocaleDateString('ko-KR')
+                      : formatTime(message.timestamp)}
+                  </span>
+                  <button
+                    onClick={handleCopy}
+                    className="flex items-center gap-1 text-brand-primary hover:text-brand-secondary transition-colors"
+                  >
+                    {isCopied ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>복사됨</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>리포트 복사</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         );
 

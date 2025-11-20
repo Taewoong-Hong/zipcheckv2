@@ -41,6 +41,20 @@ export default function PriceInput({ contractType, onPriceSubmit }: PriceInputPr
     setError('');
   };
 
+  // 보증금을 억원 단위로 환산
+  const getDepositInEok = (): string => {
+    const depositValue = parseNumber(deposit);
+    if (!depositValue || depositValue === 0) return '';
+
+    const eok = depositValue / 10000;
+    if (eok >= 1) {
+      return `≈ ${eok.toFixed(2)}억원`;
+    } else {
+      const cheon = depositValue / 1000;
+      return `≈ ${cheon.toFixed(1)}천만원`;
+    }
+  };
+
   const handleMonthlyRentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatNumber(e.target.value);
     setMonthlyRent(formatted);
@@ -91,6 +105,12 @@ export default function PriceInput({ contractType, onPriceSubmit }: PriceInputPr
             />
             <span className="absolute right-4 top-3 text-gray-500">만원</span>
           </div>
+          {/* 억원 환산 표시 (보증금만) */}
+          {contractType !== '매매' && getDepositInEok() && (
+            <p className="mt-2 text-sm font-semibold text-blue-600">
+              {getDepositInEok()}
+            </p>
+          )}
           <p className="mt-1 text-xs text-gray-500">
             {contractType === '매매' ? '매매 계약 금액을 입력해주세요.' : '보증금 금액을 입력해주세요.'}
           </p>

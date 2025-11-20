@@ -588,7 +588,13 @@ export default function ChatInterface({
 
           // Update progress message with real-time events
           if (event.message) {
-            const progressText = `${event.message}${event.progress ? ` (${Math.round(event.progress * 100)}%)` : ''}`;
+            let progressText = `${event.message}${event.progress ? ` (${Math.round(event.progress * 100)}%)` : ''}`;
+
+            // step 6: LLM 리포트 생성 중일 때 부분 컨텐츠 표시
+            if (event.step === 6 && event.partial_content) {
+              progressText += `\n\n---\n\n**리포트 미리보기** (생성 중...)\n\n${event.partial_content}`;
+            }
+
             setMessages(prev => prev.map(msg =>
               msg.id === progressMessageId
                 ? { ...msg, content: progressText }
@@ -603,8 +609,129 @@ export default function ChatInterface({
         }
       );
 
-      // Navigate to report page where SSE will show real-time progress
-      router.push(`/report/${analysisContext.caseId}`);
+      // ✅ 채팅 내에서 리포트 표시 (페이지 이동 제거)
+      if (reportId) {
+        console.log('🔍 [DEBUG] reportId 발견:', reportId);
+        console.log('🔍 [DEBUG] caseId:', analysisContext.caseId);
+
+        try {
+          // 세션 토큰 가져오기
+          const sb = getBrowserSupabase();
+          const { data: sbData } = await sb.auth.getSession();
+          const accessToken = sbData.session?.access_token || session?.access_token;
+
+          console.log('🔍 [DEBUG] accessToken 존재:', !!accessToken);
+
+          if (!accessToken) {
+            throw new Error('인증 토큰이 없습니다. 다시 로그인해주세요.');
+          }
+
+          // 리포트 데이터 가져오기 (재시도 로직 포함)
+          console.log('🔍 [DEBUG] 리포트 API 호출 시작...');
+
+          let reportResponse: Response | null = null;
+          let retries = 0;
+          const maxRetries = 5;
+
+          // 재시도 로직: 리포트가 DB에 저장될 때까지 대기
+          while (retries < maxRetries) {
+            reportResponse = await fetch(`/api/report/${analysisContext.caseId}`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+            });
+
+            console.log(`🔍 [DEBUG] 리포트 API 응답 상태 (시도 ${retries + 1}/${maxRetries}):`, reportResponse.status);
+
+            // 성공하면 루프 탈출
+            if (reportResponse.ok) {
+              break;
+            }
+
+            // 404 에러이고 재시도 가능하면 대기 후 재시도
+            if (reportResponse.status === 404 && retries < maxRetries - 1) {
+              const delay = 1000 * (retries + 1); // 1초, 2초, 3초, 4초, 5초
+              console.log(`⏳ [DEBUG] 리포트가 아직 준비되지 않음. ${delay}ms 후 재시도...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              retries++;
+              continue;
+            }
+
+            // 다른 에러이거나 마지막 재시도면 에러 발생
+            throw new Error(`리포트 조회 실패: ${reportResponse.status}`);
+          }
+
+          if (!reportResponse || !reportResponse.ok) {
+            throw new Error('리포트를 불러올 수 없습니다. 다시 시도해주세요.');
+          }
+
+          const reportData = await reportResponse.json();
+          console.log('🔍 [DEBUG] reportData 수신:', {
+            hasContent: !!reportData.content,
+            contentLength: reportData.content?.length,
+            hasRiskScore: !!reportData.risk_score,
+            address: reportData.address,
+            contractType: reportData.contract_type,
+          });
+
+          // 진행 메시지 제거
+          setMessages(prev => prev.filter(msg => msg.id !== progressMessageId));
+
+          // 리포트를 채팅 메시지로 추가
+          const reportMessage: MessageType = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: reportData.content, // 마크다운 리포트 내용
+            timestamp: new Date(),
+            componentType: 'report', // 특별한 타입 지정
+            componentData: {
+              risk_score: reportData.risk_score,
+              address: reportData.address,
+              contract_type: reportData.contract_type,
+              created_at: reportData.created_at,
+              report_id: reportId,
+            },
+          };
+
+          console.log('🔍 [DEBUG] reportMessage 생성:', {
+            id: reportMessage.id,
+            role: reportMessage.role,
+            componentType: reportMessage.componentType,
+            hasContent: !!reportMessage.content,
+            hasComponentData: !!reportMessage.componentData,
+          });
+
+          setMessages(prev => {
+            const newMessages = [...prev, reportMessage];
+            console.log('🔍 [DEBUG] setMessages 호출 - 새 메시지 배열 길이:', newMessages.length);
+            return newMessages;
+          });
+
+          chatStorage.addMessage(reportMessage);
+
+          console.log('✅ 리포트를 채팅 메시지로 추가 완료:', reportId);
+
+        } catch (error) {
+          console.error('리포트 로딩 실패:', error);
+
+          // 진행 메시지 제거
+          setMessages(prev => prev.filter(msg => msg.id !== progressMessageId));
+
+          // 에러 메시지 추가
+          const errorMessage: MessageType = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: `리포트를 불러오는 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}`,
+            timestamp: new Date(),
+            isError: true,
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          chatStorage.addMessage(errorMessage);
+        }
+      }
 
     } catch (error) {
       console.error('Analysis error:', error);
