@@ -33,30 +33,99 @@ export async function POST(request: NextRequest) {
     let currentConversationId = conversation_id as string | undefined;
     let newConversationId: string | undefined;
 
+    // 재시도 래퍼 함수 (콜드 스타트 대응)
+    async function fetchWithRetry(
+      url: string,
+      options: RequestInit,
+      maxRetries: number = 3,
+      timeout: number = 30000
+    ): Promise<Response> {
+      const delays = [2000, 4000, 6000]; // 재시도 간격 (2초, 4초, 6초)
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`[api/chat] 요청 시도 ${attempt}/${maxRetries}: ${url}`);
+
+          // AbortController로 타임아웃 구현
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          // 성공 또는 재시도 불가 에러 (400번대)
+          if (response.ok || (response.status >= 400 && response.status < 500)) {
+            console.log(`[api/chat] 요청 성공 (시도 ${attempt})`);
+            return response;
+          }
+
+          // 500번대 에러 → 재시도
+          if (response.status >= 500 && attempt < maxRetries) {
+            const delay = delays[attempt - 1] || 2000;
+            console.warn(`[api/chat] 500 에러 (시도 ${attempt}) → ${delay}ms 후 재시도`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          return response;
+        } catch (e: any) {
+          // 타임아웃 또는 네트워크 에러
+          if (e.name === 'AbortError') {
+            console.warn(`[api/chat] 타임아웃 (시도 ${attempt}/${maxRetries})`);
+          } else {
+            console.error(`[api/chat] 네트워크 에러 (시도 ${attempt}): ${e?.message || e}`);
+          }
+
+          // 마지막 시도가 아니면 재시도
+          if (attempt < maxRetries) {
+            const delay = delays[attempt - 1] || 2000;
+            console.log(`[api/chat] ${delay}ms 후 재시도...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          // 마지막 시도 실패
+          throw new Error('BACKEND_UNREACHABLE');
+        }
+      }
+
+      throw new Error('BACKEND_UNREACHABLE');
+    }
+
     async function saveMessage(convId: string) {
       try {
-        const res = await fetch(`${AI_API_URL}/chat/message`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ conversation_id: convId, content }),
-        });
+        const res = await fetchWithRetry(
+          `${AI_API_URL}/chat/message`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ conversation_id: convId, content }),
+          }
+        );
         return res;
       } catch (e: any) {
-        console.error('[api/chat] saveMessage network error:', e?.message || e);
+        console.error('[api/chat] saveMessage 최종 실패:', e?.message || e);
         throw new Error('BACKEND_UNREACHABLE');
       }
     }
 
   let saveResponse: Response;
   if (!currentConversationId) {
-      // 대화 ID가 없으면 초기화
-      const initRes = await fetch(`${AI_API_URL}/chat/init`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      });
+      // 대화 ID가 없으면 초기화 (재시도 로직 적용)
+      const initRes = await fetchWithRetry(
+        `${AI_API_URL}/chat/init`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${session.access_token}` },
+        }
+      );
       if (!initRes.ok) throw new Error(`대화 초기화 실패: ${initRes.status}`);
       const initData = await initRes.json();
       currentConversationId = initData.conversation_id;
@@ -70,11 +139,14 @@ export async function POST(request: NextRequest) {
 
   saveResponse = await saveMessage(currentConversationId);
     if (saveResponse.status === 404) {
-      // 소유권/유효성 문제 → 신규 대화 생성 후 재시도
-      const initRes = await fetch(`${AI_API_URL}/chat/init`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      });
+      // 소유권/유효성 문제 → 신규 대화 생성 후 재시도 (재시도 로직 적용)
+      const initRes = await fetchWithRetry(
+        `${AI_API_URL}/chat/init`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${session.access_token}` },
+        }
+      );
       if (!initRes.ok) throw new Error(`대화 재초기화 실패: ${initRes.status}`);
       const initData = await initRes.json();
       currentConversationId = initData.conversation_id;
@@ -510,39 +582,45 @@ export async function POST(request: NextRequest) {
 
   try {
     if (useGPTv2) {
-      // GPT-4o-mini with Function Calling (v2)
-      analyzeResponse = await fetch(`${AI_API_URL}/chat/v2/message`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          conversation_id: currentConversationId,
-          content,
-          context: {
-            property_address: body.property_address,
-            contract_type: body.contract_type,
-            case_id: body.case_id
+      // GPT-4o-mini with Function Calling (v2) - 재시도 로직 적용
+      analyzeResponse = await fetchWithRetry(
+        `${AI_API_URL}/chat/v2/message`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
           },
-          // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
-          recent_context: recent_context
-        }),
-      });
+          body: JSON.stringify({
+            conversation_id: currentConversationId,
+            content,
+            context: {
+              property_address: body.property_address,
+              contract_type: body.contract_type,
+              case_id: body.case_id
+            },
+            // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
+            recent_context: recent_context
+          }),
+        }
+      );
     } else {
-      // 기존 rule-based + simple LLM (v1)
-      analyzeResponse = await fetch(`${AI_API_URL}/analyze/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          question: content,
-          // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
-          recent_context: recent_context
-        }),
-      });
+      // 기존 rule-based + simple LLM (v1) - 재시도 로직 적용
+      analyzeResponse = await fetchWithRetry(
+        `${AI_API_URL}/analyze/`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            question: content,
+            // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
+            recent_context: recent_context
+          }),
+        }
+      );
     }
   } catch (e: any) {
     console.error('[api/chat] analyze network error:', e?.message || e);
