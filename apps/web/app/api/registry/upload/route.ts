@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
         case_id: caseId,
         user_id: user.id,
         artifact_type: 'registry_pdf',
-        file_path: uploadData.path,
+        file_path: `${bucket}/${uploadData.path}`, // ✅ "artifacts/user_id/caseId/file.pdf" 형태로 저장
         file_name: file.name,
         file_size: file.size,
         mime_type: mime || 'application/pdf',
