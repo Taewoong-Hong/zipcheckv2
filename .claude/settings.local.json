@@ -69,7 +69,9 @@
       "Bash(iconv:*)",
       "Bash(for pid in 25552 34196 40388 15124 8512)",
       "Bash(do echo \"=== PID $pid ===\")",
-      "Bash(tasklist /FI \"PID eq $pid\" /FO TABLE)"
+      "Bash(tasklist /FI \"PID eq $pid\" /FO TABLE)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []

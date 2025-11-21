@@ -506,6 +506,7 @@ async def stream_analysis(
                 return
 
             report_id = report_response.data[0]['id']
+            logger.info(f"✅ [SSE] 리포트 생성 완료: case_id={case_id}, user_id={case['user_id']}, report_id={report_id}")
 
             # 8단계: 상태 전환
             supabase.table("v2_cases").update({
@@ -513,7 +514,33 @@ async def stream_analysis(
                 "updated_at": datetime.utcnow().isoformat(),
             }).eq("id", case_id).execute()
 
-            # 완료
+            # ✅ 검증 단계 추가 (SSE_REPORT_DEBUG.md 방안 1)
+            # 8-1: v2_reports 재확인 (Supabase 리플리케이션 지연 감지)
+            verify_report = supabase.table("v2_reports") \
+                .select("id") \
+                .eq("id", report_id) \
+                .execute()
+
+            if not verify_report.data:
+                logger.error(f"❌ [SSE 검증 실패] 리포트 검증 실패: report_id={report_id}")
+                yield f"data: {json.dumps({'error': '리포트 저장 검증 실패. 잠시 후 다시 시도해주세요.'}, ensure_ascii=False)}\n\n"
+                return
+
+            # 8-2: v2_cases current_state 재확인
+            verify_case = supabase.table("v2_cases") \
+                .select("current_state") \
+                .eq("id", case_id) \
+                .execute()
+
+            if not verify_case.data or verify_case.data[0]['current_state'] != 'report':
+                current = verify_case.data[0]['current_state'] if verify_case.data else 'unknown'
+                logger.error(f"❌ [SSE 검증 실패] 케이스 상태 검증 실패: case_id={case_id}, current_state={current}")
+                yield f"data: {json.dumps({'error': '케이스 상태 전환 실패. 잠시 후 다시 시도해주세요.'}, ensure_ascii=False)}\n\n"
+                return
+
+            logger.info(f"✅ [SSE 검증 통과] 리포트 및 상태 전환 확인 완료")
+
+            # 완료 (검증 통과 후에만 전송)
             yield f"data: {json.dumps({'step': 8, 'message': '✅ 분석 완료!', 'progress': 1.0, 'report_id': report_id, 'done': True}, ensure_ascii=False)}\n\n"
 
         except Exception as e:

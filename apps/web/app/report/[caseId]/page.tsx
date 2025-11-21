@@ -116,13 +116,40 @@ export default function ReportPage() {
             setStreamProgress(data.progress || 0);
             setStreamMessage(data.message || '처리 중...');
 
-            // 완료 시 리포트 로드
+            // 완료 시 리포트 로드 (재시도 로직 강화 - SSE_REPORT_DEBUG.md 방안 2)
             if (data.done) {
-              console.log('분석 완료! 리포트 로딩 시작...');
+              console.log('✅ [SSE] 분석 완료! 리포트 로딩 시작...');
               eventSource?.close();
+
+              // 재시도 로직
+              const retryLoadReport = async (attempt: number = 1, maxAttempts: number = 3) => {
+                console.log(`📊 [리포트 로딩] 시도 ${attempt}/${maxAttempts}...`);
+
+                try {
+                  await loadReport();
+                  console.log('✅ [리포트 로딩] 성공!');
+                } catch (error: any) {
+                  const status = error?.status || error?.response?.status;
+                  console.error(`❌ [리포트 로딩 실패] 시도 ${attempt}, 상태코드=${status}:`, error);
+
+                  // 404 또는 400 에러이고 재시도 가능한 경우
+                  if (attempt < maxAttempts && (status === 404 || status === 400)) {
+                    console.log(`⏳ [재시도 대기] ${2000}ms 후 재시도...`);
+                    setTimeout(() => {
+                      retryLoadReport(attempt + 1, maxAttempts);
+                    }, 2000); // 2초 간격
+                  } else {
+                    // 최종 실패
+                    console.error('❌ [리포트 로딩 최종 실패]:', error);
+                    setError('리포트를 불러올 수 없습니다. 페이지를 새로고침해주세요.');
+                  }
+                }
+              };
+
+              // 첫 시도는 2초 후 (Supabase 리플리케이션 지연 고려)
               setTimeout(() => {
-                loadReport();
-              }, 1000); // 1초 후 리포트 로드 (서버 저장 시간 고려)
+                retryLoadReport();
+              }, 2000);
             }
           } catch (err) {
             console.error('SSE 메시지 파싱 실패:', err);
