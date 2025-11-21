@@ -261,6 +261,81 @@ export default function ChatInterface({
     }
   }, [isLoggedIn, session, stateMachine]);
 
+  // Load existing chat session (대화 내역 불러오기)
+  const loadChatSession = useCallback(async (sessionId: string) => {
+    console.log(`[loadChatSession] Loading conversation: ${sessionId}`);
+
+    try {
+      // 기존 채팅 초기화 (메시지만)
+      setMessages([]);
+      setIsLoading(true);
+
+      // API에서 대화 + 메시지 불러오기
+      const response = await fetch(`/api/conversations/${sessionId}/messages`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.error('[loadChatSession] Conversation not found:', sessionId);
+          alert('대화를 찾을 수 없습니다.');
+        } else if (response.status === 401) {
+          console.error('[loadChatSession] Unauthorized');
+          if (onLoginRequired) {
+            onLoginRequired();
+          }
+        } else {
+          throw new Error(`Failed to load conversation: ${response.status}`);
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      const data = await response.json();
+      console.log(`[loadChatSession] ✅ Loaded ${data.count} messages for conversation:`, data.conversation.title);
+
+      // 메시지 변환 (DB 형식 → MessageType)
+      const loadedMessages: MessageType[] = data.messages.map((msg: any) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date(msg.created_at),
+        componentType: msg.metadata?.componentType,
+      }));
+
+      // 상태 업데이트
+      setConversationId(sessionId);
+      setMessages(loadedMessages);
+      setIsLoading(false);
+
+      // 스크롤 최하단으로
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+
+      console.log(`[loadChatSession] ✅ Successfully loaded ${loadedMessages.length} messages`);
+
+    } catch (error) {
+      console.error('[loadChatSession] Error loading conversation:', error);
+      setIsLoading(false);
+      alert('대화를 불러오는데 실패했습니다.');
+    }
+  }, [onLoginRequired]);
+
+  // Register loadChatSession on window object for Sidebar to call
+  useEffect(() => {
+    (window as any).loadChatSession = loadChatSession;
+    console.log('[ChatInterface] ✅ window.loadChatSession registered');
+
+    return () => {
+      delete (window as any).loadChatSession;
+      console.log('[ChatInterface] window.loadChatSession unregistered');
+    };
+  }, [loadChatSession]);
+
   // Handle address selection
   const handleAddressSelect = async (address: any, detailAddress: string) => {
     // Add user selection message with detail address

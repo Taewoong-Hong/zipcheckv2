@@ -21,6 +21,54 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["채팅"])
 
 
+# ============== 헬퍼 함수 ==============
+
+async def update_conversation_title(
+    supabase,
+    conversation_id: str,
+    property_address: Optional[str],
+    contract_type: Optional[str],
+    first_user_message: Optional[str] = None
+):
+    """
+    대화 제목 자동 생성
+
+    우선순위:
+    1. 주소 + 계약 유형: "서울 강남구 역삼동 전세 분석"
+    2. 주소만: "서울 강남구 역삼동"
+    3. 첫 번째 의미 있는 질문 내용 요약 (최대 30자)
+    4. 없으면: 제목 업데이트 안 함 (기존 "새 대화" 유지)
+    """
+    try:
+        title = None
+
+        if property_address and contract_type:
+            # 우선순위 1: 주소 + 계약 유형 (최대 40자)
+            short_address = property_address[:30] + "..." if len(property_address) > 30 else property_address
+            title = f"{short_address} {contract_type} 분석"
+        elif property_address:
+            # 우선순위 2: 주소만 (최대 40자)
+            title = property_address[:40] + "..." if len(property_address) > 40 else property_address
+        elif first_user_message:
+            # 우선순위 3: 첫 번째 질문 내용 요약 (최대 30자)
+            # 개행 제거 및 공백 정리
+            cleaned_message = first_user_message.replace('\n', ' ').strip()
+            if len(cleaned_message) > 30:
+                title = cleaned_message[:30] + "..."
+            else:
+                title = cleaned_message
+
+        if title:
+            supabase.table("conversations").update({
+                "title": title
+            }).eq("id", conversation_id).execute()
+
+            logger.info(f"대화 제목 업데이트: conversation_id={conversation_id}, title={title}")
+
+    except Exception as e:
+        logger.warning(f"대화 제목 업데이트 실패(무시): {e}")
+
+
 # ============== 요청/응답 스키마 ==============
 
 class CreateConversationResponse(BaseModel):
@@ -94,11 +142,14 @@ async def init_chat(user: dict = Depends(get_current_user)):
     try:
         supabase = get_supabase_client(service_role=True)
 
-        # 1. conversations 생성
+        # 1. conversations 생성 (카테고리 자동 설정)
         conv_result = supabase.table("conversations").insert({
             "user_id": user_id,
             "title": "새 대화",
-            "analysis_status": "pending"
+            "analysis_status": "pending",
+            "is_recent_conversation": True,  # 모든 대화는 기본적으로 최근 대화
+            "is_analysis_report": False,     # 분석 완료 시 TRUE로 변경됨
+            "case_id": None                  # 분석 리포트 연동 시 설정
         }).execute()
 
         if not conv_result.data:
@@ -241,11 +292,40 @@ async def send_message(
                     supabase.table("conversations").update({
                         "property_address": addr_extracted.address
                     }).eq("id", request.conversation_id).execute()
+
+                    # ✅ 대화 제목 자동 생성 (주소만 있는 경우)
+                    await update_conversation_title(
+                        supabase=supabase,
+                        conversation_id=request.conversation_id,
+                        property_address=addr_extracted.address,
+                        contract_type=None
+                    )
+
                     assistant_msg = (
                         f"주소를 확인했습니다: {addr_extracted.address}\n\n"
                         "계약 유형을 선택해주세요. (전세/전월세/월세/매매)"
                     )
                 else:
+                    # ✅ 주소가 없는 첫 메시지인 경우, 질문 내용으로 제목 생성
+                    # 메시지 개수 확인 (첫 번째 유저 메시지인지)
+                    msg_count_resp = supabase.table("messages") \
+                        .select("id", count="exact") \
+                        .eq("conversation_id", request.conversation_id) \
+                        .eq("role", "user") \
+                        .execute()
+
+                    user_message_count = msg_count_resp.count if hasattr(msg_count_resp, 'count') else 0
+
+                    # 첫 번째 유저 메시지라면 제목 생성
+                    if user_message_count == 1:  # 방금 저장한 메시지가 첫 번째
+                        await update_conversation_title(
+                            supabase=supabase,
+                            conversation_id=request.conversation_id,
+                            property_address=None,
+                            contract_type=None,
+                            first_user_message=request.content
+                        )
+
                     # 주소 요청 안내
                     assistant_msg = (
                         "부동산 주소를 입력해주세요.\n"
@@ -257,6 +337,15 @@ async def send_message(
                     supabase.table("conversations").update({
                         "contract_type": detected_contract
                     }).eq("id", request.conversation_id).execute()
+
+                    # ✅ 대화 제목 자동 생성 (주소 + 계약 유형)
+                    await update_conversation_title(
+                        supabase=supabase,
+                        conversation_id=request.conversation_id,
+                        property_address=property_address,
+                        contract_type=detected_contract
+                    )
+
                     assistant_msg = (
                         f"계약 유형을 '{detected_contract}'로 설정했습니다.\n\n"
                         "등기부를 발급(크레딧 차감)하시겠어요, 아니면 PDF를 업로드하시겠어요?"
@@ -353,21 +442,38 @@ async def get_messages(
 
 
 @router.get("/recent", response_model=GetRecentConversationsResponse)
-async def get_recent_conversations(limit: int = 20, user: dict = Depends(get_current_user)):
+async def get_recent_conversations(
+    limit: int = 20,
+    category: Optional[str] = None,  # "recent" | "analysis" | None (전체)
+    user: dict = Depends(get_current_user)
+):
     """
     최근 대화 목록 조회
+
+    Args:
+        limit: 최대 결과 수 (기본값: 20)
+        category: 카테고리 필터
+            - "recent": is_recent_conversation=TRUE 대화만
+            - "analysis": is_analysis_report=TRUE 대화만
+            - None: 전체 대화 (중복 허용, 분류 무관)
     """
     user_id = user["sub"]
-    logger.info(f"최근 대화 조회: user_id={user_id}, limit={limit}")
+    logger.info(f"최근 대화 조회: user_id={user_id}, limit={limit}, category={category}")
 
     try:
         supabase = get_supabase_client(service_role=False)
 
-        # recent_conversations 뷰 조회
-        result = supabase.table("recent_conversations") \
-            .select("*") \
-            .limit(limit) \
-            .execute()
+        # recent_conversations 뷰 조회 (카테고리 필터 적용)
+        query = supabase.table("recent_conversations").select("*")
+
+        # 카테고리 필터
+        if category == "recent":
+            query = query.eq("is_recent_conversation", True)
+        elif category == "analysis":
+            query = query.eq("is_analysis_report", True)
+        # else: 전체 조회 (필터 없음)
+
+        result = query.limit(limit).execute()
 
         conversations = result.data or []
 

@@ -2046,3 +2046,90 @@ decrypted_users = decrypt_list_fields(users, ['name'])
 - CORS는 운영 도메인만 허용(개발/스테이징은 별도 값)
 - SMS 레이트리밋/캡차 병행 운용(현재 토큰 필수, 필요 시 추가 레이트리밋 도입)
 
+
+
+---
+
+### ✅ 2025-11-21: 대화 내역 불러오기 기능 구현 완료
+
+**핵심 성과**:
+- ✅ 저장된 대화 클릭 시 메시지 히스토리 로드 기능 구현
+- ✅ API 엔드포인트 + 클라이언트 함수 통합
+- ✅ ChatGPT/Claude와 동일한 UX 구현
+- ✅ 서버 재시작 (포트 3000, 8000)
+
+**구현 내용**:
+
+1. **API 엔드포인트 생성** (`apps/web/app/api/conversations/[conversationId]/messages/route.ts`)
+   - GET 핸들러: 대화 + 메시지 조회
+   - Supabase SSR 인증 통합
+   - RLS 보안 정책 적용 (본인 대화만 조회)
+   - 시간순 정렬 (created_at ASC)
+   - 아카이브된 대화 제외 (is_archived = false)
+
+2. **클라이언트 함수 구현** (`apps/web/components/chat/ChatInterface.tsx`)
+   - Lines 265-326: `loadChatSession(sessionId)` 함수 추가
+   - API 호출 → 메시지 변환 → 상태 업데이트
+   - 에러 처리: 404 (대화 없음), 401 (인증 필요), 500 (서버 오류)
+   - Lines 329-337: window 객체에 함수 등록 (Sidebar 연동)
+
+3. **데이터 변환 로직**
+   - DB 스키마 → MessageType 인터페이스
+   - 타임스탬프 변환 (ISO string → Date)
+   - 메타데이터 보존 (componentType 등)
+
+4. **서버 재시작**
+   - Next.js: http://localhost:3000
+   - FastAPI: http://0.0.0.0:8000
+   - 모든 이전 프로세스 종료 후 깨끗한 재시작
+
+**동작 플로우**:
+```
+1. 사이드바에서 저장된 대화 클릭
+2. Sidebar.tsx: window.loadChatSession(sessionId) 호출
+3. ChatInterface.tsx: loadChatSession 함수 실행
+4. API 요청: GET /api/conversations/{sessionId}/messages
+5. Supabase: 대화 소유권 확인 + 메시지 조회
+6. 응답 수신: conversation + messages 배열
+7. 메시지 변환 및 상태 업데이트
+8. 화면에 대화 내역 표시
+```
+
+**기술 스택**:
+- Next.js 15.5.6 App Router
+- Supabase SSR (@supabase/ssr)
+- React Hooks (useCallback, useEffect)
+- TypeScript strict typing
+- Dynamic API Routes ([conversationId])
+
+**보안 고려사항**:
+- Supabase SSR 세션 기반 인증
+- RLS 정책으로 사용자 데이터 격리
+- 소유권 검증 (user_id 매칭)
+- 아카이브된 대화 필터링
+
+**사용자 경험**:
+- 클릭 즉시 대화 내역 로드
+- 스크롤 자동 이동 (최하단)
+- 로딩 인디케이터 표시
+- 명확한 에러 메시지
+
+**테스트 시나리오**:
+- ✅ 본인 대화 클릭 → 메시지 로드 성공
+- ✅ 타인 대화 클릭 → 404 에러
+- ✅ 로그아웃 상태 → 401 에러 + 로그인 모달
+- ✅ 아카이브된 대화 → 404 에러
+- ✅ 빈 대화 → 빈 메시지 배열
+
+**주요 파일**:
+- [c:\dev\zipcheckv2\apps\web\app\api\conversations\[conversationId]\messages\route.ts](apps/web/app/api/conversations/[conversationId]/messages/route.ts)
+- [c:\dev\zipcheckv2\apps\web\components\chat\ChatInterface.tsx:265-337](apps/web/components/chat/ChatInterface.tsx#L265-L337)
+- [c:\dev\zipcheckv2\apps\web\components\sidebar\Sidebar.tsx:367-377](apps/web/components/sidebar/Sidebar.tsx#L367-L377)
+
+**향후 개선 사항**:
+- 메시지 페이지네이션 (긴 대화 대응)
+- 검색 기능 (대화 내 키워드 검색)
+- 대화 제목 자동 생성/수정
+- 메시지 편집/삭제 기능
+- 대화 공유 기능
+

@@ -1112,7 +1112,24 @@ async def execute_analysis_pipeline(case_id: str):
         report_id = report_response.data[0]['id']
         logger.info(f"리포트 저장 완료: {report_id}")
 
-        # 7️⃣ 상태 전환: parse_enrich → report
+        # 7️⃣ 대화 카테고리 업데이트 (분석 리포트 태깅)
+        # 이 케이스와 연결된 대화를 찾아서 is_analysis_report=TRUE, case_id 설정
+        conversation_update = supabase.table("conversations") \
+            .update({
+                "is_analysis_report": True,
+                "case_id": case_id,
+                "updated_at": datetime.utcnow().isoformat(),
+            }) \
+            .eq("user_id", case['user_id']) \
+            .or_(f"case_id.eq.{case_id},property_address.eq.{case['property_address']}") \
+            .execute()
+
+        if conversation_update.data:
+            logger.info(f"대화 카테고리 업데이트 완료: {len(conversation_update.data)}개 대화 → 분석 리포트로 태깅")
+        else:
+            logger.warning(f"업데이트할 대화를 찾지 못함 (case_id={case_id}, 주소={case['property_address']})")
+
+        # 8️⃣ 상태 전환: parse_enrich → report
         supabase.table("v2_cases").update({
             "current_state": "report",
             "updated_at": datetime.utcnow().isoformat(),

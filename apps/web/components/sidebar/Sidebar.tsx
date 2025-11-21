@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Home, Search, Clock, FolderOpen, PenSquare, HelpCircle, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
+import { Home, Search, Clock, FolderOpen, PenSquare, HelpCircle, ChevronDown, ChevronRight, MessageSquare, X } from "lucide-react";
 import UserProfileNew from "./UserProfileNew";
 import SearchModal from "../search/SearchModal";
 
@@ -20,27 +20,43 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
   const [recentSessions, setRecentSessions] = useState<any[]>([]);
   const [myReports, setMyReports] = useState<any[]>([]);
 
+  // Load recent sessions from backend API (단순화 - 새 /api/sidebar 사용)
+  const loadRecentSessions = async () => {
+    try {
+      const response = await fetch('/api/sidebar?filter=recent');
+
+      if (response.ok) {
+        const data = await response.json();
+        setRecentSessions(data.conversations || []);
+      } else {
+        console.error('Failed to load recent sessions:', response.status);
+        setRecentSessions([]);
+      }
+    } catch (error) {
+      console.error('Error loading recent sessions:', error);
+      setRecentSessions([]);
+    }
+  };
+
   // Load recent sessions when Recent section is expanded
   useEffect(() => {
-    if (recentExpanded && typeof (window as any).getRecentSessions === 'function') {
-      const sessions = (window as any).getRecentSessions();
-      setRecentSessions(sessions || []);
+    if (recentExpanded) {
+      loadRecentSessions();
     }
   }, [recentExpanded]);
 
   // Refresh recent sessions periodically
   useEffect(() => {
     const interval = setInterval(() => {
-      if (recentExpanded && typeof (window as any).getRecentSessions === 'function') {
-        const sessions = (window as any).getRecentSessions();
-        setRecentSessions(sessions || []);
+      if (recentExpanded) {
+        loadRecentSessions();
       }
     }, 2000); // Refresh every 2 seconds
 
     return () => clearInterval(interval);
   }, [recentExpanded]);
 
-  // Listen to auth state changes and load reports when authenticated
+  // Listen to auth state changes and load data when authenticated
   useEffect(() => {
     let authListener: any = null;
 
@@ -55,21 +71,30 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           // Wait a bit for session to be fully established
           setTimeout(() => {
+            if (recentExpanded) {
+              loadRecentSessions();
+            }
             if (myKnowledgeExpanded) {
               loadMyReports();
             }
           }, 500);
         } else if (event === 'SIGNED_OUT') {
+          setRecentSessions([]);
           setMyReports([]);
         }
       });
 
       authListener = subscription;
 
-      // Also load reports immediately if already authenticated
+      // Also load data immediately if already authenticated
       const { data: { session } } = await supabase.auth.getSession();
-      if (session && myKnowledgeExpanded) {
-        loadMyReports();
+      if (session) {
+        if (recentExpanded) {
+          loadRecentSessions();
+        }
+        if (myKnowledgeExpanded) {
+          loadMyReports();
+        }
       }
     };
 
@@ -80,7 +105,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
         authListener.unsubscribe();
       }
     };
-  }, [myKnowledgeExpanded]);
+  }, [recentExpanded, myKnowledgeExpanded]);
 
   // Load my reports when My Knowledge section is expanded
   useEffect(() => {
@@ -89,32 +114,14 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
     }
   }, [myKnowledgeExpanded]);
 
-  // Load reports from backend
+  // Load reports from backend (단순화 - 새 /api/sidebar 사용)
   const loadMyReports = async () => {
     try {
-      // Get Supabase session token via singleton client
-      const { getBrowserSupabase } = await import('../../lib/supabaseBrowser');
-      const supabase = getBrowserSupabase();
-
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session) {
-        console.log('No session found, skipping report load');
-        setMyReports([]);
-        return;
-      }
-
-      const response = await fetch('/api/reports/list', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
+      const response = await fetch('/api/sidebar?filter=report');
 
       if (response.ok) {
         const data = await response.json();
-        setMyReports(data.reports || []);
+        setMyReports(data.conversations || []);
       } else {
         console.error('Failed to load reports:', response.status);
         setMyReports([]);
@@ -126,9 +133,15 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
   };
 
   // Format date for display
-  const formatDate = (date: Date) => {
+  const formatDate = (date: Date | string | undefined) => {
+    if (!date) return '';
+
     const now = new Date();
     const messageDate = new Date(date);
+
+    // Invalid date check
+    if (isNaN(messageDate.getTime())) return '';
+
     const diffInMillis = now.getTime() - messageDate.getTime();
     const diffInMinutes = Math.floor(diffInMillis / 60000);
     const diffInHours = Math.floor(diffInMinutes / 60);
@@ -139,6 +152,33 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
     if (diffInHours < 24) return `${diffInHours}시간 전`;
     if (diffInDays < 7) return `${diffInDays}일 전`;
     return messageDate.toLocaleDateString('ko-KR');
+  };
+
+  // Delete conversation handler
+  const handleDeleteConversation = async (conversationId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent conversation click
+
+    if (!confirm('이 대화를 삭제하시겠습니까?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/sidebar/${conversationId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Reload conversations after deletion
+        loadRecentSessions();
+        loadMyReports();
+      } else {
+        console.error('Failed to delete conversation:', response.status);
+        alert('대화 삭제에 실패했습니다.');
+      }
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      alert('대화 삭제 중 오류가 발생했습니다.');
+    }
   };
 
   return (
@@ -317,21 +357,32 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
               <div className="ml-8 mt-1 space-y-1">
                 {recentSessions.length > 0 ? (
                   recentSessions.map((session) => (
-                    <button
+                    <div
                       key={session.id}
-                      onClick={() => {
-                        if (typeof (window as any).loadChatSession === 'function') {
-                          (window as any).loadChatSession(session.id);
-                        }
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors group"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors group relative"
                     >
-                      <MessageSquare className="w-4 h-4 text-neutral-400 shrink-0" />
-                      <span className="flex-1 text-left text-sm truncate">{session.title}</span>
+                      <button
+                        onClick={() => {
+                          if (typeof (window as any).loadChatSession === 'function') {
+                            (window as any).loadChatSession(session.id);
+                          }
+                        }}
+                        className="flex-1 flex items-center gap-2 text-left"
+                      >
+                        <MessageSquare className="w-4 h-4 text-neutral-400 shrink-0" />
+                        <span className="flex-1 text-sm truncate">{session.title}</span>
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteConversation(session.id, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-neutral-200 rounded transition-all"
+                        title="삭제"
+                      >
+                        <X className="w-3 h-3 text-neutral-500" />
+                      </button>
                       <span className="text-xs text-neutral-400 opacity-0 group-hover:opacity-100">
                         {formatDate(session.updatedAt)}
                       </span>
-                    </button>
+                    </div>
                   ))
                 ) : (
                   <div className="px-3 py-2 text-sm text-neutral-500">
@@ -377,22 +428,37 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
               <div className="ml-8 mt-1 space-y-1">
                 {myReports.length > 0 ? (
                   myReports.map((report) => (
-                    <button
+                    <div
                       key={report.id}
-                      onClick={() => {
-                        // Navigate to report view
-                        window.location.href = `/report/${report.case_id}`;
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors group"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-100 rounded-lg transition-colors group relative"
                     >
-                      <FolderOpen className="w-4 h-4 text-neutral-400 shrink-0" />
-                      <span className="flex-1 text-left text-sm truncate">
-                        {report.metadata?.address || '부동산 분석'}
-                      </span>
+                      <button
+                        onClick={() => {
+                          // case_id가 있으면 리포트로, 없으면 대화로
+                          if (report.case_id) {
+                            window.location.href = `/report/${report.case_id}`;
+                          } else if (typeof (window as any).loadChatSession === 'function') {
+                            (window as any).loadChatSession(report.id);
+                          }
+                        }}
+                        className="flex-1 flex items-center gap-2 text-left"
+                      >
+                        <FolderOpen className="w-4 h-4 text-neutral-400 shrink-0" />
+                        <span className="flex-1 text-sm truncate">
+                          {report.property_address || report.title || '분석 대화'}
+                        </span>
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteConversation(report.id, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-neutral-200 rounded transition-all"
+                        title="삭제"
+                      >
+                        <X className="w-3 h-3 text-neutral-500" />
+                      </button>
                       <span className="text-xs text-neutral-400 opacity-0 group-hover:opacity-100">
-                        {formatDate(new Date(report.created_at))}
+                        {formatDate(new Date(report.updated_at))}
                       </span>
-                    </button>
+                    </div>
                   ))
                 ) : (
                   <div className="px-3 py-2 text-sm text-neutral-500">

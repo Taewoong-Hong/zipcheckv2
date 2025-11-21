@@ -31,8 +31,17 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // FastAPI 채팅 API 호출
-    const response = await fetch(`${AI_API_URL}/chat/recent?limit=20`, {
+    // URL에서 category 쿼리 파라미터 추출
+    const { searchParams } = new URL(request.url);
+    const category = searchParams.get('category'); // 'recent' | 'analysis' | null
+
+    // FastAPI 채팅 API 호출 (category 파라미터 전달)
+    let apiUrl = `${AI_API_URL}/chat/recent?limit=20`;
+    if (category) {
+      apiUrl += `&category=${category}`;
+    }
+
+    const response = await fetch(apiUrl, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,

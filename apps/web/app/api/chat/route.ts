@@ -627,8 +627,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'BACKEND_UNREACHABLE' }, { status: 502 });
   }
 
+    // ✅ 404는 정상 흐름으로 처리 (아직 분석 대상이 없음)
     if (!analyzeResponse.ok) {
       const text = await analyzeResponse.text();
+
+      // 404 에러는 "아직 케이스/분석 대상이 없음"이므로 조기 종료
+      if (analyzeResponse.status === 404) {
+        console.warn('[api/chat] 404 - 분석 대상 없음 (정상 흐름):', text);
+
+        // 기본 안내 메시지 반환
+        const defaultAnswer = '죄송합니다. 분석 대상을 찾을 수 없습니다. 주소와 계약 유형을 먼저 입력해주세요.';
+
+        // 스트리밍 응답으로 기본 메시지 전달
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            const data = JSON.stringify({ content: defaultAnswer, done: false });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+            const doneData = JSON.stringify({ done: true });
+            controller.enqueue(encoder.encode(`data: ${doneData}\n\n`));
+            controller.close();
+          },
+        });
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        };
+        if (newConversationId) headers['X-New-Conversation-Id'] = newConversationId;
+
+        return new NextResponse(stream, { headers });
+      }
+
+      // 404 외 에러는 예외 발생
       throw new Error(`분석 실패: ${analyzeResponse.status} ${text}`);
     }
 
