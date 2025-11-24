@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Home, Search, Clock, FolderOpen, PenSquare, HelpCircle, ChevronDown, ChevronRight, MessageSquare, X } from "lucide-react";
@@ -21,7 +21,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
   const [myReports, setMyReports] = useState<any[]>([]);
 
   // Load recent sessions from backend API (단순화 - 새 /api/sidebar 사용)
-  const loadRecentSessions = async () => {
+  const loadRecentSessions = useCallback(async () => {
     try {
       const response = await fetch('/api/sidebar?filter=recent');
 
@@ -36,7 +36,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
       console.error('Error loading recent sessions:', error);
       setRecentSessions([]);
     }
-  };
+  }, []); // 의존성 없음 - 한 번만 생성
 
   // Load recent sessions when Recent section is expanded
   useEffect(() => {
@@ -45,16 +45,9 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
     }
   }, [recentExpanded]);
 
-  // Refresh recent sessions periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (recentExpanded) {
-        loadRecentSessions();
-      }
-    }, 2000); // Refresh every 2 seconds
-
-    return () => clearInterval(interval);
-  }, [recentExpanded]);
+  // ✅ 폴링 제거: 무한 루프 원인 해결
+  // 이전에는 2초마다 API를 호출하여 무한 루프 발생
+  // 이제는 섹션 열릴 때만 1회 로드
 
   // Listen to auth state changes and load data when authenticated
   useEffect(() => {
@@ -115,7 +108,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
   }, [myKnowledgeExpanded]);
 
   // Load reports from backend (단순화 - 새 /api/sidebar 사용)
-  const loadMyReports = async () => {
+  const loadMyReports = useCallback(async () => {
     try {
       const response = await fetch('/api/sidebar?filter=report');
 
@@ -130,7 +123,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
       console.error('Error loading reports:', error);
       setMyReports([]);
     }
-  };
+  }, []); // 의존성 없음 - 한 번만 생성
 
   // Format date for display
   const formatDate = (date: Date | string | undefined) => {
