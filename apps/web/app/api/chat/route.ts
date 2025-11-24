@@ -44,8 +44,6 @@ export async function POST(request: NextRequest) {
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          console.log(`[api/chat] 요청 시도 ${attempt}/${maxRetries}: ${url}`);
-
           // AbortController로 타임아웃 구현
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -59,36 +57,36 @@ export async function POST(request: NextRequest) {
 
           // 성공 또는 재시도 불가 에러 (400번대)
           if (response.ok || (response.status >= 400 && response.status < 500)) {
-            console.log(`[api/chat] 요청 성공 (시도 ${attempt})`);
+            if (attempt > 1) {
+              console.log(`[api/chat] 요청 성공 (재시도 후: ${attempt}/${maxRetries})`);
+            }
             return response;
           }
 
           // 500번대 에러 → 재시도
           if (response.status >= 500 && attempt < maxRetries) {
             const delay = delays[attempt - 1] || 2000;
-            console.warn(`[api/chat] 500 에러 (시도 ${attempt}) → ${delay}ms 후 재시도`);
+            if (attempt === 1) {
+              console.warn(`[api/chat] 500 에러 감지 → 재시도 시작 (최대 ${maxRetries}회)`);
+            }
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
 
           return response;
         } catch (e: any) {
-          // 타임아웃 또는 네트워크 에러
-          if (e.name === 'AbortError') {
-            console.warn(`[api/chat] 타임아웃 (시도 ${attempt}/${maxRetries})`);
-          } else {
-            console.error(`[api/chat] 네트워크 에러 (시도 ${attempt}): ${e?.message || e}`);
-          }
-
           // 마지막 시도가 아니면 재시도
           if (attempt < maxRetries) {
+            if (attempt === 1) {
+              console.warn(`[api/chat] 네트워크 에러 감지 → 재시도 시작`);
+            }
             const delay = delays[attempt - 1] || 2000;
-            console.log(`[api/chat] ${delay}ms 후 재시도...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
 
           // 마지막 시도 실패
+          console.error(`[api/chat] 최종 실패 (${maxRetries}회 시도 후): ${e?.message || e}`);
           throw new Error('BACKEND_UNREACHABLE');
         }
       }
@@ -366,7 +364,7 @@ export async function POST(request: NextRequest) {
     function getFixedReply(): string | undefined {
       // 비교분석/일반질문 의도는 모달 없이 바로 LLM 답변
       if (isComparisonOrGeneralQuestion(content)) {
-        return undefined; // LLM 분석 단계로 진행
+        return undefined; // LLM 분석 단계로 진행 (로그 없음)
       }
 
       if (!addr) {
@@ -424,8 +422,6 @@ export async function POST(request: NextRequest) {
 
     // 부동산 분석 요청이 감지되거나 긍정 응답이면 분석 플로우 시작
     if ((isRealEstateAnalysisRequest(content) || isPositiveResponse(content)) && (!addr || !ctype)) {
-      console.log('[게이팅] 부동산 분석 시작 - 필수 정보 수집');
-
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
         start(controller) {
@@ -437,7 +433,6 @@ export async function POST(request: NextRequest) {
 
             // 1. 긍정 응답이면 즉시 모달 오픈
             if (isPositiveResponse(content)) {
-              console.log('[게이팅] 긍정 응답 감지 → 주소 모달 오픈');
               const msg = '상세 주소를 검색해드리겠습니다. 아파트명이나 번지수를 입력해주세요.';
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
 
@@ -454,7 +449,6 @@ export async function POST(request: NextRequest) {
             }
             // 2. 행정구역만 있고 구체적 주소 없음 → 더 구체적인 주소 요청
             else if (looksLikeAddress(content) && !hasSpecificDetails) {
-              console.log('[게이팅] 행정구역만 감지 → 구체적 주소 요청');
               const msg = `${content.trim()} 지역이시군요! 더 정확한 분석을 위해 **상세한 주소**를 입력해주세요.\n\n예시:\n- "파주시 야당동 62-24"\n- "파주시 야당동 이편한세상"\n- "경기도 파주시 야당동 123번지"`;
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
 
@@ -463,7 +457,6 @@ export async function POST(request: NextRequest) {
             }
             // 3. 구체적 주소 또는 일반 분석 요청 → 바로 모달 오픈
             else {
-              console.log('[게이팅] 구체적 주소 또는 일반 요청 → 주소 모달 오픈');
               const msg = '부동산 분석을 시작하겠습니다. 먼저 검토하실 부동산 주소를 입력해주세요.';
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: msg, done: false })}\n\n`));
 

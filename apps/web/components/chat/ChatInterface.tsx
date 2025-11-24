@@ -61,13 +61,17 @@ export default function ChatInterface({
   const router = useRouter();
 
   // Persist conversationId to localStorage when it changes
+  const prevConversationIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (conversationId) {
-      localStorage.setItem('chat_conversation_id', conversationId);
-      console.log('Conversation ID saved to localStorage:', conversationId);
-    } else {
-      localStorage.removeItem('chat_conversation_id');
-      console.log('Conversation ID removed from localStorage');
+    if (conversationId !== prevConversationIdRef.current) {
+      if (conversationId) {
+        localStorage.setItem('chat_conversation_id', conversationId);
+        console.log('Conversation ID saved to localStorage:', conversationId);
+      } else {
+        localStorage.removeItem('chat_conversation_id');
+        console.log('Conversation ID removed from localStorage');
+      }
+      prevConversationIdRef.current = conversationId;
     }
   }, [conversationId]);
 
@@ -326,13 +330,17 @@ export default function ChatInterface({
   }, [onLoginRequired]);
 
   // Register loadChatSession on window object for Sidebar to call
+  const loadChatSessionRegisteredRef = useRef(false);
   useEffect(() => {
-    (window as any).loadChatSession = loadChatSession;
-    console.log('[ChatInterface] ✅ window.loadChatSession registered');
+    if (!loadChatSessionRegisteredRef.current) {
+      (window as any).loadChatSession = loadChatSession;
+      console.log('[ChatInterface] ✅ window.loadChatSession registered');
+      loadChatSessionRegisteredRef.current = true;
+    }
 
     return () => {
       delete (window as any).loadChatSession;
-      console.log('[ChatInterface] window.loadChatSession unregistered');
+      loadChatSessionRegisteredRef.current = false;
     };
   }, [loadChatSession]);
 
@@ -686,24 +694,17 @@ export default function ChatInterface({
 
       // ✅ 채팅 내에서 리포트 표시 (페이지 이동 제거)
       if (reportId) {
-        console.log('🔍 [DEBUG] reportId 발견:', reportId);
-        console.log('🔍 [DEBUG] caseId:', analysisContext.caseId);
-
         try {
           // 세션 토큰 가져오기
           const sb = getBrowserSupabase();
           const { data: sbData } = await sb.auth.getSession();
           const accessToken = sbData.session?.access_token || session?.access_token;
 
-          console.log('🔍 [DEBUG] accessToken 존재:', !!accessToken);
-
           if (!accessToken) {
             throw new Error('인증 토큰이 없습니다. 다시 로그인해주세요.');
           }
 
           // 리포트 데이터 가져오기 (재시도 로직 포함)
-          console.log('🔍 [DEBUG] 리포트 API 호출 시작...');
-
           let reportResponse: Response | null = null;
           let retries = 0;
           const maxRetries = 5;
@@ -719,8 +720,6 @@ export default function ChatInterface({
               credentials: 'include',
             });
 
-            console.log(`🔍 [DEBUG] 리포트 API 응답 상태 (시도 ${retries + 1}/${maxRetries}):`, reportResponse.status);
-
             // 성공하면 루프 탈출
             if (reportResponse.ok) {
               break;
@@ -729,7 +728,6 @@ export default function ChatInterface({
             // 404 에러이고 재시도 가능하면 대기 후 재시도
             if (reportResponse.status === 404 && retries < maxRetries - 1) {
               const delay = 1000 * (retries + 1); // 1초, 2초, 3초, 4초, 5초
-              console.log(`⏳ [DEBUG] 리포트가 아직 준비되지 않음. ${delay}ms 후 재시도...`);
               await new Promise(resolve => setTimeout(resolve, delay));
               retries++;
               continue;
@@ -744,13 +742,6 @@ export default function ChatInterface({
           }
 
           const reportData = await reportResponse.json();
-          console.log('🔍 [DEBUG] reportData 수신:', {
-            hasContent: !!reportData.content,
-            contentLength: reportData.content?.length,
-            hasRiskScore: !!reportData.risk_score,
-            address: reportData.address,
-            contractType: reportData.contract_type,
-          });
 
           // 진행 메시지 제거
           setMessages(prev => prev.filter(msg => msg.id !== progressMessageId));
@@ -771,23 +762,8 @@ export default function ChatInterface({
             },
           };
 
-          console.log('🔍 [DEBUG] reportMessage 생성:', {
-            id: reportMessage.id,
-            role: reportMessage.role,
-            componentType: reportMessage.componentType,
-            hasContent: !!reportMessage.content,
-            hasComponentData: !!reportMessage.componentData,
-          });
-
-          setMessages(prev => {
-            const newMessages = [...prev, reportMessage];
-            console.log('🔍 [DEBUG] setMessages 호출 - 새 메시지 배열 길이:', newMessages.length);
-            return newMessages;
-          });
-
+          setMessages(prev => [...prev, reportMessage]);
           chatStorage.addMessage(reportMessage);
-
-          console.log('✅ 리포트를 채팅 메시지로 추가 완료:', reportId);
 
         } catch (error) {
           console.error('리포트 로딩 실패:', error);
@@ -871,10 +847,8 @@ export default function ChatInterface({
   const handleSubmit = async (content?: string, e?: React.FormEvent): Promise<boolean> => {
     if (e) e.preventDefault();
 
-    console.log('[handleSubmit] isSubmitting=', isSubmitting, 'isLoading=', isLoading, 'text=', (content ?? inputValue).trim());
     // 중복 제출 방지 (디바운싱)
     if (isSubmitting) {
-      console.log('[ChatInterface] Already submitting, ignoring duplicate');
       return false;
     }
 
@@ -912,27 +886,18 @@ export default function ChatInterface({
 
       // Ensure conversation exists (awaits init if needed)
       const convId = await getOrCreateConversationId();
-      console.log('[handleSubmit] ??Strategy 3: convId=', convId, 'state conversationId=', conversationId, 'input=', text.substring(0, 30));
 
       // ??Update chatStorage session with conversation ID (if not already set)
       // THIS MUST HAPPEN BEFORE addMessage() to prevent sync failures
       const currentSession = await chatStorage.getCurrentSession();
       if (!currentSession?.conversationId && convId) {
-        console.log('[handleSubmit] Updating chatStorage session with conversationId:' , convId);
         // Create or update session with conversation ID
         if (!currentSession) {
           await chatStorage.createSession(text, convId);
         } else {
           // Update existing session with conversationId
-          const updated = await chatStorage.updateSessionConversationId(convId);
-          if (updated) {
-            console.log('[handleSubmit] ??Session updated with conversationId:', convId);
-          } else {
-            console.warn('[handleSubmit] Failed to update session with conversationId');
-          }
+          await chatStorage.updateSessionConversationId(convId);
         }
-      } else if (currentSession?.conversationId) {
-        console.log('[handleSubmit] ??Session already has conversationId:', currentSession.conversationId);
       }
 
       // NOW add user message with optimistic update (임시 ID)
@@ -1069,7 +1034,6 @@ export default function ChatInterface({
       // ??Reuse the convId from Strategy 3 block (same instance, not state)
       // Strategy 3 already called getOrCreateConversationId() above (line 691)
       const convId = await getOrCreateConversationId();
-      console.log('[handleSubmit] ?? LLM call: convId=', convId, 'state conversationId=', conversationId);
 
       // Create abort controller for cancellation
       abortControllerRef.current = new AbortController();
