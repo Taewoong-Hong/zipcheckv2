@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     vworld_domain: str | None = Field(default=None, description="VWorld API 도메인 (선택)")
 
     @property
-    def public_data_api_key(self) -> str:
+    def public_data_api_key(self) -> str | None:
         """아파트 매매 기본 API 키 (data_go_kr_api_key와 동일 - 법정동과 함께 승인됨)."""
         return self.data_go_kr_api_key
 

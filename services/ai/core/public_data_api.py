@@ -441,19 +441,207 @@ class AptTradeAPIClient(BasePublicDataAPI):
                 ""
             )
 
+            # PDF 스펙에 따른 전체 필드 매핑
             normalized_item = {
-                "dealAmount": safe_int(item.get("거래금액") or item.get("dealAmount")),
-                "dealYear": safe_int(item.get("년") or item.get("dealYear")),
-                "dealMonth": safe_int(item.get("월") or item.get("dealMonth")),
-                "dealDay": safe_int(item.get("일") or item.get("dealDay")),
+                # 기본 거래 정보
+                "sggCd": safe_str(item.get("sggCd")),  # 지역코드 (5자리)
+                "umdNm": safe_str(item.get("umdNm") or dong),  # 법정동 (60자)
+                "aptNm": safe_str(item.get("aptNm") or apt_name),  # 단지명 (100자)
+                "jibun": safe_str(item.get("지번") or item.get("jibun")),  # 지번 (20자)
+                "excluUseAr": safe_str(item.get("excluUseAr") or item.get("전용면적")),  # 전용면적 (22자)
+
+                # 계약 정보
+                "dealYear": safe_int(item.get("년") or item.get("dealYear")),  # 계약년도 (4자)
+                "dealMonth": safe_int(item.get("월") or item.get("dealMonth")),  # 계약월 (2자)
+                "dealDay": safe_int(item.get("일") or item.get("dealDay")),  # 계약일 (2자)
+                "dealAmount": safe_int(item.get("거래금액") or item.get("dealAmount")),  # 거래금액(만원) (40자)
+
+                # 건물 정보
+                "floor": safe_str(item.get("층") or item.get("floor")),  # 층 (10자)
+                "buildYear": safe_int(item.get("건축년도") or item.get("buildYear")),  # 건축년도 (4자)
+                "aptDong": safe_str(item.get("aptDong")),  # 아파트 동명 (400자)
+
+                # 거래 상세 정보
+                "cdealType": safe_str(item.get("해제여부") or item.get("cancelDealType") or item.get("cdealType")),  # 해제여부 (1자)
+                "cdealDay": safe_str(item.get("해제사유발생일") or item.get("cancelDealDate") or item.get("cdealDay")),  # 해제사유발생일 (8자)
+                "dealingGbn": safe_str(item.get("dealingGbn")),  # 거래유형 중개 및 직거래여부 (10자)
+                "estateAgentSggNm": safe_str(item.get("estateAgentSggNm")),  # 중개사소재지 시군구단위 (3000자)
+                "rgstDate": safe_str(item.get("rgstDate")),  # 등기일자 (8자)
+
+                # 거래 주체 정보
+                "slerGbn": safe_str(item.get("slerGbn")),  # 매도자 거래주체정보 (100자)
+                "buyerGbn": safe_str(item.get("buyerGbn")),  # 매수자 거래주체정보 (100자)
+                "landLeaseholdGbn": safe_str(item.get("landLeaseholdGbn")),  # 토지임대부 아파트 여부 (1자)
+
+                # 하위 호환성을 위한 기존 필드명 유지
                 "aptName": apt_name,
                 "dong": dong,
-                "jibun": safe_str(item.get("지번") or item.get("jibun")),
-                "exclusiveArea": safe_int(item.get("전용면적") or item.get("exclusiveArea")),
-                "floor": safe_int(item.get("층") or item.get("floor")),
-                "buildYear": safe_int(item.get("건축년도") or item.get("buildYear")),
-                "cancelDealType": safe_str(item.get("해제여부") or item.get("cancelDealType")),
-                "cancelDealDate": safe_str(item.get("해제사유발생일") or item.get("cancelDealDate")),
+                "exclusiveArea": safe_int(item.get("전용면적") or item.get("exclusiveArea") or item.get("excluUseAr")),
+                "cancelDealType": safe_str(item.get("해제여부") or item.get("cancelDealType") or item.get("cdealType")),
+                "cancelDealDate": safe_str(item.get("해제사유발생일") or item.get("cancelDealDate") or item.get("cdealDay")),
+            }
+
+            normalized.append(normalized_item)
+
+        return normalized
+
+
+class AptRentAPIClient(BasePublicDataAPI):
+    """국토교통부 아파트 전월세 실거래가 조회 API 클라이언트."""
+
+    API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
+
+    async def get_apt_rent_transactions(
+        self,
+        lawd_cd: str,
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
+    ) -> Dict[str, Any]:
+        """
+        아파트 전월세 실거래가 조회.
+
+        Args:
+            lawd_cd: 법정동코드 5자리 (예: "11110")
+            deal_ymd: 계약년월 6자리 (예: "202407")
+            page_no: 페이지 번호 (기본값: 1)
+            num_of_rows: 한 페이지 결과 수 (기본값: 100)
+
+        Returns:
+            전월세 거래 내역 딕셔너리
+
+        Raises:
+            PublicDataAPIError: API 호출 실패 시
+        """
+        logger.info(f"아파트 전월세 실거래가 조회: lawd_cd={lawd_cd}, deal_ymd={deal_ymd}")
+
+        # 파라미터 검증
+        if len(lawd_cd) != 5 or not lawd_cd.isdigit():
+            raise PublicDataAPIError(f"Invalid lawd_cd: {lawd_cd} (must be 5 digits)")
+
+        if len(deal_ymd) != 6 or not deal_ymd.isdigit():
+            raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd} (must be 6 digits YYYYMM)")
+
+        # Ensure client is initialized
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized. Use async context manager or provide client.")
+
+        try:
+            params = {
+                "serviceKey": self.api_key,
+                "LAWD_CD": lawd_cd,
+                "DEAL_YMD": deal_ymd,
+                "pageNo": str(page_no),
+                "numOfRows": str(num_of_rows)
+            }
+
+            response = await self.client.get(self.API_URL, params=params)
+
+            logger.info(f"아파트 전월세 실거래가 API 응답: status={response.status_code}")
+
+            if not response.is_success:
+                logger.error(f"아파트 전월세 실거래가 API HTTP 오류: {response.status_code}")
+                raise PublicDataAPIError(f"HTTP {response.status_code}")
+
+            # XML 파싱
+            text = response.text.replace("\ufeff", "")  # BOM 제거
+            data = xmltodict.parse(text)
+
+            # 결과 코드 확인
+            result_code = (
+                data.get("response", {}).get("header", {}).get("resultCode") or
+                data.get("OpenAPI_ServiceResponse", {}).get("cmmMsgHeader", {}).get("returnAuthMsg", {}).get("resultCode")
+            )
+
+            result_msg = (
+                data.get("response", {}).get("header", {}).get("resultMsg") or
+                data.get("OpenAPI_ServiceResponse", {}).get("cmmMsgHeader", {}).get("returnAuthMsg", {}).get("resultMessage")
+            )
+
+            # 성공 코드
+            success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
+            is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
+
+            if result_code and result_code not in success_codes and not is_no_data:
+                logger.error(f"아파트 전월세 실거래가 API 오류: {result_code} - {result_msg}")
+                raise PublicDataAPIError(f"API Error: {result_msg}")
+
+            # NO_DATA 처리
+            if is_no_data:
+                logger.info(f"아파트 전월세 실거래가 조회: 데이터 없음 (lawd_cd={lawd_cd}, deal_ymd={deal_ymd})")
+                return {
+                    "header": {
+                        "resultCode": result_code,
+                        "resultMsg": result_msg or "NO_DATA"
+                    },
+                    "body": {
+                        "items": [],
+                        "totalCount": 0
+                    }
+                }
+
+            # rows 추출
+            rows = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            items = rows if isinstance(rows, list) else ([rows] if rows else [])
+
+            logger.info(f"아파트 전월세 실거래가 조회 성공: {len(items)}개 결과")
+
+            return {
+                "header": {
+                    "resultCode": result_code or "000",
+                    "resultMsg": result_msg or "OK"
+                },
+                "body": {
+                    "items": self._normalize_apt_rent_items(items),
+                    "totalCount": len(items)
+                }
+            }
+
+        except httpx.HTTPError as e:
+            logger.error(f"아파트 전월세 실거래가 API HTTP 오류: {e}")
+            raise PublicDataAPIError(f"HTTP Error: {e}") from e
+        except Exception as e:
+            logger.error(f"아파트 전월세 실거래가 API 호출 실패: {e}")
+            raise PublicDataAPIError(f"API call failed: {e}") from e
+
+    def _normalize_apt_rent_items(self, items: List[Dict]) -> List[Dict[str, Any]]:
+        """아파트 전월세 거래 데이터 정규화."""
+        normalized = []
+
+        for item in items:
+            # 안전한 변환 헬퍼
+            def safe_str(v) -> str:
+                return str(v).strip() if v is not None else ""
+
+            def safe_int(v) -> Optional[int]:
+                s = safe_str(v).replace(" ", "").replace(",", "")
+                try:
+                    return int(s) if s else None
+                except ValueError:
+                    return None
+
+            # PDF 스펙에 따른 필드 매핑
+            normalized_item = {
+                "sggCd": safe_str(item.get("sggCd")),  # 지역코드 (5자리)
+                "umdNm": safe_str(item.get("umdNm")),  # 법정동 (30자)
+                "aptNm": safe_str(item.get("aptNm")),  # 아파트명 (100자)
+                "jibun": safe_str(item.get("jibun")),  # 지번 (20자)
+                "excluUseAr": safe_str(item.get("excluUseAr")),  # 전용면적 (22자)
+                "dealYear": safe_int(item.get("dealYear")),  # 계약년도 (4자)
+                "dealMonth": safe_int(item.get("dealMonth")),  # 계약월 (2자)
+                "dealDay": safe_int(item.get("dealDay")),  # 계약일 (2자)
+                "deposit": safe_int(item.get("deposit")),  # 보증금액(만원) (40자)
+                "monthlyRent": safe_int(item.get("monthlyRent")),  # 월세금액(만원) (40자)
+                "floor": safe_str(item.get("floor")),  # 층 (10자)
+                "buildYear": safe_int(item.get("buildYear")),  # 건축년도 (4자)
+                "contractTerm": safe_str(item.get("contractTerm")),  # 계약기간 (12자)
+                "contractType": safe_str(item.get("contractType")),  # 계약구분 (4자)
+                "useRRRight": safe_str(item.get("useRRRight")),  # 갱신요구권사용 (4자)
+                "preDeposit": safe_int(item.get("preDeposit")),  # 종전계약보증금 (40자)
+                "preMonthlyRent": safe_int(item.get("preMonthlyRent")),  # 종전계약월세 (40자)
             }
 
             normalized.append(normalized_item)

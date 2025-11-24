@@ -164,6 +164,9 @@ def build_llm_prompt(
     contract_deposit: Optional[int] = None,
     contract_price: Optional[int] = None,
     monthly_rent: Optional[int] = None,
+    property_value_estimate: Optional[int] = None,
+    jeonse_market_average: Optional[int] = None,
+    recent_transactions: Optional[List[Dict]] = None,
 ) -> str:
     """
     RegistryRiskFeatures → LLM용 마크다운 프롬프트
@@ -176,6 +179,9 @@ def build_llm_prompt(
         contract_deposit: 계약 보증금 (만원)
         contract_price: 계약 금액 (만원, 매매용)
         monthly_rent: 월세 (만원)
+        property_value_estimate: 매매 실거래가 평균 (만원)
+        jeonse_market_average: 전세 실거래가 평균 (만원)
+        recent_transactions: 최근 거래 내역 (선택)
 
     Returns:
         LLM용 마크다운 프롬프트
@@ -202,6 +208,25 @@ def build_llm_prompt(
             lines.append(f"- **월세**: {monthly_rent:,}만원")
 
     lines.append("")
+
+    # 시장 실거래가 정보 (새로 추가)
+    if contract_type == "매매" and property_value_estimate:
+        lines.append("## 💰 시장 실거래가 정보\n")
+        lines.append(f"- **평균 매매가**: {property_value_estimate:,}만원 (최근 3개월 기준, 최대/최소 제외)")
+        if recent_transactions:
+            lines.append(f"- **분석 건수**: {len(recent_transactions)}건")
+        lines.append("")
+
+    if contract_type in ["전세", "월세"]:
+        lines.append("## 💰 시장 실거래가 정보\n")
+        if jeonse_market_average:
+            lines.append(f"- **전세 시장 평균**: {jeonse_market_average:,}만원 (최근 6개월 기준, 100% 시장가)")
+        if property_value_estimate:
+            lines.append(f"- **매매 평균**: {property_value_estimate:,}만원 (최근 3개월 기준)")
+            if jeonse_market_average and property_value_estimate:
+                market_jeonse_ratio = (jeonse_market_average / property_value_estimate) * 100
+                lines.append(f"- **시장 전세가율**: {market_jeonse_ratio:.1f}% (시장 전체 평균)")
+        lines.append("")
 
     # 소유권 정보
     lines.append("## 👤 소유권 정보\n")

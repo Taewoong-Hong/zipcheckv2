@@ -217,6 +217,14 @@ export default function AddressSearchSelector({
       return; // Fallback 모드면 조회 안 함
     }
 
+    // "'동'없음" 선택 시: 하드코딩 층 목록 제공
+    if (dongNm === "'동'없음") {
+      const floors = Array.from({ length: 50 }, (_, i) => `${i + 1}층`);
+      setFloorOptions(floors);
+      console.log('✅ "동 없음" 선택 - 기본 층 목록 제공 (1~50층)');
+      return;
+    }
+
     // JUSO API: 층/호 목록 조회
     try {
       const params = new URLSearchParams({
@@ -260,8 +268,8 @@ export default function AddressSearchSelector({
   // 확인 버튼 핸들러
   const handleConfirm = () => {
     if (selectedAddress) {
-      // 프로덕션에서만 층 필수 검증
-      if (isProduction && !selectedFloor) {
+      // 층 필수 검증 (단, 층 옵션이 있는 경우에만)
+      if (isProduction && floorOptions.length > 0 && !selectedFloor) {
         setErrorMessage("층을 선택해주세요.");
         return;
       }
@@ -461,7 +469,7 @@ export default function AddressSearchSelector({
         )}
         <button
           onClick={handleConfirm}
-          disabled={!selectedAddress || (isProduction && !selectedFloor)}
+          disabled={!selectedAddress || (isProduction && floorOptions.length > 0 && !selectedFloor)}
           className="px-6 py-2 bg-brand-primary text-white rounded-lg hover:bg-brand-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           이 주소로 계속하기

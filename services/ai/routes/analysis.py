@@ -515,7 +515,7 @@ async def stream_analysis(
             }).eq("id", case_id).execute()
 
             # ✅ 검증 단계 추가 (SSE_REPORT_DEBUG.md 방안 1)
-            # 8-1: v2_reports 재확인 (Supabase 리플리케이션 지연 감지)
+            # 8-1: v2_reports 재확인 (Supabase 리플리케이션 지연 ��지)
             verify_report = supabase.table("v2_reports") \
                 .select("id") \
                 .eq("id", report_id) \
@@ -891,6 +891,51 @@ async def execute_analysis_pipeline(case_id: str):
                 logger.info(f"개인정보 마스킹 완료: 소유자={registry_doc_masked['owner']['name'] if registry_doc_masked.get('owner') else None}")
 
         # 3️⃣ 공공 데이터 수집 (실거래가로 property_value 추정)
+
+        # 헬퍼 함수: 이전 월 계산 (YYYYMM 형식)
+        def get_previous_month(year: int, month: int, months_back: int = 1) -> str:
+            """
+            현재 년월로부터 N개월 이전 월 계산
+
+            Args:
+                year: 시작 년도
+                month: 시작 월
+                months_back: 이전 개월 수 (기본값: 1)
+
+            Returns:
+                YYYYMM 형식 문자열
+            """
+            from datetime import datetime, timedelta
+            from dateutil.relativedelta import relativedelta
+
+            current_date = datetime(year, month, 1)
+            target_date = current_date - relativedelta(months=months_back)
+            return f"{target_date.year}{target_date.month:02d}"
+
+        # 헬퍼 함수: 최댓값/최솟값 제외 평균 계산
+        def calculate_average_exclude_outliers(amounts: list[int]) -> Optional[int]:
+            """
+            금액 리스트에서 최댓값/최솟값을 제외한 평균 계산
+
+            Args:
+                amounts: 금액 리스트 (만원 단위)
+
+            Returns:
+                평균값 (만원 단위) 또는 None (데이터 부족 시)
+            """
+            if len(amounts) <= 2:
+                # 데이터가 2개 이하면 단순 평균
+                return sum(amounts) // len(amounts) if amounts else None
+
+            # 최댓값/최솟값 제외
+            sorted_amounts = sorted(amounts)
+            filtered_amounts = sorted_amounts[1:-1]  # 첫 번째(최소)와 마지막(최대) 제외
+
+            if not filtered_amounts:
+                return None
+
+            return sum(filtered_amounts) // len(filtered_amounts)
+
         async with httpx.AsyncClient() as client:
             # 법정동 코드 조회
             legal_dong_client = LegalDongCodeAPIClient(
@@ -907,25 +952,114 @@ async def execute_analysis_pipeline(case_id: str):
                 logger.info(f"법정동코드: {lawd_cd}")
 
             # 실거래가 조회
-            property_value_estimate = None
-            if lawd_cd:
-                apt_trade_client = AptTradeAPIClient(
-                    api_key=settings.public_data_api_key,
-                    client=client
-                )
-                now = datetime.now()
-                trade_result = await apt_trade_client.get_apt_trades(
-                    lawd_cd=lawd_cd,
-                    deal_ymd=f"{now.year}{now.month:02d}"
-                )
+            property_value_estimate = None  # 매매 실거래가 기반 (3개월, 최대/최소 제외, 70% 낙찰가율)
+            jeonse_market_average = None  # 전세 실거래가 기반 (6개월, 100% 시장가)
+            recent_transactions = []
 
-                # 실거래가 평균 계산
-                if trade_result['body']['items']:
-                    amounts = [item['dealAmount'] for item in trade_result['body']['items']
-                              if item['dealAmount']]
-                    if amounts:
-                        property_value_estimate = sum(amounts) // len(amounts)
-                        logger.info(f"실거래가 평균: {property_value_estimate}만원")
+            if lawd_cd:
+                now = datetime.now()
+                contract_type = case.get('contract_type', '전세')
+
+                # ============================
+                # 전세/월세 계약: 듀얼 API 호출
+                # ============================
+                if contract_type in ["전세", "월세"]:
+                    logger.info(f"[듀얼 API] {contract_type} 계약 - 전세 실거래가(6개월) + 매매 실거래가(3개월) 조회")
+
+                    # (1) 전세 실거래가 조회 (6개월, 100%)
+                    from core.public_data_api import AptRentAPIClient
+
+                    apt_rent_client = AptRentAPIClient(
+                        api_key=settings.public_data_api_key,
+                        client=client
+                    )
+
+                    jeonse_amounts = []
+                    for months_back in range(6):  # 최근 6개월
+                        deal_ymd = get_previous_month(now.year, now.month, months_back)
+
+                        try:
+                            rent_result = await apt_rent_client.get_apt_rent_transactions(
+                                lawd_cd=lawd_cd,
+                                deal_ymd=deal_ymd
+                            )
+
+                            if rent_result['body']['items']:
+                                for item in rent_result['body']['items']:
+                                    # 전세만 필터링 (월세 제외)
+                                    if item.get('deposit') and not item.get('monthlyRent'):
+                                        jeonse_amounts.append(item['deposit'])
+                        except Exception as e:
+                            logger.warning(f"전세 실거래가 조회 실패 ({deal_ymd}): {e}")
+                            continue
+
+                    # 전세 시장 평균 계산 (단순 평균)
+                    if jeonse_amounts:
+                        jeonse_market_average = sum(jeonse_amounts) // len(jeonse_amounts)
+                        logger.info(f"✅ 전세 실거래가 평균 (6개월): {jeonse_market_average:,}만원 ({len(jeonse_amounts)}건 분석)")
+                    else:
+                        logger.warning("⚠️ 전세 실거래가 데이터 없음 (6개월)")
+
+                    # (2) 매매 실거래가 조회 (3개월, 최대/최소 제외)
+                    apt_trade_client = AptTradeAPIClient(
+                        api_key=settings.public_data_api_key,
+                        client=client
+                    )
+
+                    sale_amounts = []
+                    for months_back in range(3):  # 최근 3개월
+                        deal_ymd = get_previous_month(now.year, now.month, months_back)
+
+                        try:
+                            trade_result = await apt_trade_client.get_apt_trades(
+                                lawd_cd=lawd_cd,
+                                deal_ymd=deal_ymd
+                            )
+
+                            if trade_result['body']['items']:
+                                recent_transactions.extend(trade_result['body']['items'])
+                                for item in trade_result['body']['items']:
+                                    if item.get('dealAmount'):
+                                        sale_amounts.append(item['dealAmount'])
+                        except Exception as e:
+                            logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+                            continue
+
+                    # 매매 평균 계산 (최대/최소 제외)
+                    if sale_amounts:
+                        filtered_average = calculate_average_exclude_outliers(sale_amounts)
+                        if filtered_average:
+                            property_value_estimate = filtered_average
+                            logger.info(f"✅ 매매 실거래가 평균 (3개월, 최대/최소 제외): {property_value_estimate:,}만원 ({len(sale_amounts)}건 중 {len(sale_amounts)-2}건 분석)")
+                        else:
+                            logger.warning("⚠️ 매매 실거래가 필터링 후 데이터 부족")
+                    else:
+                        logger.warning("⚠️ 매매 실거래가 데이터 없음 (3개월)")
+
+                # ============================
+                # 매매 계약: 매매 실거래가만 조회 (현재 월)
+                # ============================
+                else:
+                    logger.info(f"[단일 API] 매매 계약 - 매매 실거래가(현재 월) 조회")
+
+                    deal_ymd = f"{now.year}{now.month:02d}"
+
+                    apt_trade_client = AptTradeAPIClient(
+                        api_key=settings.public_data_api_key,
+                        client=client
+                    )
+                    trade_result = await apt_trade_client.get_apt_trades(
+                        lawd_cd=lawd_cd,
+                        deal_ymd=deal_ymd
+                    )
+
+                    if trade_result['body']['items']:
+                        recent_transactions = trade_result['body']['items']
+                        amounts = [item['dealAmount'] for item in recent_transactions
+                                  if item['dealAmount']]
+                        if amounts:
+                            property_value_estimate = sum(amounts) // len(amounts)
+                            logger.info(f"✅ 매매 실거래가 평균 (현재 월): {property_value_estimate:,}만원 ({len(amounts)}건 분석)")
 
         # 4️⃣ 리스크 엔진 실행 (계약 타입에 따라 분기)
         contract_type = case.get('contract_type', '전세')
@@ -1044,12 +1178,20 @@ async def execute_analysis_pipeline(case_id: str):
         # Step 2: RegistryRiskFeatures → LLM 프롬프트 (마크다운)
         llm_prompt = None
         if risk_features:
+            # 시장 데이터 변수 확인 로깅
+            logger.info(f"[시장데이터 확인] property_value_estimate={property_value_estimate}, "
+                       f"jeonse_market_average={jeonse_market_average}, "
+                       f"recent_transactions_count={len(recent_transactions)}")
+
             llm_prompt = build_llm_prompt(
                 risk_features=risk_features,
                 contract_type=contract_type,
                 contract_deposit=case.get('metadata', {}).get('deposit'),
                 contract_price=case.get('metadata', {}).get('price'),
-                monthly_rent=case.get('metadata', {}).get('monthly_rent')
+                monthly_rent=case.get('metadata', {}).get('monthly_rent'),
+                property_value_estimate=property_value_estimate,
+                jeonse_market_average=jeonse_market_average,
+                recent_transactions=recent_transactions,
             )
             logger.info(f"LLM 프롬프트 생성 완료: {len(llm_prompt)}자")
         else:
@@ -1088,21 +1230,33 @@ async def execute_analysis_pipeline(case_id: str):
             raise HTTPException(503, "분석이 지연됩니다. 잠시 후 다시 시도해주세요.")
 
         # 6️⃣ 리포트 저장 (v2_reports 테이블)
+        report_data_payload = {
+            "summary": final_answer,
+            "risk": risk_result.risk_score.dict() if risk_result else {},
+            "registry": registry_doc_masked,
+            "market": market_data.dict() if (contract_type == '매매' and market_data) else None
+        }
+
+        # 전세/월세 계약: 전세 시장가 정보 추가
+        if contract_type in ["전세", "월세"] and jeonse_market_average:
+            report_data_payload["jeonse_market"] = {
+                "average_deposit": jeonse_market_average,
+                "period": "6개월",
+                "description": "최근 6개월 전세 실거래가 평균 (100% 시장가)"
+            }
+
         report_response = supabase.table("v2_reports").insert({
             "case_id": case_id,
             "user_id": case['user_id'],
             "content": final_answer,
             "risk_score": risk_result.risk_score.dict() if risk_result else {},
             "registry_data": registry_doc_masked,  # 마스킹된 등기부 정보 저장
-            "report_data": {
-                "summary": final_answer,
-                "risk": risk_result.risk_score.dict() if risk_result else {},
-                "registry": registry_doc_masked,
-                "market": market_data.dict() if (contract_type == '매매' and market_data) else None
-            },
+            "report_data": report_data_payload,
             "metadata": {
                 "model": "gpt-4o-mini",
                 "confidence": 0.85,
+                "jeonse_market_average": jeonse_market_average if contract_type in ["전세", "월세"] else None,
+                "property_value_estimate": property_value_estimate,
             }
         }).execute()
 
