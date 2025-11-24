@@ -38,16 +38,6 @@ interface MessageProps {
 }
 
 export default function Message({ message, isTyping, onContractTypeSelect, onPriceSubmit, onRegistryChoiceSelect, onAddressSelect }: MessageProps) {
-  // 🔍 DEBUG: 메시지 렌더링 시작
-  console.log('🔍 [DEBUG Message.tsx] Message 컴포넌트 렌더링:', {
-    messageId: message.id,
-    role: message.role,
-    componentType: message.componentType,
-    hasContent: !!message.content,
-    contentPreview: message.content?.substring(0, 100),
-    isStreaming: message.isStreaming,
-    isError: message.isError,
-  });
   const [displayedContent, setDisplayedContent] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
@@ -116,12 +106,6 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
       return null;
     }
 
-    console.log('🔍 [DEBUG Message.tsx] renderSpecialComponent 호출:', {
-      componentType: message.componentType,
-      messageId: message.id,
-      hasComponentData: !!message.componentData,
-    });
-
     switch (message.componentType) {
       case 'contract_selector':
         return (
@@ -170,13 +154,6 @@ export default function Message({ message, isTyping, onContractTypeSelect, onPri
         );
 
       case 'report':
-        console.log('🔍 [DEBUG Message.tsx] report 케이스 진입:', {
-          address: message.componentData?.address,
-          contractType: message.componentData?.contract_type,
-          hasRiskScore: !!message.componentData?.risk_score,
-          contentLength: message.content?.length,
-        });
-
         return (
           <div className="mt-4">
             <div className="bg-white rounded-lg shadow-sm border border-neutral-200 overflow-hidden">
