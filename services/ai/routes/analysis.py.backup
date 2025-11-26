@@ -569,13 +569,8 @@ async def stream_analysis(
                 yield f"data: {json.dumps({'step': 5, 'message': risk_message, 'progress': 0.75, 'risk_score': risk_result.risk_score.dict()}, ensure_ascii=False)}\n\n"
                 await asyncio.sleep(1.0)
 
-            # 6단계: 듀얼 LLM 순차 스트리밍 (GPT-4o-mini → Claude Sonnet 검증)
-            # merge_dual_streams()가 단계별 메시지를 자동으로 전송:
-            #   1) GPT-4o-mini 초안 생성 (📝 초안 생성 중... → ✅ 초안 완료)
-            #   2) 3초 대기 후 Claude Sonnet 검증 시작 (🔍 검증 시작... → 🔍 검증 중... → ✅ 검증 완료)
-            # merge_dual_streams()가 단계별 메시지를 자동으로 전송:
-            #   1) GPT-4o-mini 초안 생성 (📝 초안 생성 중... → ✅ 초안 완료)
-            #   2) 3초 대기 후 Claude Sonnet 검증 시작 (🔍 검증 시작... → 🔍 검증 중... → ✅ 검증 완료)
+            # 6단계: 듀얼 LLM 병렬 스트리밍 (GPT-4o-mini + Claude Sonnet)
+            yield f"data: {json.dumps({'step': 6, 'message': '🤖 듀얼 AI 분석 시작 (GPT-4o-mini + Claude Sonnet)...', 'progress': 0.75}, ensure_ascii=False)}\n\n"
 
             from core.report_generator import build_risk_features_from_registry, build_llm_prompt
             from langchain_openai import ChatOpenAI

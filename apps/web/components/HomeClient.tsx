@@ -63,17 +63,17 @@ export default function HomeClient() {
   // Hydration 전에는 로딩 표시 (SSR/CSR 불일치 방지)
   if (!isHydrated || isLoading) {
     return (
-      <div className="flex h-screen bg-neutral-50 items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" />
-          <p className="mt-4 text-sm text-gray-600">로딩 중...</p>
+      <div className="flex h-screen bg-neutral-50 items-center justify-center" suppressHydrationWarning>
+        <div className="text-center" suppressHydrationWarning>
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]" suppressHydrationWarning />
+          <p className="mt-4 text-sm text-gray-600" suppressHydrationWarning>로딩 중...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-neutral-50">
+    <div className="flex h-screen bg-neutral-50" suppressHydrationWarning>
       {/* 로그인 상태일 때만 사이드바 표시 */}
       {isLoggedIn && (
         <Sidebar isExpanded={isSidebarExpanded} setIsExpanded={setIsSidebarExpanded} />
@@ -81,7 +81,7 @@ export default function HomeClient() {
 
       {/* 비로그인 상태일 때 헤더 표시 */}
       {!isLoggedIn && (
-        <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-neutral-200">
+        <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-neutral-200" suppressHydrationWarning>
           <div className="flex items-center justify-between h-14 md:h-16 px-4 md:px-6">
             {/* 좌측 로고 */}
             <div className="flex items-center gap-1.5 md:gap-2">

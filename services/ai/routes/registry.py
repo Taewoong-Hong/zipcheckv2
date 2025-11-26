@@ -24,6 +24,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/registry", tags=["registry"])
 
 
+def get_db_environment() -> str:
+    """
+    Normalize settings.app_env to database environment value.
+    
+    Maps:
+    - "development" -> "dev"
+    - "staging" -> "dev"
+    - "production" -> "prod"
+    """
+    return "dev" if settings.app_env in ["development", "staging"] else "prod"
+
+
+
 # ============================================
 # Request/Response Models
 # ============================================
@@ -222,6 +235,7 @@ async def upload_registry(
                 artifact_res = supabase.table("v2_artifacts").insert({
                     "case_id": case_id,
                     "artifact_type": "registry_pdf",
+            "environment": get_db_environment(),
                     "file_path": f"{bucket}/{storage_path}",
                     "file_name": file.filename,
                     "file_size": file_size,

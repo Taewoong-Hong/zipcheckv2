@@ -172,6 +172,30 @@ def verify_token_with_fallback(token: str) -> Dict[str, Any]:
     2) Supabase Auth API(/auth/v1/user) 호출로 검증 (apikey 필요)
     3) 실패 시, Edge Function이 서명한 HS256 토큰(issuer=edge:naver) 로컬 검증
     """
+    # Service role key detection and bypass for development/testing
+    if token.startswith("sb_secret_"):
+        logger.info("Service role key detected in authentication")
+
+        if settings.app_env not in ["development", "staging"]:
+            logger.error(f"Service role key authentication attempted in {settings.app_env} environment")
+            raise HTTPException(
+                status_code=401,
+                detail="Service role key authentication not allowed in production"
+            )
+
+        logger.info(f"Bypassing JWT verification for service role key in {settings.app_env} environment")
+
+        synthetic_payload = {
+            "sub": "00000000-0000-0000-0000-000000000000",
+            "email": "test@development.local",
+            "role": "authenticated",
+            "aud": "authenticated",
+            "app_metadata": {"provider": "development"},
+        }
+
+        logger.info(f"Service role key authentication successful for test user: {synthetic_payload['sub']}")
+        return synthetic_payload
+
     # 토큰 디버깅 정보
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"Token received (length only): {len(token)}")

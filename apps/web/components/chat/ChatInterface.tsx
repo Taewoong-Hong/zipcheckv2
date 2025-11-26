@@ -75,65 +75,52 @@ export default function ChatInterface({
     }
   }, [conversationId]);
 
-  // Initialize conversation on first load (only if no existing conversationId)
+  // Load messages when conversationId changes
   useEffect(() => {
-    const initConversation = async () => {
-      // Try to obtain a valid access token from props or Supabase (fallback)
-      let accessToken: string | undefined = session?.access_token;
-      if (!accessToken) {
-        try {
-          const sb = getBrowserSupabase();
-          const { data } = await sb.auth.getSession();
-          accessToken = data.session?.access_token;
-        } catch (_) {}
-      }
-
-      if (!accessToken) {
-        console.log('[ChatInterface] Skipping conversation init: no session');
+    const loadMessages = async () => {
+      if (!conversationId || !session?.access_token) {
         return;
       }
 
-      if (conversationId) {
-        console.log('[ChatInterface] Skipping conversation init: already have conversationId:', conversationId);
-        return;
-      }
-
-      // Prevent duplicate initialization races
-      if (initializingRef.current) {
-        console.log('[ChatInterface] Already initializing conversation, skipping duplicate init');
-        return;
-      }
-
-      initializingRef.current = true;
+      console.log('[ChatInterface] Loading messages for conversation:', conversationId);
 
       try {
-        console.log('[ChatInterface] Initializing new conversation ...');
-        const response = await fetch('/api/chat/init', {
-          method: 'POST',
+        const response = await fetch(`/api/conversations/${conversationId}/messages`, {
+          method: 'GET',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + accessToken,
+            'Authorization': `Bearer ${session.access_token}`,
           },
           credentials: 'include',
-          body: JSON.stringify({ session: { access_token: accessToken } }),
         });
 
         if (response.ok) {
           const data = await response.json();
-          setConversationId(data.conversation_id);
-          console.log('[ChatInterface] New conversation created:', data.conversation_id);
+
+          // Convert DB messages to MessageType format
+          const loadedMessages: MessageType[] = data.messages.map((msg: any) => ({
+            id: msg.id,
+            role: msg.role as 'user' | 'assistant',
+            content: msg.content,
+            timestamp: new Date(msg.created_at),
+            componentType: msg.meta?.componentType,
+          }));
+
+          setMessages(loadedMessages);
+          console.log('[ChatInterface] Messages loaded:', loadedMessages.length);
         } else {
-          console.error('[ChatInterface] Failed to create conversation:', response.status, await response.text());
+          console.error('[ChatInterface] Failed to load messages:', response.status);
         }
       } catch (error) {
-        console.error('[ChatInterface] Failed to initialize conversation:', error);
-      } finally {
-        initializingRef.current = false;
+        console.error('[ChatInterface] Error loading messages:', error);
       }
     };
 
-    initConversation();
-  }, [session, conversationId]); // 세션 변경 모니터링
+    loadMessages();
+  }, [conversationId, session?.access_token]);
+
+  // Initialize conversation on first load (only if no existing conversationId)
+  // ❌ 자동 초기화 제거: 채팅형 서비스는 사용자가 첫 메시지를 보낼 때 대화를 시작합니다.
+  // 환영 메시지는 getOrCreateConversationId() 함수 내부에서 로드됩니다.
 
   // Abort any in-flight init on unmount
   useEffect(() => {
@@ -212,6 +199,33 @@ export default function ChatInterface({
       // 3) 상태에 반영
       setConversationId(id);
       console.log('[getOrCreateConversationId] Conversation initialized:', id);
+
+      // 4) 환영 메시지 로드 (백엔드에서 이미 생성됨)
+      try {
+        const messagesResponse = await fetch(`/api/conversations/${id}/messages`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${latestToken}`,
+          },
+          credentials: 'include',
+        });
+
+        if (messagesResponse.ok) {
+          const messagesData = await messagesResponse.json();
+          const welcomeMessages: MessageType[] = messagesData.messages.map((msg: any) => ({
+            id: msg.id,
+            role: msg.role as 'user' | 'assistant',
+            content: msg.content,
+            timestamp: new Date(msg.created_at),
+            componentType: msg.meta?.componentType,
+          }));
+          setMessages(welcomeMessages);
+          console.log('[getOrCreateConversationId] Welcome messages loaded:', welcomeMessages.length);
+        }
+      } catch (error) {
+        console.error('[getOrCreateConversationId] Failed to load welcome messages:', error);
+      }
+
       return id;
     })();
 

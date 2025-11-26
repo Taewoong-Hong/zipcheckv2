@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
+import { createSSEStream, isSSEDone, isSSEError, SSEEvent } from '@/types/sse-events';
 
 interface ReportData {
   content: string;
@@ -86,8 +87,6 @@ export default function ReportPage() {
     if (!isAnalyzing) return;
 
     let eventSource: EventSource | null = null;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 3;
 
     const connectSSE = async () => {
       try {
@@ -98,88 +97,76 @@ export default function ReportPage() {
         const token = session?.access_token;
 
         if (!token) {
-          console.error('SSE 연결 실패: 인증 토큰 없음');
+          console.error('[SSE] 인증 토큰 없음');
           setError('인증이 필요합니다. 다시 로그인해주세요.');
           return;
         }
 
-        // EventSource 생성 (토큰을 쿼리 파라미터로 전달)
-        eventSource = new EventSource(`/api/analysis/stream?caseId=${caseId}&token=${encodeURIComponent(token)}`);
+        // Type-safe SSE stream with automatic retry and error handling
+        eventSource = createSSEStream(
+          `/api/analysis/stream?caseId=${caseId}&token=${encodeURIComponent(token)}`,
+          {
+            onMessage: (event: SSEEvent) => {
+              // Error handling with type guard
+              if (isSSEError(event)) {
+                console.error('[SSE Error]:', event.error);
+                setError(event.error);
+                return;
+              }
 
-        eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            console.log('SSE 메시지:', data);
+              // Completion handling with type guard
+              if (isSSEDone(event)) {
+                console.log('✅ [SSE] 분석 완료! 리포트 로딩 시작...');
 
-            // 진행 상태 업데이트
-            setStreamStep(data.step || 0);
-            setStreamProgress(data.progress || 0);
-            setStreamMessage(data.message || '처리 중...');
+                // 재시도 로직 (Supabase 리플리케이션 지연 고려)
+                const retryLoadReport = async (attempt: number = 1, maxAttempts: number = 3) => {
+                  console.log(`📊 [리포트 로딩] 시도 ${attempt}/${maxAttempts}...`);
 
-            // 완료 시 리포트 로드 (재시도 로직 강화 - SSE_REPORT_DEBUG.md 방안 2)
-            if (data.done) {
-              console.log('✅ [SSE] 분석 완료! 리포트 로딩 시작...');
-              eventSource?.close();
+                  try {
+                    await loadReport();
+                    console.log('✅ [리포트 로딩] 성공!');
+                  } catch (error: any) {
+                    const status = error?.status || error?.response?.status;
+                    console.error(`❌ [리포트 로딩 실패] 시도 ${attempt}, 상태코드=${status}:`, error);
 
-              // 재시도 로직
-              const retryLoadReport = async (attempt: number = 1, maxAttempts: number = 3) => {
-                console.log(`📊 [리포트 로딩] 시도 ${attempt}/${maxAttempts}...`);
-
-                try {
-                  await loadReport();
-                  console.log('✅ [리포트 로딩] 성공!');
-                } catch (error: any) {
-                  const status = error?.status || error?.response?.status;
-                  console.error(`❌ [리포트 로딩 실패] 시도 ${attempt}, 상태코드=${status}:`, error);
-
-                  // 404 또는 400 에러이고 재시도 가능한 경우
-                  if (attempt < maxAttempts && (status === 404 || status === 400)) {
-                    console.log(`⏳ [재시도 대기] ${2000}ms 후 재시도...`);
-                    setTimeout(() => {
-                      retryLoadReport(attempt + 1, maxAttempts);
-                    }, 2000); // 2초 간격
-                  } else {
-                    // 최종 실패
-                    console.error('❌ [리포트 로딩 최종 실패]:', error);
-                    setError('리포트를 불러올 수 없습니다. 페이지를 새로고침해주세요.');
+                    // 404 또는 400 에러이고 재시도 가능한 경우
+                    if (attempt < maxAttempts && (status === 404 || status === 400)) {
+                      console.log(`⏳ [재시도 대기] 2초 후 재시도...`);
+                      setTimeout(() => retryLoadReport(attempt + 1, maxAttempts), 2000);
+                    } else {
+                      // 최종 실패
+                      console.error('❌ [리포트 로딩 최종 실패]:', error);
+                      setError('리포트를 불러올 수 없습니다. 페이지를 새로고침해주세요.');
+                    }
                   }
-                }
-              };
+                };
 
-              // 첫 시도는 2초 후 (Supabase 리플리케이션 지연 고려)
-              setTimeout(() => {
-                retryLoadReport();
-              }, 2000);
-            }
-          } catch (err) {
-            console.error('SSE 메시지 파싱 실패:', err);
+                // 첫 시도는 2초 후 (Supabase 리플리케이션 지연 고려)
+                setTimeout(() => retryLoadReport(), 2000);
+                return;
+              }
+
+              // Progress updates (type-safe via BaseSSEEvent)
+              setStreamStep(event.step);
+              setStreamProgress(event.progress);
+              setStreamMessage(event.message);
+
+              // Optional: Phase-specific logging
+              if (event.phase) {
+                console.log(`[SSE Phase: ${event.phase}] ${event.message}`);
+              }
+            },
+            onError: (error) => {
+              console.error('[SSE] 연결 에러:', error);
+              setError('실시간 연결에 실패했습니다. 페이지를 새로고침해주세요.');
+            },
+            maxRetries: 3,
+            retryInterval: 2000
           }
-        };
-
-        eventSource.onerror = (err) => {
-          console.error('SSE 연결 오류:', err);
-          eventSource?.close();
-
-          // 재연결 시도
-          if (reconnectAttempts < maxReconnectAttempts) {
-            reconnectAttempts++;
-            console.log(`SSE 재연결 시도 ${reconnectAttempts}/${maxReconnectAttempts}...`);
-            setTimeout(() => {
-              connectSSE();
-            }, 2000 * reconnectAttempts); // 2초, 4초, 6초 대기
-          } else {
-            console.error('SSE 재연결 실패. 폴링으로 전환합니다.');
-            setError('실시간 연결에 실패했습니다. 페이지를 새로고침해주세요.');
-          }
-        };
-
-        eventSource.onopen = () => {
-          console.log('SSE 연결 성공');
-          reconnectAttempts = 0; // 연결 성공 시 재시도 카운터 초기화
-        };
+        );
 
       } catch (err) {
-        console.error('EventSource 생성 실패:', err);
+        console.error('[SSE] 초기화 실패:', err);
         setError('실시간 연결 생성에 실패했습니다.');
       }
     };
@@ -190,7 +177,7 @@ export default function ReportPage() {
     // 클린업 함수
     return () => {
       if (eventSource) {
-        console.log('SSE 연결 종료');
+        console.log('[SSE] 연결 종료');
         eventSource.close();
       }
     };

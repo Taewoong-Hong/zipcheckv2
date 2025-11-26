@@ -9,22 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from core.supabase_client import get_supabase_client
 from core.auth import get_current_user
-from core.settings import settings
 
 router = APIRouter(prefix="/case", tags=["case"])
-
-
-def get_db_environment() -> str:
-    """
-    Normalize settings.app_env to database environment value.
-    
-    Maps:
-    - "development" -> "dev"
-    - "staging" -> "dev"
-    - "production" -> "prod"
-    """
-    return "dev" if settings.app_env in ["development", "staging"] else "prod"
-
 
 
 # ===========================
@@ -52,7 +38,6 @@ class CaseResponse(BaseModel):
     property_address: str
     contract_type: str
     current_state: str
-    environment: str
     metadata: Optional[dict]
     created_at: str
     updated_at: str
@@ -81,7 +66,6 @@ async def create_case(
         "property_address": request.property_address,
         "contract_type": request.contract_type,
         "current_state": "init",  # 초기 상태 (스키마와 일치)
-        "environment": get_db_environment(),
         "metadata": request.metadata or {},
     }).execute()
 
@@ -201,7 +185,6 @@ async def list_cases(
     response = supabase.table("v2_cases") \
         .select("*") \
         .eq("user_id", user["id"]) \
-        .eq("environment", get_db_environment()) \
         .order("created_at", desc=True) \
         .range(offset, offset + limit - 1) \
         .execute()

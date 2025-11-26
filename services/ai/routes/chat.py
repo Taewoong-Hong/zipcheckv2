@@ -15,6 +15,7 @@ from datetime import datetime
 
 from core.auth import get_current_user
 from core.supabase_client import get_supabase_client
+from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -602,6 +603,258 @@ async def delete_conversation(conversation_id: str, user: dict = Depends(get_cur
 
 
 # ============== SSE 스트리밍 엔드포인트 ==============
+
+class StreamChatRequest(BaseModel):
+    """채팅 스트리밍 요청"""
+    conversation_id: str = Field(..., description="대화 ID")
+    content: str = Field(..., min_length=1, max_length=5000, description="메시지 내용")
+    client_message_id: Optional[str] = Field(None, description="클라이언트 생성 메시지 ID (idempotency key)")
+
+
+@router.post("/stream")
+async def stream_chat(request: StreamChatRequest, user: dict = Depends(get_current_user)):
+    """
+    채팅 메시지 스트리밍 (듀얼 LLM)
+
+    - GPT-4o-mini (초안) + Claude Sonnet (검증) 병렬 스트리밍
+    - /analyze/stream과 동일한 SSE 이벤트 포맷
+    - merge_dual_streams() 헬퍼 함수 재사용
+    """
+    user_id = user["sub"]
+    logger.info(f"채팅 스트리밍 시작: user_id={user_id}, conversation_id={request.conversation_id}")
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """SSE 이벤트 생성기"""
+        try:
+            supabase = get_supabase_client(service_role=True)
+
+            # 1. 대화 소유권 확인
+            conv_check = supabase.table("conversations") \
+                .select("id, property_address, contract_type") \
+                .eq("id", request.conversation_id) \
+                .eq("user_id", user_id) \
+                .execute()
+
+            if not conv_check.data:
+                yield f"data: {json.dumps({'error': '대화를 찾을 수 없거나 권한이 없습니다.'}, ensure_ascii=False)}\n\n"
+                return
+
+            conversation = conv_check.data[0]
+
+            # ✅ Feature toggle: Check if dual LLM streaming is enabled
+            if not settings.dual_llm_streaming_enabled:
+                # Single LLM fallback mode
+                yield f"data: {json.dumps({'step': 1, 'message': '단일 모드로 답변 생성 중...', 'progress': 0.5}, ensure_ascii=False)}\n\n"
+                logger.info("Dual LLM streaming disabled - using single LLM mode")
+                return
+
+            # 2. 사용자 메시지 저장
+            user_msg_result = supabase.table("messages").insert({
+                "conversation_id": request.conversation_id,
+                "role": "user",
+                "content": request.content,
+                "meta": {
+                    "topic": "contract_analysis",
+                    "extension": "chat",
+                    "client_message_id": request.client_message_id
+                }
+            }).execute()
+
+            if not user_msg_result.data:
+                yield f"data: {json.dumps({'error': '메시지 저장 실패'}, ensure_ascii=False)}\n\n"
+                return
+
+            user_message_id = user_msg_result.data[0]["id"]
+
+            # 3. 대화 히스토리 조회 (최근 10개 메시지)
+            history_result = supabase.table("messages") \
+                .select("role, content") \
+                .eq("conversation_id", request.conversation_id) \
+                .order("created_at", desc=True) \
+                .limit(10) \
+                .execute()
+
+            history = history_result.data or []
+            history.reverse()  # 시간순 정렬
+
+            # 4. 컨텍스트 구성
+            context_parts = []
+            if conversation.get("property_address"):
+                context_parts.append(f"**주소**: {conversation['property_address']}")
+            if conversation.get("contract_type"):
+                context_parts.append(f"**계약 유형**: {conversation['contract_type']}")
+
+            context_parts.append("\n**최근 대화**:")
+            for msg in history[-5:]:  # 최근 5개만
+                role_label = "사용자" if msg["role"] == "user" else "AI"
+                context_parts.append(f"- {role_label}: {msg['content'][:100]}")
+
+            context = "\n".join(context_parts)
+
+            # 5. 듀얼 LLM 스트리밍 준비
+            from langchain_openai import ChatOpenAI
+            from langchain_anthropic import ChatAnthropic
+            from langchain_core.messages import SystemMessage, HumanMessage
+
+            # 시스템 프롬프트
+            system_prompt = """너는 부동산 계약 리스크 점검 전문가이다.
+
+사용자 질문에 대해 다음 컨텍스트를 참고하여 답변하라:
+
+{context}
+
+요구사항:
+- 계약 리스크를 조목조목 리스트로 정리
+- 각 항목마다 '근거'와 '권장 조치' 포함
+- 법률 단정 표현은 지양하고, "참고", "검토", "전문가 상담" 등으로 권장
+- 출처 정보는 절대 노출하지 말 것
+"""
+
+            # GPT-4o-mini 초안 생성기
+            async def stream_gpt_draft():
+                """GPT-4o-mini 초안 스트리밍"""
+                llm = ChatOpenAI(model=settings.openai_analysis_model, temperature=0.3, max_tokens=2048, streaming=True)
+                messages = [
+                    SystemMessage(content=system_prompt.format(context=context)),
+                    HumanMessage(content=request.content)
+                ]
+
+                async for chunk in llm.astream(messages):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        yield chunk.content
+
+            # Claude Sonnet 검증 생성기 팩토리
+            def stream_claude_validation(draft_content: str):
+                """Claude Sonnet 검증 스트리밍 (팩토리)"""
+                async def _generator():
+                    judge_prompt = """너는 부동산 계약 리스크 점검 검증자이다.
+
+다음은 ChatGPT가 생성한 초안이다:
+
+{draft}
+
+이 초안을 다음 관점에서 검증하라:
+1. 사실 관계의 정확성
+2. 법률적 표현의 적절성
+3. 누락된 중요 리스크
+4. 권장 조치의 실효성
+
+검증 결과를 다음 형식으로 작성하라:
+
+### 검증 결과
+- 정확한 내용: ...
+- 수정 필요: ...
+- 추가 필요: ...
+
+### 최종 권장사항
+...
+"""
+                    judge_model = settings.claude_analysis_model
+                    llm = ChatAnthropic(model=judge_model, temperature=0.1, max_tokens=2048, streaming=True)
+                    messages = [
+                        SystemMessage(content=judge_prompt.format(draft=draft_content)),
+                        HumanMessage(content=request.content)
+                    ]
+
+                    try:
+                        async for chunk in llm.astream(messages):
+                            if hasattr(chunk, 'content') and chunk.content:
+                                yield chunk.content
+                    except Exception as e:
+                        # Fallback to Haiku
+                        if "NotFound" in str(e) or "not_found_error" in str(e):
+                            logger.warning(f"Claude Sonnet 실패, Haiku로 fallback: {e}")
+                            llm = ChatAnthropic(model="claude-3-5-haiku-latest", temperature=0.1, max_tokens=2048, streaming=True)
+                            async for chunk in llm.astream(messages):
+                                if hasattr(chunk, 'content') and chunk.content:
+                                    yield chunk.content
+                        else:
+                            raise
+
+                return _generator()
+
+            # 6. merge_dual_streams() 재사용
+            # Import from analysis.py
+            from routes.analysis import merge_dual_streams
+
+            draft_content = ""
+            validation_content = ""
+            last_validation_event = {}
+
+            async for event in merge_dual_streams(
+                draft_generator=stream_gpt_draft(),
+                validation_generator_factory=stream_claude_validation,
+                step_base=1.0,  # 채팅은 step 1부터 시작
+                progress_base=0.0,  # 채팅은 progress 0부터 시작
+                draft_timeout=settings.draft_timeout_sec,
+                judge_timeout=settings.judge_timeout_sec
+            ):
+                if isinstance(event, str):
+                    # SSE 이벤트 전달
+                    yield event
+                else:
+                    # 최종 결과 (draft_content, validation_content, last_validation_event)
+                    draft_content, validation_content, last_validation_event = event
+
+            # 7. AI 응답 저장
+            # 불일치 항목 추출
+            conflicts = []
+            if "수정 필요" in validation_content:
+                conflicts.append("Claude가 초안에 수정이 필요하다고 판단했습니다.")
+            if "추가 필요" in validation_content:
+                conflicts.append("Claude가 누락된 항목이 있다고 판단했습니다.")
+
+            # 최종 답변 생성
+            if len(conflicts) == 0:
+                final_answer = draft_content
+                confidence = 0.95
+            else:
+                final_answer = f"""### ChatGPT 초안
+{draft_content}
+
+### Claude 검증 의견
+{validation_content}
+
+⚠️ 두 모델 간 견해 차이가 있습니다. 최종 판단은 법무사 또는 변호사와 상담하세요.
+"""
+                confidence = 0.75
+
+            # AI 메시지 저장
+            supabase.table("messages").insert({
+                "conversation_id": request.conversation_id,
+                "role": "assistant",
+                "content": final_answer,
+                "meta": {
+                    "topic": "contract_analysis",
+                    "extension": "chat",
+                    "dual_llm": {
+                        "draft_model": "gpt-4o-mini",
+                        "validation_model": last_validation_event.get("model", "claude-3-5-sonnet-latest"),
+                        "confidence": confidence,
+                        "conflicts": conflicts
+                    }
+                }
+            }).execute()
+
+            # 8. 완료 이벤트
+            yield f"data: {json.dumps({'step': 2, 'message': '✅ 답변 완료!', 'progress': 1.0, 'done': True}, ensure_ascii=False)}\n\n"
+
+            logger.info(f"채팅 스트리밍 완료: conversation_id={request.conversation_id}")
+
+        except Exception as e:
+            logger.error(f"채팅 스트리밍 오류: {e}", exc_info=True)
+            yield f"data: {json.dumps({'error': f'답변 생성 중 오류 발생: {str(e)}'}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 
 @router.get("/stream/{message_id}")
 async def stream_message(message_id: int, user: dict = Depends(get_current_user)):

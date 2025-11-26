@@ -137,6 +137,26 @@ class Settings(BaseSettings):
         description="Vision API detail level (high for OCR, low for cost savings)"
     )
 
+    # Streaming Timeouts
+    draft_timeout_sec: int = Field(
+        default=25,
+        ge=1,
+        le=60,
+        description="GPT-4o-mini draft generation timeout (seconds)"
+    )
+    judge_timeout_sec: int = Field(
+        default=30,
+        ge=1,
+        le=60,
+        description="Claude Sonnet validation timeout (seconds)"
+    )
+
+    # Dual Streaming Control
+    dual_llm_streaming_enabled: bool = Field(
+        default=True,
+        description="Enable parallel Draft + Judge LLM streaming for /api/chat/stream"
+    )
+
     # API Configuration
     ai_allowed_origins: str = Field(
         default="*",
