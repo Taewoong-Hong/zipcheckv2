@@ -26,7 +26,7 @@ export default function DevCasesPage() {
       setError(null);
 
       // Fetch cases from Supabase (dev environment only)
-      const response = await fetch('/api/cases');
+      const response = await fetch('/api/cases?environment=dev');
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -77,10 +77,21 @@ export default function DevCasesPage() {
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">집체크 Analysis Lab</h1>
-          <div className="text-sm text-gray-500">
-            환경: <span className="font-mono font-medium">dev</span>
+          <div>
+            <h1 className="text-3xl font-bold">집체크 Analysis Lab</h1>
+            <div className="text-sm text-gray-500 mt-1">
+              환경: <span className="font-mono font-medium">dev</span>
+            </div>
           </div>
+          <Link
+            href="/dev/cases/upload"
+            className="px-6 py-3 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            케이스 업로드
+          </Link>
         </div>
 
         <div className="bg-white rounded-lg shadow">

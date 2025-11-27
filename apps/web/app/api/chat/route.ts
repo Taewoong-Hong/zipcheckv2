@@ -569,36 +569,69 @@ export async function POST(request: NextRequest) {
     console.warn('[api/chat] gating check failed (proceeding to analyze):', e);
   }
 
-  // 3. LLM 분석 - 듀얼 LLM 스트리밍 (GPT-4o-mini + Claude Sonnet)
+  // 3. LLM 분석 - GPT-4o-mini 또는 기존 시스템 선택
+  let analyzeResponse: Response;
+  const useGPTv2 = process.env.USE_GPT_V2 === 'true' || body.useGPTv2;
+
   try {
-    console.log(`[api/chat] 듀얼 LLM 스트리밍 시작: conversation_id=${currentConversationId}`);
+    if (useGPTv2) {
+      // GPT-4o-mini with Function Calling (v2) - 재시도 로직 적용
+      analyzeResponse = await fetchWithRetry(
+        `${AI_API_URL}/chat/v2/message`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            conversation_id: currentConversationId,
+            content,
+            context: {
+              property_address: body.property_address,
+              contract_type: body.contract_type,
+              case_id: body.case_id
+            },
+            // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
+            recent_context: recent_context
+          }),
+        }
+      );
+    } else {
+      // 기존 rule-based + simple LLM (v1) - 재시도 로직 적용
+      analyzeResponse = await fetchWithRetry(
+        `${AI_API_URL}/analyze/`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            question: content,
+            // ✅ 최근 대화 히스토리 포함 (Claude-like integrated answer)
+            recent_context: recent_context
+          }),
+        }
+      );
+    }
+  } catch (e: any) {
+    console.error('[api/chat] analyze network error:', e?.message || e);
+    return NextResponse.json({ error: 'BACKEND_UNREACHABLE' }, { status: 502 });
+  }
 
-    // FastAPI 듀얼 LLM 스트리밍 엔드포인트 호출
-    const streamResponse = await fetchWithRetry(
-      `${AI_API_URL}/chat/stream`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          conversation_id: currentConversationId,
-          content,
-          client_message_id: userMessageId, // Idempotency key
-        }),
-      },
-      3,  // maxRetries
-      60000  // 60초 타임아웃 (듀얼 LLM은 시간이 더 걸림)
-    );
+    // ✅ 404는 정상 흐름으로 처리 (아직 분석 대상이 없음)
+    if (!analyzeResponse.ok) {
+      const text = await analyzeResponse.text();
 
-    if (!streamResponse.ok) {
-      const text = await streamResponse.text();
-      console.error(`[api/chat] 듀얼 LLM 스트리밍 실패: ${streamResponse.status} ${text}`);
+      // 404 에러는 "아직 케이스/분석 대상이 없음"이므로 조기 종료
+      if (analyzeResponse.status === 404) {
+        console.warn('[api/chat] 404 - 분석 대상 없음 (정상 흐름):', text);
 
-      // 404 에러는 "아직 분석 대상 없음"으로 처리
-      if (streamResponse.status === 404) {
+        // 기본 안내 메시지 반환
         const defaultAnswer = '죄송합니다. 분석 대상을 찾을 수 없습니다. 주소와 계약 유형을 먼저 입력해주세요.';
+
+        // 스트리밍 응답으로 기본 메시지 전달
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           start(controller) {
@@ -616,31 +649,97 @@ export async function POST(request: NextRequest) {
           'Connection': 'keep-alive',
         };
         if (newConversationId) headers['X-New-Conversation-Id'] = newConversationId;
+
         return new NextResponse(stream, { headers });
       }
 
-      throw new Error(`듀얼 LLM 스트리밍 실패: ${streamResponse.status} ${text}`);
+      // 404 외 에러는 예외 발생
+      throw new Error(`분석 실패: ${analyzeResponse.status} ${text}`);
     }
 
-    // FastAPI SSE 스트림을 프록시 (body를 그대로 전달)
+  const analyzeData = await analyzeResponse.json();
+
+  // v2 response has 'reply' field, v1 has 'answer' field
+  const answer = analyzeData.reply || analyzeData.answer || '응답을 생성할 수 없습니다.';
+  const toolCalls = analyzeData.tool_calls || analyzeData.toolCalls || []; // Handle both naming conventions
+
+  // Log tool calls for debugging
+  if (toolCalls.length > 0) {
+    console.log('[chat/route] Tool calls received from backend:', JSON.stringify(toolCalls, null, 2));
+  }
+
+  // 4. AI 응답 메시지 저장
+  const { error: insertErr } = await supabase.from('messages').insert({
+    conversation_id: currentConversationId,
+    role: 'assistant',
+    content: answer,
+    meta: {
+      topic: 'contract_analysis',
+      extension: 'chat',
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined
+    },
+  });
+  if (insertErr) {
+    console.warn('[api/chat] assistant message insert failed:', insertErr);
+  }
+
+  // 5. 스트리밍 응답 반환
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        // Send meta event first (e.g., newConversationId, userMessageId)
+        const metaEvent: any = { done: false, meta: true };
+        if (newConversationId) metaEvent.newConversationId = newConversationId;
+        if (userMessageId) metaEvent.user_message_id = userMessageId; // ✨ 사용자 메시지 ID 포함
+        if (newConversationId || userMessageId) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(metaEvent)}\n\n`));
+        }
+
+        // Send tool calls if any (for v2)
+        if (toolCalls.length > 0) {
+          toolCalls.forEach((toolCall: any) => {
+            const toolData = JSON.stringify({
+              meta: true,
+              toolCall: toolCall,
+              done: false
+            });
+            controller.enqueue(encoder.encode(`data: ${toolData}\n\n`));
+          });
+        }
+
+        const chunks = answer.split(' ');
+        chunks.forEach((chunk: string, index: number) => {
+          setTimeout(() => {
+            const content = index === 0 ? chunk : ' ' + chunk;
+            const data = JSON.stringify({ content, done: false });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+
+            if (index === chunks.length - 1) {
+              setTimeout(() => {
+                const doneData = JSON.stringify({ done: true });
+                controller.enqueue(encoder.encode(`data: ${doneData}\n\n`));
+                controller.close();
+              }, 50);
+            }
+          }, index * 50);
+        });
+      },
+    });
+
     const headers: Record<string, string> = {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',  // Nginx 버퍼링 비활성화
     };
     if (newConversationId) {
       headers['X-New-Conversation-Id'] = newConversationId;
     }
 
-    console.log('[api/chat] 듀얼 LLM 스트리밍 프록시 시작');
-
-    return new NextResponse(streamResponse.body, { headers });
-
-  } catch (e: any) {
-    console.error('[api/chat] 듀얼 LLM 스트리밍 오류:', e?.message || e);
-    return NextResponse.json({ error: 'BACKEND_UNREACHABLE' }, { status: 502 });
-  }
+    return new NextResponse(stream, {
+      headers: {
+        ...headers,
+      },
+    });
   } catch (error) {
     console.error('Chat API error:', error);
     const message = error instanceof Error ? error.message : String(error);
