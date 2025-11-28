@@ -24,11 +24,14 @@ const N = (v: unknown): number | null => {
 }
 
 export async function POST(req: NextRequest) {
+  console.log('[apt-trade] POST 요청 시작')
   try {
     const { lawdCd, dealYmd } = await req.json()
+    console.log('[apt-trade] params:', { lawdCd, dealYmd })
 
     // 파라미터 검증
     if (!lawdCd || String(lawdCd).length !== 5 || !/^\d{6}$/.test(String(dealYmd || ''))) {
+      console.log('[apt-trade] 파라미터 검증 실패')
       return NextResponse.json({
         header: { resultCode: '400', resultMsg: 'Bad Request' },
         body: { items: [], totalCount: 0, error: 'Invalid parameters', params: { lawdCd, dealYmd } }
@@ -36,6 +39,7 @@ export async function POST(req: NextRequest) {
     }
 
     const serviceKey = process.env.DATA_GO_KR_API_KEY
+    console.log('[apt-trade] serviceKey exists:', !!serviceKey)
     if (!serviceKey) {
       return NextResponse.json({
         header: { resultCode: '500', resultMsg: 'Internal Server Error' },
@@ -57,18 +61,27 @@ export async function POST(req: NextRequest) {
       }).toString()
 
       const url = `${baseUrl}?${qs}`
+      console.log('[apt-trade] 시도:', version, url.replace(serviceKey, 'KEY_HIDDEN'))
 
       try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
         res = await fetch(url, {
           cache: 'no-store',
-          signal: AbortSignal.timeout(10000)
+          signal: controller.signal
         })
+
+        clearTimeout(timeoutId)
+        console.log('[apt-trade] response.status:', res.status)
         text = (await res.text()).replace(/^\uFEFF/, '') // BOM 제거
+        console.log('[apt-trade] response text length:', text.length)
 
         if (res.ok || res.status !== 404) {
           break
         }
-      } catch (error) {
+      } catch (error: any) {
+        console.error('[apt-trade] fetch error:', error.message)
         continue
       }
     }
@@ -158,6 +171,7 @@ export async function POST(req: NextRequest) {
     })
 
   } catch (err: any) {
+    console.error('[apt-trade] 최종 catch error:', err)
     return NextResponse.json({
       header: { resultCode: '500', resultMsg: 'Internal Server Error' },
       body: {

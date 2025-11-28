@@ -32,8 +32,10 @@ const S = (v: unknown): string => (v == null ? '' : String(v))
 const asArray = (v: any): any[] => (Array.isArray(v) ? v : v ? [v] : [])
 
 export async function POST(request: NextRequest) {
+  console.log('[legal-dong] POST 요청 시작')
   try {
     const body = await request.json()
+    console.log('[legal-dong] body:', body)
     const { keyword } = body
 
     if (!keyword) {
@@ -44,6 +46,7 @@ export async function POST(request: NextRequest) {
     }
 
     const serviceKey = process.env.DATA_GO_KR_API_KEY
+    console.log('[legal-dong] serviceKey exists:', !!serviceKey)
 
     if (!serviceKey) {
       return NextResponse.json({
@@ -58,12 +61,21 @@ export async function POST(request: NextRequest) {
     for (const withFlag of [true, false]) {
       try {
         const url = buildUrl(keyword, serviceKey, withFlag)
+        console.log('[legal-dong] URL:', url.replace(serviceKey, 'KEY_HIDDEN'))
 
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+        console.log('[legal-dong] fetch 시작')
         const response = await fetch(url, {
           cache: 'no-store',
-          signal: AbortSignal.timeout(10000)
+          signal: controller.signal
         })
+
+        clearTimeout(timeoutId)
+        console.log('[legal-dong] response.status:', response.status)
         const text = await response.text()
+        console.log('[legal-dong] response text length:', text.length)
 
         if (!response.ok) {
           lastError = { status: response.status, body: text.slice(0, 500) }
@@ -110,6 +122,8 @@ export async function POST(request: NextRequest) {
                     payload?.items ||
                     []
 
+        console.log('[legal-dong] rows count:', rows?.length || 0)
+
         if (rows && rows.length > 0) {
           // 데이터 정규화
           const items = asArray(rows)
@@ -140,17 +154,20 @@ export async function POST(request: NextRequest) {
           })
         }
       } catch (fetchError: any) {
+        console.error('[legal-dong] fetchError:', fetchError.message)
         lastError = { fetchError: fetchError.message }
       }
     }
 
     // 모든 시도 실패
+    console.log('[legal-dong] 모든 시도 실패, lastError:', lastError)
     return NextResponse.json({
       header: { resultCode: '502', resultMsg: 'Upstream Error' },
       body: { items: [], totalCount: 0, error: lastError }
     }, { status: 502 })
 
   } catch (error) {
+    console.error('[legal-dong] 최종 catch error:', error)
     return NextResponse.json({
       header: { resultCode: '500', resultMsg: 'Internal Server Error' },
       body: {
