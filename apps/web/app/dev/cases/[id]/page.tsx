@@ -239,16 +239,226 @@ export default function DevCaseDetailPage({
             {step1Result && (
               <div className="px-6 py-4">
                 {step1Result.success ? (
-                  <div>
+                  <div className="space-y-6">
                     <div className="flex items-center gap-2 mb-4">
                       <span className="text-green-600 font-medium">✓ Success</span>
                       <span className="text-gray-500 text-sm">
                         ({step1Result.execution_time_ms}ms)
                       </span>
                     </div>
-                    <pre className="bg-gray-50 p-4 rounded text-xs overflow-auto max-h-96">
-                      {JSON.stringify(step1Result.registry_doc_masked, null, 2)}
-                    </pre>
+
+                    {/* 기본 정보 카드 */}
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-blue-900 mb-3">📋 기본 정보</h3>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-600">주소:</span>
+                          <p className="font-medium">{step1Result.registry_doc_masked?.property_address || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">소유자:</span>
+                          <p className="font-medium">{step1Result.registry_doc_masked?.owner?.name || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">건물 종류:</span>
+                          <p className="font-medium">{step1Result.registry_doc_masked?.building_type || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">전용면적:</span>
+                          <p className="font-medium">{step1Result.registry_doc_masked?.area_m2 ? `${step1Result.registry_doc_masked.area_m2}㎡` : 'N/A'}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 리스크 요약 카드 */}
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-amber-900 mb-3">⚠️ 리스크 요약</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div className="text-center p-3 bg-white rounded-lg border">
+                          <div className="text-2xl font-bold text-red-600">
+                            {step1Result.registry_doc_masked?.mortgages?.filter((m: any) => !m.is_deleted).length || 0}
+                          </div>
+                          <div className="text-gray-600">유효 근저당</div>
+                          <div className="text-xs text-gray-400">
+                            (말소: {step1Result.registry_doc_masked?.mortgages?.filter((m: any) => m.is_deleted).length || 0}건)
+                          </div>
+                        </div>
+                        <div className="text-center p-3 bg-white rounded-lg border">
+                          <div className="text-2xl font-bold text-orange-600">
+                            {step1Result.registry_doc_masked?.seizures?.filter((s: any) => !s.is_deleted).length || 0}
+                          </div>
+                          <div className="text-gray-600">유효 압류/가압류</div>
+                          <div className="text-xs text-gray-400">
+                            (말소: {step1Result.registry_doc_masked?.seizures?.filter((s: any) => s.is_deleted).length || 0}건)
+                          </div>
+                        </div>
+                        <div className="text-center p-3 bg-white rounded-lg border">
+                          <div className="text-2xl font-bold text-purple-600">
+                            {step1Result.registry_doc_masked?.pledges?.filter((p: any) => !p.is_deleted).length || 0}
+                          </div>
+                          <div className="text-gray-600">유효 질권</div>
+                          <div className="text-xs text-gray-400">
+                            (말소: {step1Result.registry_doc_masked?.pledges?.filter((p: any) => p.is_deleted).length || 0}건)
+                          </div>
+                        </div>
+                        <div className="text-center p-3 bg-white rounded-lg border">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {step1Result.registry_doc_masked?.lease_rights?.filter((l: any) => !l.is_deleted).length || 0}
+                          </div>
+                          <div className="text-gray-600">유효 전세권</div>
+                          <div className="text-xs text-gray-400">
+                            (말소: {step1Result.registry_doc_masked?.lease_rights?.filter((l: any) => l.is_deleted).length || 0}건)
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 근저당권 상세 테이블 */}
+                    {step1Result.registry_doc_masked?.mortgages?.length > 0 && (
+                      <div className="border rounded-lg overflow-hidden">
+                        <div className="bg-gray-100 px-4 py-2 font-semibold text-gray-800">
+                          🏦 근저당권 목록
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left">상태</th>
+                              <th className="px-4 py-2 text-left">채권자</th>
+                              <th className="px-4 py-2 text-right">채권최고액</th>
+                              <th className="px-4 py-2 text-left">채무자</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {step1Result.registry_doc_masked.mortgages.map((m: any, idx: number) => (
+                              <tr key={idx} className={`border-t ${m.is_deleted ? 'bg-gray-100 text-gray-400' : ''}`}>
+                                <td className="px-4 py-2">
+                                  {m.is_deleted ? (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
+                                      ❌ 말소
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                                      ✅ 유효
+                                    </span>
+                                  )}
+                                </td>
+                                <td className={`px-4 py-2 ${m.is_deleted ? 'line-through' : ''}`}>{m.creditor || 'N/A'}</td>
+                                <td className={`px-4 py-2 text-right ${m.is_deleted ? 'line-through' : ''}`}>
+                                  {m.amount ? `${m.amount.toLocaleString()}만원` : 'N/A'}
+                                </td>
+                                <td className={`px-4 py-2 ${m.is_deleted ? 'line-through' : ''}`}>{m.debtor || 'N/A'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-gray-50 font-semibold">
+                            <tr>
+                              <td colSpan={2} className="px-4 py-2">유효 합계</td>
+                              <td className="px-4 py-2 text-right text-red-600">
+                                {step1Result.registry_doc_masked.mortgages
+                                  .filter((m: any) => !m.is_deleted)
+                                  .reduce((sum: number, m: any) => sum + (m.amount || 0), 0)
+                                  .toLocaleString()}만원
+                              </td>
+                              <td></td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* 압류/가압류/가처분 테이블 */}
+                    {step1Result.registry_doc_masked?.seizures?.length > 0 && (
+                      <div className="border rounded-lg overflow-hidden">
+                        <div className="bg-gray-100 px-4 py-2 font-semibold text-gray-800">
+                          ⚡ 압류/가압류/가처분 목록
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left">상태</th>
+                              <th className="px-4 py-2 text-left">유형</th>
+                              <th className="px-4 py-2 text-left">채권자</th>
+                              <th className="px-4 py-2 text-right">채권액</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {step1Result.registry_doc_masked.seizures.map((s: any, idx: number) => (
+                              <tr key={idx} className={`border-t ${s.is_deleted ? 'bg-gray-100 text-gray-400' : ''}`}>
+                                <td className="px-4 py-2">
+                                  {s.is_deleted ? (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
+                                      ❌ 말소
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                                      ✅ 유효
+                                    </span>
+                                  )}
+                                </td>
+                                <td className={`px-4 py-2 ${s.is_deleted ? 'line-through' : ''}`}>{s.type}</td>
+                                <td className={`px-4 py-2 ${s.is_deleted ? 'line-through' : ''}`}>{s.creditor || 'N/A'}</td>
+                                <td className={`px-4 py-2 text-right ${s.is_deleted ? 'line-through' : ''}`}>
+                                  {s.amount ? `${s.amount.toLocaleString()}만원` : 'N/A'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* 전세권 테이블 */}
+                    {step1Result.registry_doc_masked?.lease_rights?.length > 0 && (
+                      <div className="border rounded-lg overflow-hidden">
+                        <div className="bg-gray-100 px-4 py-2 font-semibold text-gray-800">
+                          🏠 전세권 목록
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left">상태</th>
+                              <th className="px-4 py-2 text-left">전세권자</th>
+                              <th className="px-4 py-2 text-right">전세금</th>
+                              <th className="px-4 py-2 text-left">존속기간</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {step1Result.registry_doc_masked.lease_rights.map((l: any, idx: number) => (
+                              <tr key={idx} className={`border-t ${l.is_deleted ? 'bg-gray-100 text-gray-400' : ''}`}>
+                                <td className="px-4 py-2">
+                                  {l.is_deleted ? (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
+                                      ❌ 말소
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                      ✅ 유효
+                                    </span>
+                                  )}
+                                </td>
+                                <td className={`px-4 py-2 ${l.is_deleted ? 'line-through' : ''}`}>{l.lessee || 'N/A'}</td>
+                                <td className={`px-4 py-2 text-right ${l.is_deleted ? 'line-through' : ''}`}>
+                                  {l.amount ? `${l.amount.toLocaleString()}만원` : 'N/A'}
+                                </td>
+                                <td className={`px-4 py-2 ${l.is_deleted ? 'line-through' : ''}`}>
+                                  {l.period_start && l.period_end ? `${l.period_start} ~ ${l.period_end}` : 'N/A'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* 원본 JSON 토글 */}
+                    <details className="mt-4">
+                      <summary className="cursor-pointer text-gray-500 text-sm hover:text-gray-700">
+                        🔍 원본 JSON 보기 (디버깅용)
+                      </summary>
+                      <pre className="bg-gray-50 p-4 rounded text-xs overflow-auto max-h-96 mt-2">
+                        {JSON.stringify(step1Result.registry_doc_masked, null, 2)}
+                      </pre>
+                    </details>
                   </div>
                 ) : (
                   <div className="text-red-600">

@@ -77,6 +77,7 @@ class MortgageInfo(BaseModel):
     debtor: Optional[str] = None  # 채무자
     registration_date: Optional[str] = None  # 설정일
     registration_number: Optional[str] = None  # 접수번호
+    is_deleted: bool = False  # 말소 여부 (True면 말소됨)
 
     def get_masked_debtor(self) -> Optional[str]:
         """마스킹된 채무자 반환 (개인만)"""
@@ -90,6 +91,7 @@ class SeizureInfo(BaseModel):
     amount: Optional[int] = None  # 채권액 (만원)
     registration_date: Optional[str] = None  # 접수일
     description: Optional[str] = None  # 추가 설명
+    is_deleted: bool = False  # 말소 여부 (True면 말소됨)
 
 
 class PledgeInfo(BaseModel):
@@ -97,6 +99,7 @@ class PledgeInfo(BaseModel):
     creditor: Optional[str] = None  # 질권자
     amount: Optional[int] = None  # 채권최고액 (만원)
     registration_date: Optional[str] = None  # 설정일
+    is_deleted: bool = False  # 말소 여부 (True면 말소됨)
 
 
 class LeaseRightInfo(BaseModel):
@@ -106,6 +109,7 @@ class LeaseRightInfo(BaseModel):
     period_start: Optional[str] = None  # 존속기간 시작
     period_end: Optional[str] = None  # 존속기간 종료
     registration_date: Optional[str] = None  # 설정일
+    is_deleted: bool = False  # 말소 여부 (True면 말소됨)
 
 
 class RegistryDocument(BaseModel):
@@ -154,6 +158,7 @@ class RegistryDocument(BaseModel):
                     "amount": m.amount,
                     "debtor": m.get_masked_debtor(),  # 개인만 마스킹
                     "registration_date": m.registration_date,
+                    "is_deleted": m.is_deleted,  # 말소 여부
                 }
                 for m in self.mortgages
             ],
@@ -164,6 +169,7 @@ class RegistryDocument(BaseModel):
                     "amount": s.amount,
                     "registration_date": s.registration_date,
                     "description": s.description,
+                    "is_deleted": s.is_deleted,  # 말소 여부
                 }
                 for s in self.seizures
             ],
@@ -172,6 +178,7 @@ class RegistryDocument(BaseModel):
                     "creditor": p.creditor,
                     "amount": p.amount,
                     "registration_date": p.registration_date,
+                    "is_deleted": p.is_deleted,  # 말소 여부
                 }
                 for p in self.pledges
             ],
@@ -182,6 +189,7 @@ class RegistryDocument(BaseModel):
                     "period_start": lr.period_start,
                     "period_end": lr.period_end,
                     "registration_date": lr.registration_date,
+                    "is_deleted": lr.is_deleted,  # 말소 여부
                 }
                 for lr in self.lease_rights
             ],
@@ -273,6 +281,9 @@ def extract_mortgages(text: str) -> List[MortgageInfo]:
     creditor_pattern = r'채권자\s*[:：]?\s*([^\n]+?)(?:\s|$)'
     debtor_pattern = r'채무자\s*[:：]?\s*([가-힣]+)'
 
+    # 말소 여부 판별 키워드
+    deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제']
+
     # 모든 근저당권 찾기
     for amount_match in re.finditer(amount_pattern, text):
         amount_str = amount_match.group(1).replace(',', '')
@@ -294,10 +305,14 @@ def extract_mortgages(text: str) -> List[MortgageInfo]:
         if debtor_match:
             debtor = debtor_match.group(1).strip()
 
+        # 말소 여부 판별 (컨텍스트 내 키워드 검색)
+        is_deleted = any(keyword in context for keyword in deletion_keywords)
+
         mortgages.append(MortgageInfo(
             creditor=creditor,
             amount=amount_man,
-            debtor=debtor
+            debtor=debtor,
+            is_deleted=is_deleted
         ))
 
     return mortgages
@@ -316,30 +331,47 @@ def extract_seizures(text: str) -> List[SeizureInfo]:
         '압류': '압류',
     }
 
+    # 말소 여부 판별 키워드
+    deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
+
     for keyword, seizure_type in seizure_keywords.items():
         # 키워드가 있는지 확인
         pattern_search = f'{keyword}'
         if pattern_search not in text:
             continue
 
+        # 키워드 위치 찾기
+        keyword_pos = text.find(keyword)
+        if keyword_pos == -1:
+            continue
+
+        # 컨텍스트 추출 (앞뒤 200자)
+        start = max(0, keyword_pos - 100)
+        end = min(len(text), keyword_pos + 300)
+        context = text[start:end]
+
         # 근처에서 채권자 찾기
         pattern = f'{keyword}[^가-힣]{{0,50}}([가-힣]+(?:캐피탈|은행|금융|신협|저축|증권|국세청|시청|구청)?)'
-        match = re.search(pattern, text)
+        match = re.search(pattern, context)
         creditor = match.group(1).strip() if match else None
 
         # 금액 찾기 (있을 경우)
         amount = None
         amount_pattern = rf'{keyword}[^0-9]{{0,100}}금?\s*([\d,]+)\s*원'
-        amount_match = re.search(amount_pattern, text)
+        amount_match = re.search(amount_pattern, context)
         if amount_match:
             amount_str = amount_match.group(1).replace(',', '')
             amount = int(amount_str) // 10000  # 만원 단위
+
+        # 말소 여부 판별 (컨텍스트 내 키워드 검색)
+        is_deleted = any(del_kw in context for del_kw in deletion_keywords)
 
         seizures.append(SeizureInfo(
             type=seizure_type,
             creditor=creditor,
             amount=amount,
-            description=keyword  # 원본 키워드 저장
+            description=keyword,  # 원본 키워드 저장
+            is_deleted=is_deleted
         ))
 
     return seizures
@@ -352,6 +384,9 @@ def extract_pledges(text: str) -> List[PledgeInfo]:
     # 패턴: "질권" + 채권최고액
     if '질권' not in text:
         return pledges
+
+    # 말소 여부 판별 키워드
+    deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제']
 
     # 금액 패턴
     amount_pattern = r'질권[^0-9]{0,100}금?\s*([\d,]+)\s*원'
@@ -372,9 +407,13 @@ def extract_pledges(text: str) -> List[PledgeInfo]:
         if creditor_match:
             creditor = creditor_match.group(1).strip()
 
+        # 말소 여부 판별
+        is_deleted = any(keyword in context for keyword in deletion_keywords)
+
         pledges.append(PledgeInfo(
             creditor=creditor,
             amount=amount_man,
+            is_deleted=is_deleted
         ))
 
     return pledges
@@ -387,6 +426,9 @@ def extract_lease_rights(text: str) -> List[LeaseRightInfo]:
     # 패턴: "전세권" + 전세금
     if '전세권' not in text:
         return lease_rights
+
+    # 말소 여부 판별 키워드
+    deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제']
 
     # 금액 패턴
     amount_pattern = r'전세금?\s*금?\s*([\d,]+)\s*원'
@@ -416,11 +458,15 @@ def extract_lease_rights(text: str) -> List[LeaseRightInfo]:
             period_start = f"{period_match.group(1)}-{period_match.group(2):0>2}-{period_match.group(3):0>2}"
             period_end = f"{period_match.group(4)}-{period_match.group(5):0>2}-{period_match.group(6):0>2}"
 
+        # 말소 여부 판별
+        is_deleted = any(keyword in context for keyword in deletion_keywords)
+
         lease_rights.append(LeaseRightInfo(
             lessee=lessee,
             amount=amount_man,
             period_start=period_start,
             period_end=period_end,
+            is_deleted=is_deleted
         ))
 
     return lease_rights
