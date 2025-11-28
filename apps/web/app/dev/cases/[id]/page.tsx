@@ -31,6 +31,26 @@ interface SummaryResult {
   used_llm: boolean;
 }
 
+// API Tester Types
+interface APITestResult {
+  success: boolean;
+  api_name: string;
+  api_name_kr: string;
+  execution_time_ms: number;
+  total_count: number;
+  sample_data?: any[];
+  error?: string;
+  request_params: Record<string, any>;
+}
+
+interface AllAPITestResult {
+  total_apis: number;
+  success_count: number;
+  fail_count: number;
+  total_execution_time_ms: number;
+  results: APITestResult[];
+}
+
 export default function DevCaseDetailPage({
   params,
 }: {
@@ -55,6 +75,11 @@ export default function DevCaseDetailPage({
   const [step1Loading, setStep1Loading] = useState(false);
   const [step2Loading, setStep2Loading] = useState(false);
   const [step3Loading, setStep3Loading] = useState(false);
+
+  // API Tester state
+  const [apiTestResult, setApiTestResult] = useState<AllAPITestResult | null>(null);
+  const [apiTestLoading, setApiTestLoading] = useState(false);
+  const [selectedApiResult, setSelectedApiResult] = useState<APITestResult | null>(null);
 
   const [useLLM, setUseLLM] = useState(false);
 
@@ -172,6 +197,42 @@ export default function DevCaseDetailPage({
       });
     } finally {
       setStep2Loading(false);
+    }
+  };
+
+  const runAPITest = async () => {
+    try {
+      setApiTestLoading(true);
+      setApiTestResult(null);
+      setSelectedApiResult(null);
+
+      const response = await fetch('/api/dev/api-tester');
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      setApiTestResult(data);
+    } catch (err: any) {
+      console.error('API Test failed:', err);
+      setApiTestResult({
+        total_apis: 15,
+        success_count: 0,
+        fail_count: 15,
+        total_execution_time_ms: 0,
+        results: [{
+          success: false,
+          api_name: 'AllAPIs',
+          api_name_kr: 'API Test Error',
+          execution_time_ms: 0,
+          total_count: 0,
+          error: err.message,
+          request_params: {},
+        }],
+      });
+    } finally {
+      setApiTestLoading(false);
     }
   };
 
@@ -529,14 +590,142 @@ export default function DevCaseDetailPage({
                   법정동코드 + 실거래가 조회 (전세/월세: 듀얼 API)
                 </p>
               </div>
-              <button
-                onClick={runStep2}
-                disabled={step2Loading}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {step2Loading ? 'Running...' : 'Run'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={runAPITest}
+                  disabled={apiTestLoading}
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {apiTestLoading ? 'Testing 15 APIs...' : 'Test All 15 APIs'}
+                </button>
+                <button
+                  onClick={runStep2}
+                  disabled={step2Loading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {step2Loading ? 'Running...' : 'Run'}
+                </button>
+              </div>
             </div>
+
+            {/* API Tester Results */}
+            {apiTestResult && (
+              <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-gray-800">15개 공공데이터 API 테스트 결과</h3>
+                  <div className="flex items-center gap-4 text-sm">
+                    <span className="text-green-600 font-medium">
+                      ✓ 성공: {apiTestResult.success_count}
+                    </span>
+                    <span className="text-red-600 font-medium">
+                      ✗ 실패: {apiTestResult.fail_count}
+                    </span>
+                    <span className="text-gray-500">
+                      ({apiTestResult.total_execution_time_ms.toLocaleString()}ms)
+                    </span>
+                  </div>
+                </div>
+
+                {/* API Grid */}
+                <div className="grid grid-cols-3 md:grid-cols-5 gap-2 mb-4">
+                  {apiTestResult.results.map((result, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setSelectedApiResult(result)}
+                      className={`p-3 rounded-lg border text-left transition-all ${
+                        result.success
+                          ? 'bg-green-50 border-green-200 hover:bg-green-100'
+                          : 'bg-red-50 border-red-200 hover:bg-red-100'
+                      } ${
+                        selectedApiResult?.api_name === result.api_name
+                          ? 'ring-2 ring-blue-500'
+                          : ''
+                      }`}
+                    >
+                      <div className="text-xs font-medium truncate">
+                        {result.api_name_kr}
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className={`text-lg ${result.success ? 'text-green-600' : 'text-red-600'}`}>
+                          {result.success ? '✓' : '✗'}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {result.total_count}건
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {result.execution_time_ms.toLocaleString()}ms
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Selected API Detail */}
+                {selectedApiResult && (
+                  <div className="mt-4 p-4 bg-white rounded-lg border">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold">
+                        {selectedApiResult.api_name_kr}
+                        <span className="ml-2 text-sm font-mono text-gray-500">
+                          ({selectedApiResult.api_name})
+                        </span>
+                      </h4>
+                      <button
+                        onClick={() => setSelectedApiResult(null)}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Status */}
+                    <div className="flex items-center gap-4 mb-3 text-sm">
+                      <span className={selectedApiResult.success ? 'text-green-600' : 'text-red-600'}>
+                        {selectedApiResult.success ? '✓ 성공' : '✗ 실패'}
+                      </span>
+                      <span className="text-gray-500">
+                        조회 건수: {selectedApiResult.total_count}건
+                      </span>
+                      <span className="text-gray-500">
+                        실행 시간: {selectedApiResult.execution_time_ms}ms
+                      </span>
+                    </div>
+
+                    {/* Request Params */}
+                    <div className="mb-3">
+                      <div className="text-xs font-medium text-gray-600 mb-1">요청 파라미터:</div>
+                      <div className="bg-gray-50 p-2 rounded text-xs font-mono">
+                        {JSON.stringify(selectedApiResult.request_params, null, 2)}
+                      </div>
+                    </div>
+
+                    {/* Error */}
+                    {selectedApiResult.error && (
+                      <div className="mb-3">
+                        <div className="text-xs font-medium text-red-600 mb-1">에러:</div>
+                        <div className="bg-red-50 p-2 rounded text-xs text-red-700">
+                          {selectedApiResult.error}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sample Data */}
+                    {selectedApiResult.sample_data && selectedApiResult.sample_data.length > 0 && (
+                      <div>
+                        <div className="text-xs font-medium text-gray-600 mb-1">
+                          샘플 데이터 ({selectedApiResult.sample_data.length}건):
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded text-xs font-mono overflow-auto max-h-64">
+                          <pre>{JSON.stringify(selectedApiResult.sample_data, null, 2)}</pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Original Step 2 Result */}
             {step2Result && (
               <div className="px-6 py-4">
                 {step2Result.success ? (
