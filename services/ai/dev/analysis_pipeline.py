@@ -34,6 +34,10 @@ class PublicDataResult(BaseModel):
     property_value_estimate: Optional[int] = None
     jeonse_market_average: Optional[int] = None
     recent_transactions: List[Dict[str, Any]] = []
+    # 건축물대장 데이터
+    building_ledger: Optional[Dict[str, Any]] = None
+    # 주소 변환 결과
+    address_convert_result: Optional[Dict[str, Any]] = None
     errors: List[str] = []
     execution_time_ms: int
     metadata: Dict[str, Any] = {}
@@ -191,7 +195,7 @@ async def collect_public_data(
     force: bool = False
 ) -> PublicDataResult:
     """
-    공공 데이터 수집 (법정동코드 + 실거래가)
+    공공 데이터 수집 (주소 변환 + 법정동코드 + 실거래가 + 건축물대장)
 
     Args:
         case_id: 케이스 UUID
@@ -202,6 +206,8 @@ async def collect_public_data(
     """
     from core.supabase_client import get_supabase_client
     from core.public_data_api import AptTradeAPIClient, LegalDongCodeAPIClient, AptRentAPIClient
+    from core.address_converter import AddressConverter
+    from core.building_ledger_api import BuildingLedgerAPIClient
     from core.settings import settings
     from datetime import datetime
     from dateutil.relativedelta import relativedelta
@@ -210,6 +216,8 @@ async def collect_public_data(
         start_time = datetime.now()
         supabase = get_supabase_client(service_role=True)
         errors = []
+        building_ledger = None
+        address_convert_result = None
 
         try:
             # 케이스 조회
@@ -234,11 +242,88 @@ async def collect_public_data(
 
             case = case_response.data[0]
             contract_type = case.get('contract_type', '전세')
+            property_address = case.get('property_address', '')
 
             async with httpx.AsyncClient() as client:
-                # 법정동 코드 조회
+                # ======================================
+                # Step 2.1: 주소 변환 (AddressConverter)
+                # ======================================
+                dev_logger.log_api_call(case_id, "collect_public_data", "address_converter",
+                                        {"address": property_address})
+                api_start = datetime.now()
+
+                try:
+                    converter = AddressConverter()
+                    converter.client = client  # 기존 httpx client 재사용
+                    addr_result = await converter.convert(property_address)
+                    address_convert_result = addr_result.dict()
+
+                    api_time = int((datetime.now() - api_start).total_seconds() * 1000)
+                    dev_logger.log_api_response(case_id, "collect_public_data", "address_converter",
+                                               response_time_ms=api_time,
+                                               success=addr_result.success)
+
+                    if not addr_result.success:
+                        errors.append(f"주소 변환 실패: {addr_result.error}")
+
+                    # 느린 작업 감지 (3000ms 임계값)
+                    if api_time > 3000:
+                        dev_logger.log_slow_operation(
+                            case_id, "collect_public_data", "주소 변환", api_time, threshold_ms=3000
+                        )
+                except Exception as e:
+                    errors.append(f"주소 변환 오류: {str(e)}")
+                    addr_result = None
+
+                # ======================================
+                # Step 2.2: 건축물대장 조회 (BuildingLedgerAPI)
+                # ======================================
+                if addr_result and addr_result.success and addr_result.sigungu_cd and addr_result.bjdong_cd:
+                    dev_logger.log_api_call(case_id, "collect_public_data", "building_ledger_api",
+                                            {"sigungu_cd": addr_result.sigungu_cd,
+                                             "bjdong_cd": addr_result.bjdong_cd,
+                                             "bun": addr_result.bun,
+                                             "ji": addr_result.ji})
+                    api_start = datetime.now()
+
+                    try:
+                        building_client = BuildingLedgerAPIClient()
+                        building_client.client = client  # 기존 httpx client 재사용
+
+                        ledger_result = await building_client.search_building_by_address(
+                            sigungu_cd=addr_result.sigungu_cd,
+                            bjdong_cd=addr_result.bjdong_cd,
+                            plat_gb_cd="0",  # 대지
+                            bun=addr_result.bun or "",
+                            ji=addr_result.ji or ""
+                        )
+
+                        api_time = int((datetime.now() - api_start).total_seconds() * 1000)
+                        dev_logger.log_api_response(case_id, "collect_public_data", "building_ledger_api",
+                                                   response_time_ms=api_time,
+                                                   success=ledger_result.get('success', False))
+
+                        if ledger_result.get('success') and ledger_result.get('items'):
+                            building_ledger = ledger_result['items'][0]
+                            logger.info(f"건축물대장 조회 성공: {building_ledger.get('bldNm', 'N/A')}")
+                        else:
+                            errors.append("건축물대장 조회 결과 없음")
+
+                        # 느린 작업 감지 (3000ms 임계값)
+                        if api_time > 3000:
+                            dev_logger.log_slow_operation(
+                                case_id, "collect_public_data", "건축물대장 조회", api_time, threshold_ms=3000
+                            )
+
+                    except Exception as e:
+                        errors.append(f"건축물대장 조회 오류: {str(e)}")
+                        logger.warning(f"건축물대장 조회 실패: {e}")
+
+                # ======================================
+                # Step 2.3: 법정동 코드 조회 (기존 로직)
+                # ======================================
                 dev_logger.log_api_call(case_id, "collect_public_data", "legal_dong_api",
-                                        {"keyword": case['property_address']})
+                                        {"keyword": property_address})
                 api_start = datetime.now()
 
                 legal_dong_client = LegalDongCodeAPIClient(
@@ -246,7 +331,7 @@ async def collect_public_data(
                     client=client
                 )
                 legal_dong_result = await legal_dong_client.get_legal_dong_code(
-                    keyword=case['property_address']
+                    keyword=property_address
                 )
 
                 api_time = int((datetime.now() - api_start).total_seconds() * 1000)
@@ -260,9 +345,14 @@ async def collect_public_data(
                         case_id, "collect_public_data", "법정동코드 조회", api_time, threshold_ms=2000
                     )
 
+                # 법정동코드 결정: AddressConverter 결과 우선, 없으면 legal_dong_api 사용
                 lawd_cd = None
-                if legal_dong_result['body']['items']:
+                if addr_result and addr_result.success and addr_result.lawd_cd:
+                    lawd_cd = addr_result.lawd_cd
+                    logger.info(f"법정동코드 (AddressConverter): {lawd_cd}")
+                elif legal_dong_result['body']['items']:
                     lawd_cd = legal_dong_result['body']['items'][0]['lawd5']
+                    logger.info(f"법정동코드 (LegalDongAPI): {lawd_cd}")
                 else:
                     errors.append("법정동코드 조회 실패")
 
@@ -422,11 +512,15 @@ async def collect_public_data(
                 property_value_estimate=property_value_estimate,
                 jeonse_market_average=jeonse_market_average,
                 recent_transactions=recent_transactions[:10],  # 최근 10건만
+                building_ledger=building_ledger,
+                address_convert_result=address_convert_result,
                 errors=errors,
                 execution_time_ms=execution_time,
                 metadata={
                     "contract_type": contract_type,
                     "transaction_count": len(recent_transactions),
+                    "has_building_ledger": building_ledger is not None,
+                    "address_converted": address_convert_result is not None,
                 }
             )
 
