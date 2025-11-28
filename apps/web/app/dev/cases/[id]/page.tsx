@@ -95,6 +95,35 @@ export default function DevCaseDetailPage({
   const [jibunFilter, setJibunFilter] = useState<'none' | 'exact' | 'range100' | 'range200' | 'range300' | 'range400' | 'range500'>('none'); // 지번 필터 모드
   const [dongFilter, setDongFilter] = useState(false); // 동 필터 (파싱된 주소의 동과 일치하는 것만)
 
+  // 자동 실거래가 조회 결과 (파싱된 주소 기반)
+  const [autoTradeResult, setAutoTradeResult] = useState<{
+    loading: boolean;
+    error: string | null;
+    lawdCd: string | null;           // 법정동코드 5자리
+    lawdName: string | null;         // 법정동 이름
+    totalCount: number;              // 전체 거래 수
+    filteredCount: number;           // 필터링된 거래 수 (동+지번)
+    dongMatchCount: number;          // 동 일치 거래 수
+    jibunMatchCount: number;         // 지번 일치 거래 수
+    averagePrice: number | null;     // 필터링된 평균 거래가 (만원)
+    minPrice: number | null;         // 최소 거래가
+    maxPrice: number | null;         // 최대 거래가
+    filteredTransactions: any[];     // 필터링된 거래 목록
+  }>({
+    loading: false,
+    error: null,
+    lawdCd: null,
+    lawdName: null,
+    totalCount: 0,
+    filteredCount: 0,
+    dongMatchCount: 0,
+    jibunMatchCount: 0,
+    averagePrice: null,
+    minPrice: null,
+    maxPrice: null,
+    filteredTransactions: [],
+  });
+
   // 파싱된 주소 정보 (지번 포함)
   const [parsedAddress, setParsedAddress] = useState<{
     full: string;           // 전체 주소
@@ -433,6 +462,110 @@ export default function DevCaseDetailPage({
       }
     }
   }, [step1Result]);
+
+  // 자동 실거래가 조회 및 평균 계산 (parsedAddress가 있을 때)
+  useEffect(() => {
+    const fetchAutoTradeData = async () => {
+      if (!parsedAddress?.addressUntilDong || !parsedAddress?.dong || !parsedAddress?.jibun) {
+        return;
+      }
+
+      setAutoTradeResult(prev => ({ ...prev, loading: true, error: null }));
+
+      try {
+        // 1. 법정동코드 검색
+        const legalDongRes = await fetch(`/api/realestate/legal-dong?keyword=${encodeURIComponent(parsedAddress.addressUntilDong)}`);
+        const legalDongData = await legalDongRes.json();
+
+        if (!legalDongData.body?.items?.length) {
+          throw new Error('법정동코드를 찾을 수 없습니다');
+        }
+
+        const lawdCd = legalDongData.body.items[0].lawd5;
+        const lawdName = legalDongData.body.items[0].locataddNm;
+
+        // 2. 실거래가 조회 (현재 년/월)
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+
+        const aptTradeRes = await fetch(`/api/realestate/apt-trade?lawdCd=${lawdCd}&dealYmd=${year}${String(month).padStart(2, '0')}`);
+        const aptTradeData = await aptTradeRes.json();
+
+        const allTransactions = aptTradeData.body?.items || [];
+
+        // 3. 필터링 (동 + 지번 정확히 일치)
+        const targetDong = parsedAddress.dong.replace(/[동읍면리가]$/, '');
+        const targetBonbun = parseInt(parsedAddress.jibun.split('-')[0], 10);
+
+        const isDongMatch = (item: any) => {
+          const itemDong = (item.umdNm || item.dong || '').toString().trim().replace(/[동읍면리가]$/, '');
+          return itemDong === targetDong;
+        };
+
+        const isJibunMatch = (item: any) => {
+          const itemJibun = item.jibun?.toString().trim();
+          if (!itemJibun) return false;
+          const itemBonbun = parseInt(itemJibun.split('-')[0], 10);
+          return !isNaN(itemBonbun) && itemBonbun === targetBonbun;
+        };
+
+        const dongMatchedItems = allTransactions.filter(isDongMatch);
+        const jibunMatchedItems = allTransactions.filter(isJibunMatch);
+        const filteredItems = allTransactions.filter((item: any) => isDongMatch(item) && isJibunMatch(item));
+
+        // 4. 평균/최소/최대 계산
+        const prices = filteredItems
+          .map((item: any) => item.dealAmount)
+          .filter((p: any) => p && typeof p === 'number');
+
+        let averagePrice = null;
+        let minPrice = null;
+        let maxPrice = null;
+
+        if (prices.length > 0) {
+          averagePrice = Math.round(prices.reduce((a: number, b: number) => a + b, 0) / prices.length);
+          minPrice = Math.min(...prices);
+          maxPrice = Math.max(...prices);
+        }
+
+        setAutoTradeResult({
+          loading: false,
+          error: null,
+          lawdCd,
+          lawdName,
+          totalCount: allTransactions.length,
+          filteredCount: filteredItems.length,
+          dongMatchCount: dongMatchedItems.length,
+          jibunMatchCount: jibunMatchedItems.length,
+          averagePrice,
+          minPrice,
+          maxPrice,
+          filteredTransactions: filteredItems,
+        });
+
+        console.log('[자동 실거래가 조회]', {
+          lawdCd,
+          lawdName,
+          total: allTransactions.length,
+          dongMatch: dongMatchedItems.length,
+          jibunMatch: jibunMatchedItems.length,
+          filtered: filteredItems.length,
+          averagePrice,
+        });
+
+      } catch (err: any) {
+        console.error('[자동 실거래가 조회 실패]', err);
+        setAutoTradeResult(prev => ({
+          ...prev,
+          loading: false,
+          error: err.message || '조회 실패',
+        }));
+      }
+    };
+
+    fetchAutoTradeData();
+  }, [parsedAddress]);
 
   if (loading) {
     return (
@@ -1205,6 +1338,168 @@ export default function DevCaseDetailPage({
                 );
               })()}
             </div>
+
+            {/* 자동 실거래가 분석 결과 (파싱된 주소 기반) */}
+            {parsedAddress && (
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="font-semibold text-gray-800 mb-3">
+                  📊 자동 실거래가 분석 결과
+                  <span className="ml-2 text-sm font-normal text-gray-500">
+                    (파싱된 주소 기반: 동 + 지번 정확히 일치)
+                  </span>
+                </h3>
+
+                {/* 로딩 상태 */}
+                {autoTradeResult.loading && (
+                  <div className="flex items-center gap-3 py-8 justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <span className="text-gray-600">자동 분석 중...</span>
+                  </div>
+                )}
+
+                {/* 에러 상태 */}
+                {autoTradeResult.error && !autoTradeResult.loading && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="flex items-center gap-2 text-red-700">
+                      <span className="text-lg">⚠️</span>
+                      <span className="font-medium">분석 실패:</span>
+                      <span>{autoTradeResult.error}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 결과 표시 */}
+                {!autoTradeResult.loading && !autoTradeResult.error && autoTradeResult.lawdCd && (
+                  <div className="space-y-4">
+                    {/* 요약 카드 */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {/* 법정동코드 */}
+                      <div className="p-4 bg-gray-50 rounded-lg border">
+                        <div className="text-sm text-gray-600 mb-1">법정동코드</div>
+                        <div className="font-mono text-lg font-semibold text-gray-800">{autoTradeResult.lawdCd}</div>
+                        <div className="text-xs text-gray-500 mt-1 truncate">{autoTradeResult.lawdName}</div>
+                      </div>
+
+                      {/* 전체/필터링 거래 수 */}
+                      <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <div className="text-sm text-blue-600 mb-1">거래 건수</div>
+                        <div className="text-lg font-semibold text-blue-800">
+                          {autoTradeResult.filteredCount} / {autoTradeResult.totalCount}건
+                        </div>
+                        <div className="text-xs text-blue-600 mt-1">
+                          동: {autoTradeResult.dongMatchCount}건 | 지번: {autoTradeResult.jibunMatchCount}건
+                        </div>
+                      </div>
+
+                      {/* 평균 거래가 (핵심) */}
+                      <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                        <div className="text-sm text-green-600 mb-1">평균 거래가</div>
+                        <div className="text-2xl font-bold text-green-700">
+                          {autoTradeResult.averagePrice
+                            ? `${autoTradeResult.averagePrice.toLocaleString()}만원`
+                            : '-'}
+                        </div>
+                        <div className="text-xs text-green-600 mt-1">
+                          {autoTradeResult.filteredCount > 0
+                            ? `${autoTradeResult.filteredCount}건 기준`
+                            : '일치하는 거래 없음'}
+                        </div>
+                      </div>
+
+                      {/* 최소/최대 거래가 */}
+                      <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
+                        <div className="text-sm text-orange-600 mb-1">최소 / 최대</div>
+                        <div className="text-lg font-semibold text-orange-700">
+                          {autoTradeResult.minPrice && autoTradeResult.maxPrice
+                            ? `${autoTradeResult.minPrice.toLocaleString()} ~ ${autoTradeResult.maxPrice.toLocaleString()}`
+                            : '-'}
+                        </div>
+                        <div className="text-xs text-orange-600 mt-1">
+                          {autoTradeResult.minPrice && autoTradeResult.maxPrice
+                            ? `차이: ${(autoTradeResult.maxPrice - autoTradeResult.minPrice).toLocaleString()}만원`
+                            : '데이터 없음'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 필터 조건 표시 */}
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm">
+                      <span className="font-medium text-yellow-800">🎯 필터 조건:</span>
+                      <span className="ml-2 text-yellow-700">
+                        동 = &quot;{parsedAddress.dong}&quot; AND 지번 = &quot;{parsedAddress.jibun}&quot;
+                      </span>
+                    </div>
+
+                    {/* 필터링된 거래 목록 */}
+                    {autoTradeResult.filteredTransactions.length > 0 && (
+                      <div className="border rounded-lg overflow-hidden">
+                        <div className="bg-green-100 px-3 py-2 text-sm font-medium text-green-800 flex items-center gap-2">
+                          <span>✅ 일치하는 거래 목록</span>
+                          <span className="text-green-600">({autoTradeResult.filteredTransactions.length}건)</span>
+                        </div>
+                        <div className="max-h-64 overflow-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-100 sticky top-0">
+                              <tr>
+                                <th className="px-3 py-2 text-left">거래일</th>
+                                <th className="px-3 py-2 text-left">아파트명</th>
+                                <th className="px-3 py-2 text-right">전용면적</th>
+                                <th className="px-3 py-2 text-center">층</th>
+                                <th className="px-3 py-2 text-right">거래금액</th>
+                                <th className="px-3 py-2 text-left">법정동</th>
+                                <th className="px-3 py-2 text-left">지번</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {autoTradeResult.filteredTransactions.map((item, idx) => (
+                                <tr key={idx} className="border-t bg-green-50 hover:bg-green-100">
+                                  <td className="px-3 py-2">
+                                    {item.dealYear && item.dealMonth && item.dealDay
+                                      ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                      : 'N/A'}
+                                  </td>
+                                  <td className="px-3 py-2 font-medium">{item.aptName || item.aptNm || 'N/A'}</td>
+                                  <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                                  <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                                  <td className="px-3 py-2 text-right font-bold text-green-700">
+                                    {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
+                                  </td>
+                                  <td className="px-3 py-2 text-blue-700 font-medium">
+                                    {item.dong || item.umdNm || 'N/A'} ✓
+                                  </td>
+                                  <td className="px-3 py-2 text-orange-700 font-medium">
+                                    {item.jibun || 'N/A'} ✓
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 일치하는 거래가 없는 경우 */}
+                    {autoTradeResult.filteredCount === 0 && (
+                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center">
+                        <div className="text-gray-500 text-sm">
+                          😔 동 + 지번이 정확히 일치하는 거래가 없습니다.
+                        </div>
+                        <div className="text-gray-400 text-xs mt-1">
+                          동 일치: {autoTradeResult.dongMatchCount}건 | 지번 일치: {autoTradeResult.jibunMatchCount}건
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 파싱된 주소가 없는 경우 */}
+                {!autoTradeResult.loading && !autoTradeResult.error && !autoTradeResult.lawdCd && !parsedAddress?.jibun && (
+                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center text-sm text-gray-500">
+                    먼저 Step 1에서 등기부를 파싱하여 주소 정보를 추출하세요.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Original Step 2 Result */}
             {step2Result && (
