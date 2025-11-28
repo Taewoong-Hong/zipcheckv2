@@ -93,6 +93,12 @@ export default function DevCaseDetailPage({
   const [aptTradeResults, setAptTradeResults] = useState<any[]>([]);
   const [aptTradeLoading, setAptTradeLoading] = useState(false);
 
+  // 지번 주소 검색 (Juso API) state
+  const [jusoKeyword, setJusoKeyword] = useState('');
+  const [jusoResults, setJusoResults] = useState<any[]>([]);
+  const [jusoLoading, setJusoLoading] = useState(false);
+  const [selectedJuso, setSelectedJuso] = useState<any>(null);
+
   const [useLLM, setUseLLM] = useState(false);
 
   useEffect(() => {
@@ -366,6 +372,59 @@ export default function DevCaseDetailPage({
     }
   };
 
+  // 지번 주소 검색 (Juso API)
+  const searchJuso = async () => {
+    if (!jusoKeyword.trim()) {
+      alert('검색어를 입력하세요.');
+      return;
+    }
+
+    try {
+      setJusoLoading(true);
+      setJusoResults([]);
+      setSelectedJuso(null);
+
+      const response = await fetch('/api/realestate/juso', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: jusoKeyword }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      // FastAPI 형식: { header: { resultCode, resultMsg }, body: { items, totalCount } }
+      if (data.header?.resultCode === '000' && data.body?.items) {
+        setJusoResults(data.body.items);
+
+        // 검색 결과가 있으면 첫 번째 결과의 lawd5로 법정동 자동 선택
+        if (data.body.items.length > 0) {
+          const firstItem = data.body.items[0];
+          if (firstItem.lawd5) {
+            // 법정동코드도 자동 설정
+            setSelectedLegalDong({
+              regionCd: firstItem.admCd,
+              lawd5: firstItem.lawd5,
+              locataddNm: `${firstItem.siNm} ${firstItem.sggNm} ${firstItem.emdNm}`.trim(),
+            });
+          }
+        }
+      } else {
+        setJusoResults([]);
+        if (data.body?.error) {
+          console.warn('Juso search error:', data.body.error);
+        }
+      }
+    } catch (err: any) {
+      console.error('Juso search failed:', err);
+      alert(`검색 실패: ${err.message}`);
+    } finally {
+      setJusoLoading(false);
+    }
+  };
+
   // 케이스 주소로 법정동 검색 초기화
   useEffect(() => {
     if (case_data?.property_address) {
@@ -373,10 +432,12 @@ export default function DevCaseDetailPage({
     }
   }, [case_data]);
 
-  // PDF 파싱 결과 주소로 법정동 검색 업데이트
+  // PDF 파싱 결과 주소로 검색 키워드 업데이트
   useEffect(() => {
     if (step1Result?.success && step1Result.registry_doc_masked?.property_address) {
-      setLegalDongKeyword(step1Result.registry_doc_masked.property_address);
+      const parsedAddress = step1Result.registry_doc_masked.property_address;
+      setLegalDongKeyword(parsedAddress);
+      setJusoKeyword(parsedAddress);
     }
   }, [step1Result]);
 
@@ -838,6 +899,105 @@ export default function DevCaseDetailPage({
                 )}
               </div>
             )}
+
+            {/* 지번 주소 검색 UI (Juso API) */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-purple-50">
+              <h3 className="font-semibold text-purple-800 mb-3">🏠 지번 주소 검색 (상세)</h3>
+              <p className="text-sm text-purple-600 mb-3">
+                도로명주소 API를 사용하여 지번까지 상세 검색합니다. 검색 결과에서 선택하면 법정동코드가 자동으로 설정됩니다.
+              </p>
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={jusoKeyword}
+                  onChange={(e) => setJusoKeyword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && searchJuso()}
+                  placeholder="주소 검색 (예: 강남구 역삼동 123-45, 테헤란로 123)"
+                  className="flex-1 px-3 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <button
+                  onClick={searchJuso}
+                  disabled={jusoLoading}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {jusoLoading ? '검색 중...' : '지번 검색'}
+                </button>
+              </div>
+
+              {jusoResults.length > 0 && (
+                <div className="border border-purple-200 rounded-lg overflow-hidden">
+                  <div className="bg-purple-100 px-3 py-2 text-sm text-purple-800 font-medium">
+                    총 {jusoResults.length}개 결과
+                  </div>
+                  <div className="max-h-80 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-purple-50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left w-12">선택</th>
+                          <th className="px-3 py-2 text-left">도로명주소</th>
+                          <th className="px-3 py-2 text-left">지번주소</th>
+                          <th className="px-3 py-2 text-left">건물명</th>
+                          <th className="px-3 py-2 text-left">우편번호</th>
+                          <th className="px-3 py-2 text-left">법정동코드</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {jusoResults.map((item, idx) => (
+                          <tr
+                            key={idx}
+                            className={`border-t cursor-pointer hover:bg-purple-50 ${
+                              selectedJuso?.bdMgtSn === item.bdMgtSn ? 'bg-purple-100' : ''
+                            }`}
+                            onClick={() => {
+                              setSelectedJuso(item);
+                              // 법정동코드 자동 설정
+                              if (item.lawd5) {
+                                setSelectedLegalDong({
+                                  regionCd: item.admCd,
+                                  lawd5: item.lawd5,
+                                  locataddNm: `${item.siNm} ${item.sggNm} ${item.emdNm}`.trim(),
+                                });
+                              }
+                            }}
+                          >
+                            <td className="px-3 py-2">
+                              <input
+                                type="radio"
+                                name="juso"
+                                checked={selectedJuso?.bdMgtSn === item.bdMgtSn}
+                                onChange={() => {}}
+                                className="w-4 h-4 text-purple-600"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="font-medium">{item.roadAddr || 'N/A'}</div>
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="text-gray-600">{item.jibunAddr || 'N/A'}</div>
+                              {item.lnbrMnnm && (
+                                <div className="text-xs text-purple-600 font-mono">
+                                  지번: {item.lnbrMnnm}{item.lnbrSlno ? `-${item.lnbrSlno}` : ''}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">{item.bdNm || '-'}</td>
+                            <td className="px-3 py-2 font-mono">{item.zipNo || 'N/A'}</td>
+                            <td className="px-3 py-2 font-mono text-purple-600">{item.lawd5 || 'N/A'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {selectedJuso && (
+                    <div className="bg-purple-100 px-3 py-2 text-sm">
+                      <span className="font-medium text-purple-800">선택됨:</span>{' '}
+                      <span className="text-purple-900">{selectedJuso.roadAddr}</span>
+                      {selectedJuso.bdNm && <span className="text-purple-600"> ({selectedJuso.bdNm})</span>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* 법정동코드 검색 UI */}
             <div className="px-6 py-4 border-b border-gray-200">
