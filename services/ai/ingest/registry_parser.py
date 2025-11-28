@@ -229,6 +229,120 @@ def is_text_extractable_pdf(pdf_path: str, min_chars: int = 500) -> tuple[bool, 
 
 
 # ===========================
+# 요약페이지 파서 (말소 여부 판별의 핵심)
+# ===========================
+class SummaryData:
+    """요약페이지에서 추출한 유효 항목들"""
+    def __init__(self):
+        self.owner_name: Optional[str] = None
+        self.active_mortgage_amounts: List[int] = []  # 유효 근저당 금액 목록 (만원)
+        self.active_mortgage_creditors: List[str] = []  # 유효 근저당 채권자 목록
+        self.active_seizure_types: List[str] = []  # 유효 압류 유형 목록 (임의경매개시결정, 압류 등)
+        self.has_summary: bool = False  # 요약 섹션 존재 여부
+
+
+def parse_summary_section(text: str) -> SummaryData:
+    """
+    등기부 요약 섹션 파싱 (말소되지 않은 유효 항목만 포함)
+
+    요약 섹션 구조:
+    - 1. 소유지분현황 (갑구): 현재 소유자
+    - 2. 소유지분을 제외한 소유권에 관한 사항 (갑구): 압류, 가압류, 경매 등
+    - 3. (근)저당권 및 전세권 등 (을구): 근저당권, 전세권
+    """
+    summary = SummaryData()
+
+    # 요약 섹션 찾기
+    summary_patterns = [
+        r'주요\s*등기사항\s*요약',
+        r'주요등기사항요약',
+        r'\[참고용\]',
+    ]
+
+    summary_start = -1
+    for pattern in summary_patterns:
+        match = re.search(pattern, text)
+        if match:
+            summary_start = match.start()
+            break
+
+    if summary_start == -1:
+        logger.warning("⚠️ 요약 섹션을 찾을 수 없습니다. 전체 문서에서 파싱합니다.")
+        return summary
+
+    summary.has_summary = True
+    summary_text = text[summary_start:]
+    logger.info(f"📋 요약 섹션 발견 (위치: {summary_start}, 길이: {len(summary_text)}자)")
+
+    # 1. 소유자 추출 (소유지분현황 섹션)
+    # 패턴: "등기명의인" 행에서 이름 추출
+    owner_patterns = [
+        r'등기명의인[^\n]*\n[^\n]*?([가-힣]{2,10})\s*(?:\(소유자\)|\(소유\))?',  # 이월성 (소유자)
+        r'소유자[:\s]*([가-힣]{2,10})',
+        r'등기명의인\s+([가-힣]{2,10})',
+    ]
+
+    for pattern in owner_patterns:
+        match = re.search(pattern, summary_text)
+        if match:
+            summary.owner_name = match.group(1).strip()
+            logger.info(f"   └─ 소유자 (요약): {summary.owner_name}")
+            break
+
+    # 2. 압류/가압류/경매 추출 (섹션 2)
+    # "소유지분을 제외한 소유권에 관한 사항" 또는 "2." 섹션
+    section2_pattern = r'(?:소유지분을\s*제외한|2\.\s*소유)'
+    section2_match = re.search(section2_pattern, summary_text)
+
+    if section2_match:
+        # 섹션 2 시작부터 섹션 3 시작 전까지
+        section3_pattern = r'(?:저당권\s*및\s*전세권|3\.\s*\(근\)|을\s*구)'
+        section3_match = re.search(section3_pattern, summary_text[section2_match.start():])
+
+        if section3_match:
+            section2_text = summary_text[section2_match.start():section2_match.start() + section3_match.start()]
+        else:
+            section2_text = summary_text[section2_match.start():section2_match.start() + 1000]
+
+        # 등기목적 컬럼에서 유효 항목 추출
+        seizure_keywords = ['압류', '가압류', '가처분', '임의경매', '강제경매', '경매개시']
+        for keyword in seizure_keywords:
+            if keyword in section2_text:
+                summary.active_seizure_types.append(keyword)
+                logger.info(f"   └─ 유효 압류/경매 (요약): {keyword}")
+
+    # 3. 근저당권 추출 (섹션 3)
+    section3_pattern = r'(?:저당권\s*및\s*전세권|3\.\s*\(근\)저당권)'
+    section3_match = re.search(section3_pattern, summary_text)
+
+    if section3_match:
+        section3_text = summary_text[section3_match.start():]
+
+        # 채권최고액 추출 (금XXX,XXX,XXX원 패턴)
+        amount_pattern = r'금\s*([\d,]+)\s*원'
+        for match in re.finditer(amount_pattern, section3_text[:2000]):  # 섹션 3 내에서만
+            amount_str = match.group(1).replace(',', '')
+            try:
+                amount_won = int(amount_str)
+                amount_man = amount_won // 10000
+                summary.active_mortgage_amounts.append(amount_man)
+                logger.info(f"   └─ 유효 근저당 (요약): {amount_man:,}만원")
+            except ValueError:
+                pass
+
+        # 채권자 추출 (근저당권자: XXX 패턴)
+        creditor_pattern = r'(?:근저당권자|채권자)[:\s]*([^\s\n]+(?:은행|저축은행|캐피탈|금융|신협)?)'
+        for match in re.finditer(creditor_pattern, section3_text[:2000]):
+            creditor = match.group(1).strip()
+            if creditor and len(creditor) >= 2:
+                summary.active_mortgage_creditors.append(creditor)
+
+    logger.info(f"📋 요약 파싱 완료: 소유자={summary.owner_name}, 유효근저당={len(summary.active_mortgage_amounts)}건, 유효압류={len(summary.active_seizure_types)}건")
+
+    return summary
+
+
+# ===========================
 # 정규식 기반 파서
 # ===========================
 def extract_property_address(text: str) -> Optional[str]:
@@ -271,18 +385,24 @@ def extract_owner_name(text: str) -> Optional[str]:
     return None
 
 
-def extract_mortgages(text: str) -> List[MortgageInfo]:
-    """근저당권 추출 (을구)"""
+def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[MortgageInfo]:
+    """
+    근저당권 추출 (을구)
+
+    말소 판별 로직 (우선순위):
+    1. 요약 섹션이 있으면: 요약에 있는 금액만 유효, 나머지 말소
+    2. 요약 섹션이 없으면: 텍스트 키워드 기반 판별 (fallback)
+    """
     mortgages = []
 
     # 패턴: 채권최고액, 채권자, 채무자 추출
     # 예: "채권최고액 금 1,172,400,000원"
     amount_pattern = r'채권최고액\s*금?\s*([\d,]+)\s*원'
-    creditor_pattern = r'채권자\s*[:：]?\s*([^\n]+?)(?:\s|$)'
+    creditor_pattern = r'(?:근저당권자|채권자)\s*[:：]?\s*([^\n]+?)(?:\s|$)'
     debtor_pattern = r'채무자\s*[:：]?\s*([가-힣]+)'
 
-    # 말소 여부 판별 키워드
-    deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제']
+    # 요약 기반 유효 금액 목록 (복사본 사용 - 매칭 시 제거)
+    active_amounts = list(summary.active_mortgage_amounts) if summary and summary.has_summary else []
 
     # 모든 근저당권 찾기
     for amount_match in re.finditer(amount_pattern, text):
@@ -305,8 +425,20 @@ def extract_mortgages(text: str) -> List[MortgageInfo]:
         if debtor_match:
             debtor = debtor_match.group(1).strip()
 
-        # 말소 여부 판별 (컨텍스트 내 키워드 검색)
-        is_deleted = any(keyword in context for keyword in deletion_keywords)
+        # 말소 여부 판별
+        if summary and summary.has_summary:
+            # 요약 기반 판별: 요약에 있는 금액과 매칭되면 유효
+            is_deleted = True
+            for i, active_amount in enumerate(active_amounts):
+                # 금액이 일치하면 유효 (±1만원 오차 허용)
+                if abs(amount_man - active_amount) <= 1:
+                    is_deleted = False
+                    active_amounts.pop(i)  # 이미 매칭된 금액은 제거
+                    break
+        else:
+            # Fallback: 텍스트 키워드 기반 판별
+            deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제']
+            is_deleted = any(keyword in context for keyword in deletion_keywords)
 
         mortgages.append(MortgageInfo(
             creditor=creditor,
@@ -318,20 +450,32 @@ def extract_mortgages(text: str) -> List[MortgageInfo]:
     return mortgages
 
 
-def extract_seizures(text: str) -> List[SeizureInfo]:
-    """압류/가압류/가처분 추출 (갑구)"""
+def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[SeizureInfo]:
+    """
+    압류/가압류/가처분 추출 (갑구)
+
+    말소 판별 로직 (우선순위):
+    1. 요약 섹션이 있으면: 요약에 있는 유형만 유효, 나머지 말소
+    2. 요약 섹션이 없으면: 텍스트 키워드 기반 판별 (fallback)
+    """
     seizures = []
 
     # 패턴: "압류", "가압류", "가처분", "임의경매" 등
     seizure_keywords = {
         '가압류': '가압류',
         '가처분': '가처분',
+        '임의경매개시결정': '압류',
         '임의경매': '압류',
+        '강제경매개시결정': '압류',
         '강제경매': '압류',
+        '경매개시': '압류',
         '압류': '압류',
     }
 
-    # 말소 여부 판별 키워드
+    # 요약에서 유효 압류 유형 (복사본 사용)
+    active_seizure_types = list(summary.active_seizure_types) if summary and summary.has_summary else []
+
+    # 말소 여부 판별 키워드 (fallback용)
     deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
 
     for keyword, seizure_type in seizure_keywords.items():
@@ -340,39 +484,52 @@ def extract_seizures(text: str) -> List[SeizureInfo]:
         if pattern_search not in text:
             continue
 
-        # 키워드 위치 찾기
-        keyword_pos = text.find(keyword)
-        if keyword_pos == -1:
-            continue
+        # 키워드 위치 찾기 - 모든 발생 위치를 찾음
+        for keyword_match in re.finditer(re.escape(keyword), text):
+            keyword_pos = keyword_match.start()
 
-        # 컨텍스트 추출 (앞뒤 200자)
-        start = max(0, keyword_pos - 100)
-        end = min(len(text), keyword_pos + 300)
-        context = text[start:end]
+            # 컨텍스트 추출 (앞뒤 200자)
+            start = max(0, keyword_pos - 100)
+            end = min(len(text), keyword_pos + 300)
+            context = text[start:end]
 
-        # 근처에서 채권자 찾기
-        pattern = f'{keyword}[^가-힣]{{0,50}}([가-힣]+(?:캐피탈|은행|금융|신협|저축|증권|국세청|시청|구청)?)'
-        match = re.search(pattern, context)
-        creditor = match.group(1).strip() if match else None
+            # 근처에서 채권자 찾기
+            pattern = f'{re.escape(keyword)}[^가-힣]{{0,50}}([가-힣]+(?:캐피탈|은행|금융|신협|저축|증권|국세청|시청|구청)?)'
+            match = re.search(pattern, context)
+            creditor = match.group(1).strip() if match else None
 
-        # 금액 찾기 (있을 경우)
-        amount = None
-        amount_pattern = rf'{keyword}[^0-9]{{0,100}}금?\s*([\d,]+)\s*원'
-        amount_match = re.search(amount_pattern, context)
-        if amount_match:
-            amount_str = amount_match.group(1).replace(',', '')
-            amount = int(amount_str) // 10000  # 만원 단위
+            # 금액 찾기 (있을 경우)
+            amount = None
+            amount_pattern = rf'{re.escape(keyword)}[^0-9]{{0,100}}금?\s*([\d,]+)\s*원'
+            amount_match = re.search(amount_pattern, context)
+            if amount_match:
+                amount_str = amount_match.group(1).replace(',', '')
+                amount = int(amount_str) // 10000  # 만원 단위
 
-        # 말소 여부 판별 (컨텍스트 내 키워드 검색)
-        is_deleted = any(del_kw in context for del_kw in deletion_keywords)
+            # 말소 여부 판별
+            if summary and summary.has_summary:
+                # 요약 기반 판별: 요약에 해당 키워드가 있으면 유효
+                is_deleted = True
+                for i, active_type in enumerate(active_seizure_types):
+                    # 키워드가 요약의 유효 유형과 매칭되면 유효
+                    if keyword in active_type or active_type in keyword:
+                        is_deleted = False
+                        active_seizure_types.pop(i)  # 이미 매칭된 유형은 제거
+                        break
+            else:
+                # Fallback: 텍스트 키워드 기반 판별
+                is_deleted = any(del_kw in context for del_kw in deletion_keywords)
 
-        seizures.append(SeizureInfo(
-            type=seizure_type,
-            creditor=creditor,
-            amount=amount,
-            description=keyword,  # 원본 키워드 저장
-            is_deleted=is_deleted
-        ))
+            seizures.append(SeizureInfo(
+                type=seizure_type,
+                creditor=creditor,
+                amount=amount,
+                description=keyword,  # 원본 키워드 저장
+                is_deleted=is_deleted
+            ))
+
+            # 같은 키워드의 첫 번째 발생만 처리 (중복 방지)
+            break
 
     return seizures
 
@@ -473,14 +630,28 @@ def extract_lease_rights(text: str) -> List[LeaseRightInfo]:
 
 
 def parse_with_regex(raw_text: str) -> RegistryDocument:
-    """정규식 기반 등기부 파싱 (LLM 없음)"""
+    """
+    정규식 기반 등기부 파싱 (LLM 없음)
+
+    파싱 순서:
+    1. 요약 섹션 먼저 파싱 (말소 여부 판별의 핵심)
+    2. 요약 정보를 각 추출 함수에 전달
+    3. 요약에 있는 항목만 유효, 나머지는 말소 처리
+    """
+    # Step 1: 요약 섹션 파싱 (가장 먼저!)
+    summary = parse_summary_section(raw_text)
+
+    # Step 2: 소유자 추출 (요약 우선, fallback으로 전체 문서)
+    owner_name = summary.owner_name if summary.has_summary else extract_owner_name(raw_text)
+
+    # Step 3: 각 항목 추출 (요약 정보 전달)
     return RegistryDocument(
         property_address=extract_property_address(raw_text),
-        owner=OwnerInfo(name=extract_owner_name(raw_text)),
-        # 갑구
-        seizures=extract_seizures(raw_text),
-        # 을구
-        mortgages=extract_mortgages(raw_text),
+        owner=OwnerInfo(name=owner_name),
+        # 갑구 (요약 기반 말소 판별)
+        seizures=extract_seizures(raw_text, summary),
+        # 을구 (요약 기반 말소 판별)
+        mortgages=extract_mortgages(raw_text, summary),
         pledges=extract_pledges(raw_text),
         lease_rights=extract_lease_rights(raw_text),
         raw_text=raw_text
