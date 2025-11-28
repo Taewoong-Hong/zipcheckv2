@@ -373,6 +373,13 @@ export default function DevCaseDetailPage({
     }
   }, [case_data]);
 
+  // PDF 파싱 결과 주소로 법정동 검색 업데이트
+  useEffect(() => {
+    if (step1Result?.success && step1Result.registry_doc_masked?.property_address) {
+      setLegalDongKeyword(step1Result.registry_doc_masked.property_address);
+    }
+  }, [step1Result]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
