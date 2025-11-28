@@ -205,14 +205,14 @@ class ChatSyncService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Idempotency-Key': message.client_message_id || message.id,
+        'X-Idempotency-Key': String(message.client_message_id || message.id),
         // Authorization 헤더는 상위 레벨에서 추가
       },
       body: JSON.stringify({
         conversation_id: message.conversation_id,
         content: message.content,
         parent_id: message.parent_id,
-        client_message_id: message.client_message_id || message.id,
+        client_message_id: String(message.client_message_id || message.id),
       }),
     });
 

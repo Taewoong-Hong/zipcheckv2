@@ -115,7 +115,6 @@ export async function POST(request: NextRequest) {
       console.error('Case creation error:', caseError);
       throw new Error(`케이스 생성 실패: ${caseError.message}`);
     }
-
     // 7. v2_artifacts 테이블에 아티팩트 생성
     const { error: artifactError } = await supabase
       .from('v2_artifacts')
@@ -125,6 +124,7 @@ export async function POST(request: NextRequest) {
         user_id: DEV_SYSTEM_USER_ID,
         artifact_type: 'registry_pdf',
         file_path: `artifacts/${storagePath}`,
+        file_name: file.name,  // ← 이 줄 추가!
         file_size: file.size,
         mime_type: file.type,
         created_at: timestamp,

@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
   }
 
   const saveResult = await saveResponse.json();
-  const userMessageId = saveResult.message_id; // ✨ 백엔드에서 반환된 message_id
+  const userMessageId = String(saveResult.message_id); // 백엔드에서 반환한 message_id를 문자열로 변환 (Pydantic string type 요구사항)
   console.log('메시지 저장 완료:', saveResult, 'message_id:', userMessageId);
 
   // 2. 단계 게이트: 주소/계약유형 수집 전에는 LLM 호출하지 않고 안내만 반환
@@ -683,46 +683,68 @@ export async function POST(request: NextRequest) {
     console.warn('[api/chat] assistant message insert failed:', insertErr);
   }
 
-  // 5. 스트리밍 응답 반환
+  // 5. 스트리밍 응답 반환 (개선: 레이스 컨디션 방지)
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
-      start(controller) {
-        // Send meta event first (e.g., newConversationId, userMessageId)
-        const metaEvent: any = { done: false, meta: true };
-        if (newConversationId) metaEvent.newConversationId = newConversationId;
-        if (userMessageId) metaEvent.user_message_id = userMessageId; // ✨ 사용자 메시지 ID 포함
-        if (newConversationId || userMessageId) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(metaEvent)}\n\n`));
-        }
+      async start(controller) {
+        try {
+          // Send meta event first (e.g., newConversationId, userMessageId)
+          const metaEvent: any = { done: false, meta: true };
+          if (newConversationId) metaEvent.newConversationId = newConversationId;
+          if (userMessageId) metaEvent.user_message_id = userMessageId; // ✨ 사용자 메시지 ID 포함
+          if (newConversationId || userMessageId) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(metaEvent)}\n\n`));
+          }
 
-        // Send tool calls if any (for v2)
-        if (toolCalls.length > 0) {
-          toolCalls.forEach((toolCall: any) => {
-            const toolData = JSON.stringify({
-              meta: true,
-              toolCall: toolCall,
-              done: false
-            });
-            controller.enqueue(encoder.encode(`data: ${toolData}\n\n`));
-          });
-        }
+          // Send tool calls if any (for v2)
+          if (toolCalls.length > 0) {
+            for (const toolCall of toolCalls) {
+              const toolData = JSON.stringify({
+                meta: true,
+                toolCall: toolCall,
+                done: false
+              });
+              controller.enqueue(encoder.encode(`data: ${toolData}\n\n`));
+            }
+          }
 
-        const chunks = answer.split(' ');
-        chunks.forEach((chunk: string, index: number) => {
-          setTimeout(() => {
-            const content = index === 0 ? chunk : ' ' + chunk;
+          // 안전한 청크 스트리밍 (async/await로 레이스 컨디션 방지)
+          const chunks = answer.split(' ');
+          for (let i = 0; i < chunks.length; i++) {
+            // Controller 상태 체크 (클라이언트 연결 끊김 감지)
+            if (controller.desiredSize === null) {
+              console.warn('[SSE] Stream closed by client, stopping chunks');
+              break;
+            }
+
+            const content = i === 0 ? chunks[i] : ' ' + chunks[i];
             const data = JSON.stringify({ content, done: false });
             controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
-            if (index === chunks.length - 1) {
-              setTimeout(() => {
-                const doneData = JSON.stringify({ done: true });
-                controller.enqueue(encoder.encode(`data: ${doneData}\n\n`));
-                controller.close();
-              }, 50);
+            // 마지막 청크가 아니면 50ms 대기
+            if (i < chunks.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 50));
             }
-          }, index * 50);
-        });
+          }
+
+          // 최종 완료 이벤트 (controller가 아직 열려있을 때만)
+          if (controller.desiredSize !== null) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+            const doneData = JSON.stringify({ done: true });
+            controller.enqueue(encoder.encode(`data: ${doneData}\n\n`));
+            controller.close();
+          }
+        } catch (error) {
+          console.error('[SSE] Stream error:', error);
+          // 에러 발생 시 안전하게 종료
+          if (controller.desiredSize !== null) {
+            try {
+              controller.close();
+            } catch (closeError) {
+              // Controller가 이미 닫혀있으면 무시
+            }
+          }
+        }
       },
     });
 

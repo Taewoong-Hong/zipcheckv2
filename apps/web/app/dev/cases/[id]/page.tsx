@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { use } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface ParsedRegistryResult {
   success: boolean;
@@ -37,10 +38,13 @@ export default function DevCaseDetailPage({
 }) {
   const resolvedParams = use(params);
   const caseId = resolvedParams.id;
+  const router = useRouter();
 
   const [case_data, setCaseData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Step results
   const [step1Result, setStep1Result] = useState<ParsedRegistryResult | null>(null);
@@ -76,6 +80,40 @@ export default function DevCaseDetailPage({
       setError(err.message || 'Failed to load case');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    const confirmed = window.confirm('Delete this case?');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeleteError(null);
+      setDeleting(true);
+
+      const response = await fetch(`/api/cases/${caseId}?environment=dev`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        let message = `HTTP ${response.status}`;
+        try {
+          const data = await response.json();
+          if (data?.error) {
+            message = data.error;
+          }
+        } catch (_) {}
+        throw new Error(message);
+      }
+
+      router.push('/dev/cases');
+    } catch (err: any) {
+      console.error('Delete case failed:', err);
+      setDeleteError(err.message || 'Delete failed');
+    } finally {
+      setDeleting(false);
     }
   };
 

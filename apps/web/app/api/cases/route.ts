@@ -1,18 +1,11 @@
 /**
  * Cases API Route
- *
- * GET /api/cases?environment=dev&source=lab
- * - Fetches cases from Supabase filtered by environment and source
- *
- * Lab 케이스 조회: environment=dev, source=lab
- * Service 케이스 조회: environment=prod, source=service
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export async function GET(request: NextRequest) {
   try {
-    // Get query parameters
     const searchParams = request.nextUrl.searchParams;
     const environment = searchParams.get('environment');
     const source = searchParams.get('source');
@@ -24,28 +17,24 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Initialize Supabase client
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;  // ← 변경
 
-    if (!supabaseUrl || !supabaseAnonKey) {
+    if (!supabaseUrl || !supabaseServiceKey) {
       throw new Error('Supabase credentials not configured');
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);  // ← 변경
 
-    // Build query with environment filter
     let query = supabase
       .from('v2_cases')
       .select('*')
       .eq('environment', environment);
 
-    // Add source filter if provided
     if (source) {
       query = query.eq('source', source);
     }
 
-    // Execute query with ordering
     const { data: cases, error } = await query.order('created_at', { ascending: false });
 
     if (error) {

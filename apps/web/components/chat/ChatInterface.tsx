@@ -54,6 +54,7 @@ export default function ChatInterface({
   // Conversation init single-flight and abort control
   const conversationInitPromiseRef = useRef<Promise<string> | null>(null);
   const initAbortRef = useRef<AbortController | null>(null);
+  const justCreatedConversation = useRef(false); // Skip message loading for newly created conversations
 
   // Analysis flow state
   const [stateMachine] = useState(() => new StateMachine('init'));
@@ -79,6 +80,13 @@ export default function ChatInterface({
   useEffect(() => {
     const loadMessages = async () => {
       if (!conversationId || !session?.access_token) {
+        return;
+      }
+
+      // Skip loading if conversation was just created (welcome messages already loaded in getOrCreateConversationId)
+      if (justCreatedConversation.current) {
+        justCreatedConversation.current = false;
+        console.log('[ChatInterface] Skipping message load - conversation just created, welcome messages already loaded');
         return;
       }
 
@@ -198,6 +206,7 @@ export default function ChatInterface({
 
       // 3) 상태에 반영
       setConversationId(id);
+      justCreatedConversation.current = true; // Skip message loading for newly created conversation
       console.log('[getOrCreateConversationId] Conversation initialized:', id);
 
       // 4) 환영 메시지 로드 (백엔드에서 이미 생성됨)
@@ -853,10 +862,8 @@ export default function ChatInterface({
     };
   }, [resetChat, loadSession, saveCurrentChat]);
 
-  // Auto scroll to bottom when new messages arrive
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // ChatGPT/Claude-like behavior: No automatic scrolling on message changes
+  // Users can manually scroll to see new messages or use scroll-to-bottom button
 
   const handleSubmit = async (content?: string, e?: React.FormEvent): Promise<boolean> => {
     if (e) e.preventDefault();

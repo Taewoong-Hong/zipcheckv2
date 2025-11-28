@@ -24,13 +24,14 @@ export async function GET(
 
     // Initialize Supabase client
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    // 변경 후
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !supabaseAnonKey) {
+    if (!supabaseUrl || !supabaseServiceKey) {
       throw new Error('Supabase credentials not configured');
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Query case from v2_cases table
     const { data: caseData, error: caseError } = await supabase
@@ -82,6 +83,90 @@ export async function GET(
 
   } catch (error: any) {
     console.error('GET /api/cases/[id] error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: caseId } = await params;
+    const environment = request.nextUrl.searchParams.get('environment') || 'dev';
+
+    if (!caseId) {
+      return NextResponse.json(
+        { error: 'Case ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error('Supabase credentials not configured');
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { data: caseData, error: fetchError } = await supabase
+      .from('v2_cases')
+      .select('environment')
+      .eq('id', caseId)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return NextResponse.json(
+          { error: 'Case not found' },
+          { status: 404 }
+        );
+      }
+      throw new Error(`Supabase query error: ${fetchError.message}`);
+    }
+
+    if (caseData.environment !== environment) {
+      return NextResponse.json(
+        { error: 'Environment mismatch' },
+        { status: 403 }
+      );
+    }
+
+    const { error: artifactDeleteError } = await supabase
+      .from('v2_artifacts')
+      .delete()
+      .eq('case_id', caseId);
+
+    if (artifactDeleteError) {
+      throw new Error(`Failed to delete artifacts: ${artifactDeleteError.message}`);
+    }
+
+    const { error: reportDeleteError } = await supabase
+      .from('v2_reports')
+      .delete()
+      .eq('case_id', caseId);
+
+    if (reportDeleteError) {
+      throw new Error(`Failed to delete reports: ${reportDeleteError.message}`);
+    }
+
+    const { error: caseDeleteError } = await supabase
+      .from('v2_cases')
+      .delete()
+      .eq('id', caseId);
+
+    if (caseDeleteError) {
+      throw new Error(`Failed to delete case: ${caseDeleteError.message}`);
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error: any) {
+    console.error('DELETE /api/cases/[id] error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
       { status: 500 }

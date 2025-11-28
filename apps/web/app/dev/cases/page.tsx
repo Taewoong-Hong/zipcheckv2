@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -15,6 +15,8 @@ export default function DevCasesPage() {
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     loadCases();
@@ -42,11 +44,45 @@ export default function DevCasesPage() {
     }
   };
 
+  const handleDelete = async (caseId: string) => {
+    const confirmed = window.confirm('Delete this case?');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeleteError(null);
+      setDeletingId(caseId);
+
+      const response = await fetch(`/api/cases/${caseId}?environment=dev`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        let message = `HTTP ${response.status}`;
+        try {
+          const data = await response.json();
+          if (data?.error) {
+            message = data.error;
+          }
+        } catch (_) {}
+        throw new Error(message);
+      }
+
+      setCases((prev) => prev.filter((c) => c.id !== caseId));
+    } catch (err: any) {
+      console.error('Delete case failed:', err);
+      setDeleteError(err.message || 'Delete failed');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold mb-8">집체크 Analysis Lab</h1>
+          <h1 className="text-3xl font-bold mb-8">吏묒껜??Analysis Lab</h1>
           <div className="text-gray-600">Loading cases...</div>
         </div>
       </div>
@@ -57,7 +93,7 @@ export default function DevCasesPage() {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold mb-8">집체크 Analysis Lab</h1>
+          <h1 className="text-3xl font-bold mb-8">吏묒껜??Analysis Lab</h1>
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <p className="text-red-800 font-medium">Error loading cases</p>
             <p className="text-red-600 text-sm mt-1">{error}</p>
@@ -78,10 +114,10 @@ export default function DevCasesPage() {
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold">집체크 Analysis Lab</h1>
+            <h1 className="text-3xl font-bold">吏묒껜??Analysis Lab</h1>
             <div className="text-sm text-gray-500 mt-1">
-              환경: <span className="font-mono font-medium text-blue-600">dev</span> /
-              소스: <span className="font-mono font-medium text-green-600">lab</span>
+              ?섍꼍: <span className="font-mono font-medium text-blue-600">dev</span> /
+              ?뚯뒪: <span className="font-mono font-medium text-green-600">lab</span>
             </div>
           </div>
           <Link
@@ -91,15 +127,21 @@ export default function DevCasesPage() {
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            케이스 업로드
+            耳?댁뒪 ?낅줈??
           </Link>
         </div>
+
+        {deleteError && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
+            {deleteError}
+          </div>
+        )}
 
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-lg font-semibold">Cases ({cases.length})</h2>
             <p className="text-sm text-gray-600 mt-1">
-              Analysis Lab에서 생성된 케이스 목록입니다. (source=lab)
+              Analysis Lab?먯꽌 ?앹꽦??耳?댁뒪 紐⑸줉?낅땲?? (source=lab)
             </p>
           </div>
 
@@ -119,22 +161,33 @@ export default function DevCasesPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="font-medium text-gray-900">
-                          {c.property_address || '주소 미정'}
+                          {c.property_address || '二쇱냼 誘몄젙'}
                         </h3>
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          {c.contract_type || '계약 미정'}
+                          {c.contract_type || '怨꾩빟 誘몄젙'}
                         </span>
                       </div>
                       <div className="flex items-center gap-4 text-sm text-gray-500">
                         <div>
-                          상태: <span className="font-mono">{c.current_state}</span>
+                          ?곹깭: <span className="font-mono">{c.current_state}</span>
                         </div>
                         <div>
-                          생성일: {new Date(c.created_at).toLocaleString('ko-KR')}
+                          ?앹꽦?? {new Date(c.created_at).toLocaleString('ko-KR')}
                         </div>
                       </div>
                     </div>
-                    <div className="ml-4">
+                    <div className="ml-4 flex items-center gap-3">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDelete(c.id);
+                        }}
+                        disabled={deletingId === c.id}
+                        className="px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      >
+                        {deletingId === c.id ? 'Deleting...' : 'Delete'}
+                      </button>
                       <svg
                         className="w-5 h-5 text-gray-400"
                         fill="none"
@@ -157,12 +210,13 @@ export default function DevCasesPage() {
         </div>
 
         <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-yellow-800 text-sm font-medium">⚠️ 개발 전용 페이지</p>
+          <p className="text-yellow-800 text-sm font-medium">?좑툘 媛쒕컻 ?꾩슜 ?섏씠吏</p>
           <p className="text-yellow-700 text-sm mt-1">
-            이 페이지는 개발자 디버깅 전용입니다. 프로덕션 환경에서는 접근할 수 없습니다.
+            ???섏씠吏??媛쒕컻???붾쾭源??꾩슜?낅땲?? ?꾨줈?뺤뀡 ?섍꼍?먯꽌???묎렐?????놁뒿?덈떎.
           </p>
         </div>
       </div>
     </div>
   );
 }
+
