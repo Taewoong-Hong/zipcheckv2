@@ -488,18 +488,30 @@ export default function DevCaseDetailPage({
         const lawdCd = legalDongData.body.items[0].lawd5;
         const lawdName = legalDongData.body.items[0].locataddNm;
 
-        // 2. 실거래가 조회 (2025년 10월 하드코딩)
-        const aptTradeRes = await fetch('/api/realestate/apt-trade', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            lawdCd,
-            dealYmd: '202510',
-          }),
-        });
-        const aptTradeData = await aptTradeRes.json();
+        // 2. 실거래가 조회 (최근 3개월)
+        const now = new Date();
+        const allTransactions: any[] = [];
 
-        const allTransactions = aptTradeData.body?.items || [];
+        for (let i = 0; i < 3; i++) {
+          const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const dealYmd = `${targetDate.getFullYear()}${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+
+          try {
+            const aptTradeRes = await fetch('/api/realestate/apt-trade', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lawdCd, dealYmd }),
+            });
+            const aptTradeData = await aptTradeRes.json();
+            const items = aptTradeData.body?.items || [];
+            allTransactions.push(...items);
+            console.log(`[자동 조회] ${dealYmd}: ${items.length}건`);
+          } catch (err) {
+            console.warn(`[자동 조회] ${dealYmd} 실패:`, err);
+          }
+        }
+
+        console.log(`[자동 조회] 최근 3개월 총: ${allTransactions.length}건`);
 
         // 3. 필터링 (동 + 지번 정확히 일치)
         const targetDong = parsedAddress.dong.replace(/[동읍면리가]$/, '');
