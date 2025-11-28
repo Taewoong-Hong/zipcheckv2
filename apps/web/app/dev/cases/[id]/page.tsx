@@ -92,8 +92,41 @@ export default function DevCaseDetailPage({
   const [aptTradeMonth, setAptTradeMonth] = useState(new Date().getMonth() + 1);
   const [aptTradeResults, setAptTradeResults] = useState<any[]>([]);
   const [aptTradeLoading, setAptTradeLoading] = useState(false);
+  const [jibunFilter, setJibunFilter] = useState(false); // 지번 필터 활성화
+
+  // 파싱된 주소 정보 (지번 포함)
+  const [parsedAddress, setParsedAddress] = useState<{
+    full: string;      // 전체 주소
+    dong: string;      // 동/읍/면/리
+    jibun: string;     // 지번 (예: 123-45)
+    building: string;  // 건물명/호수
+  } | null>(null);
 
   const [useLLM, setUseLLM] = useState(false);
+
+  // 주소에서 지번 추출하는 함수
+  const parseAddressComponents = (address: string) => {
+    if (!address) return null;
+
+    // 지번 패턴: 숫자-숫자 또는 숫자 (동/리/가 뒤에 오는)
+    const jibunMatch = address.match(/(?:동|리|가)\s+(\d+(?:-\d+)?)/);
+    const jibun = jibunMatch ? jibunMatch[1] : '';
+
+    // 동/읍/면/리 추출
+    const dongMatch = address.match(/([가-힣]+(?:동|읍|면|리|가))/g);
+    const dong = dongMatch ? dongMatch[dongMatch.length - 1] : '';
+
+    // 건물명/호수 추출 (지번 이후 부분)
+    const buildingMatch = address.match(/\d+(?:-\d+)?\s+(.+)/);
+    const building = buildingMatch ? buildingMatch[1] : '';
+
+    return {
+      full: address,
+      dong,
+      jibun,
+      building,
+    };
+  };
 
   useEffect(() => {
     loadCase();
@@ -373,10 +406,19 @@ export default function DevCaseDetailPage({
     }
   }, [case_data]);
 
-  // PDF 파싱 결과 주소로 법정동 검색 업데이트
+  // PDF 파싱 결과 주소로 법정동 검색 업데이트 + 지번 추출
   useEffect(() => {
     if (step1Result?.success && step1Result.registry_doc_masked?.property_address) {
-      setLegalDongKeyword(step1Result.registry_doc_masked.property_address);
+      const address = step1Result.registry_doc_masked.property_address;
+      setLegalDongKeyword(address);
+
+      // 주소에서 지번 추출
+      const parsed = parseAddressComponents(address);
+      setParsedAddress(parsed);
+
+      if (parsed?.jibun) {
+        console.log('[지번 추출]', parsed);
+      }
     }
   }, [step1Result]);
 
@@ -913,6 +955,21 @@ export default function DevCaseDetailPage({
             {/* 아파트 실거래가 조회 UI */}
             <div className="px-6 py-4 border-b border-gray-200">
               <h3 className="font-semibold text-gray-800 mb-3">2. 아파트 실거래가 조회</h3>
+
+              {/* 파싱된 주소 정보 (지번 포함) */}
+              {parsedAddress && (
+                <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="text-sm">
+                    <span className="font-medium text-yellow-800">📍 파싱된 주소 정보</span>
+                    <div className="mt-1 grid grid-cols-3 gap-2 text-yellow-700">
+                      <div><span className="font-medium">동:</span> {parsedAddress.dong || '-'}</div>
+                      <div><span className="font-medium">지번:</span> <span className="font-mono bg-yellow-100 px-1 rounded">{parsedAddress.jibun || '-'}</span></div>
+                      <div><span className="font-medium">건물:</span> {parsedAddress.building || '-'}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-4 mb-4">
                 <div className="flex items-center gap-2">
                   <select
@@ -946,61 +1003,117 @@ export default function DevCaseDetailPage({
                     * 먼저 법정동코드를 선택하세요
                   </span>
                 )}
+                {/* 지번 필터 토글 */}
+                {parsedAddress?.jibun && aptTradeResults.length > 0 && (
+                  <label className="flex items-center gap-2 ml-4 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={jibunFilter}
+                      onChange={(e) => setJibunFilter(e.target.checked)}
+                      className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                    />
+                    <span className="text-sm text-orange-700 font-medium">
+                      지번 필터 ({parsedAddress.jibun})
+                    </span>
+                  </label>
+                )}
               </div>
 
-              {aptTradeResults.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
-                  <div className="bg-green-50 px-3 py-2 text-sm text-green-800 font-medium">
-                    {aptTradeResults.length}개의 거래를 찾았습니다.
-                  </div>
-                  <div className="max-h-96 overflow-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-100 sticky top-0">
-                        <tr>
-                          <th className="px-3 py-2 text-left">거래일</th>
-                          <th className="px-3 py-2 text-left">아파트명</th>
-                          <th className="px-3 py-2 text-right">전용면적</th>
-                          <th className="px-3 py-2 text-center">층</th>
-                          <th className="px-3 py-2 text-right">거래금액</th>
-                          <th className="px-3 py-2 text-left">법정동</th>
-                          <th className="px-3 py-2 text-left">지번</th>
-                          <th className="px-3 py-2 text-center">건축년도</th>
-                          <th className="px-3 py-2 text-center">거래유형</th>
-                          <th className="px-3 py-2 text-center">해제여부</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {aptTradeResults.map((item, idx) => (
-                          <tr key={idx} className="border-t hover:bg-gray-50">
-                            <td className="px-3 py-2">
-                              {item.dealYear && item.dealMonth && item.dealDay
-                                ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
-                                : 'N/A'}
-                            </td>
-                            <td className="px-3 py-2 font-medium">{item.aptName || item.aptNm || 'N/A'}</td>
-                            <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
-                            <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-blue-600">
-                              {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
-                            </td>
-                            <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
-                            <td className="px-3 py-2">{item.jibun || 'N/A'}</td>
-                            <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
-                            <td className="px-3 py-2 text-center">{item.dealingGbn || '-'}</td>
-                            <td className="px-3 py-2 text-center">
-                              {item.cancelDealType || item.cdealType ? (
-                                <span className="text-red-600">해제</span>
-                              ) : (
-                                <span className="text-green-600">-</span>
-                              )}
-                            </td>
+              {aptTradeResults.length > 0 && (() => {
+                // 지번 필터 적용
+                const filteredResults = jibunFilter && parsedAddress?.jibun
+                  ? aptTradeResults.filter(item => {
+                      const itemJibun = item.jibun?.toString().trim();
+                      const targetJibun = parsedAddress.jibun.trim();
+                      // 본번만 비교 (예: 123-45 → 123)
+                      const itemBonbun = itemJibun?.split('-')[0];
+                      const targetBonbun = targetJibun.split('-')[0];
+                      return itemBonbun === targetBonbun;
+                    })
+                  : aptTradeResults;
+
+                // 지번 일치 여부 확인 함수
+                const isJibunMatch = (item: any) => {
+                  if (!parsedAddress?.jibun) return false;
+                  const itemJibun = item.jibun?.toString().trim();
+                  const targetJibun = parsedAddress.jibun.trim();
+                  const itemBonbun = itemJibun?.split('-')[0];
+                  const targetBonbun = targetJibun.split('-')[0];
+                  return itemBonbun === targetBonbun;
+                };
+
+                return (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-green-50 px-3 py-2 text-sm text-green-800 font-medium flex items-center justify-between">
+                      <span>
+                        {jibunFilter
+                          ? `${filteredResults.length}개의 거래 (전체 ${aptTradeResults.length}개 중 지번 "${parsedAddress?.jibun}" 필터)`
+                          : `${aptTradeResults.length}개의 거래를 찾았습니다.`}
+                      </span>
+                      {parsedAddress?.jibun && !jibunFilter && (
+                        <span className="text-orange-600 text-xs">
+                          💡 지번 일치 항목: {aptTradeResults.filter(isJibunMatch).length}개
+                        </span>
+                      )}
+                    </div>
+                    <div className="max-h-96 overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 text-left">거래일</th>
+                            <th className="px-3 py-2 text-left">아파트명</th>
+                            <th className="px-3 py-2 text-right">전용면적</th>
+                            <th className="px-3 py-2 text-center">층</th>
+                            <th className="px-3 py-2 text-right">거래금액</th>
+                            <th className="px-3 py-2 text-left">법정동</th>
+                            <th className="px-3 py-2 text-left">지번</th>
+                            <th className="px-3 py-2 text-center">건축년도</th>
+                            <th className="px-3 py-2 text-center">거래유형</th>
+                            <th className="px-3 py-2 text-center">해제여부</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {filteredResults.map((item, idx) => {
+                            const matched = isJibunMatch(item);
+                            return (
+                              <tr
+                                key={idx}
+                                className={`border-t ${matched ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50'}`}
+                              >
+                                <td className="px-3 py-2">
+                                  {item.dealYear && item.dealMonth && item.dealDay
+                                    ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                    : 'N/A'}
+                                </td>
+                                <td className="px-3 py-2 font-medium">{item.aptName || item.aptNm || 'N/A'}</td>
+                                <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                                <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                                <td className="px-3 py-2 text-right font-semibold text-blue-600">
+                                  {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
+                                </td>
+                                <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                                <td className={`px-3 py-2 ${matched ? 'font-semibold text-orange-700' : ''}`}>
+                                  {item.jibun || 'N/A'}
+                                  {matched && <span className="ml-1 text-xs">✓</span>}
+                                </td>
+                                <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
+                                <td className="px-3 py-2 text-center">{item.dealingGbn || '-'}</td>
+                                <td className="px-3 py-2 text-center">
+                                  {item.cancelDealType || item.cdealType ? (
+                                    <span className="text-red-600">해제</span>
+                                  ) : (
+                                    <span className="text-green-600">-</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Original Step 2 Result */}
