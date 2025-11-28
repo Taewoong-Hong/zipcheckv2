@@ -93,6 +93,7 @@ export default function DevCaseDetailPage({
   const [aptTradeResults, setAptTradeResults] = useState<any[]>([]);
   const [aptTradeLoading, setAptTradeLoading] = useState(false);
   const [jibunFilter, setJibunFilter] = useState<'none' | 'exact' | 'range100' | 'range200' | 'range300' | 'range400' | 'range500'>('none'); // 지번 필터 모드
+  const [dongFilter, setDongFilter] = useState(false); // 동 필터 (파싱된 주소의 동과 일치하는 것만)
 
   // 파싱된 주소 정보 (지번 포함)
   const [parsedAddress, setParsedAddress] = useState<{
@@ -1014,6 +1015,20 @@ export default function DevCaseDetailPage({
                     * 먼저 법정동코드를 선택하세요
                   </span>
                 )}
+                {/* 동 필터 체크박스 */}
+                {parsedAddress?.dong && aptTradeResults.length > 0 && (
+                  <label className="flex items-center gap-2 ml-4 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={dongFilter}
+                      onChange={(e) => setDongFilter(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-blue-700 font-medium">
+                      동 필터 ({parsedAddress.dong})
+                    </span>
+                  </label>
+                )}
                 {/* 지번 필터 드롭다운 */}
                 {parsedAddress?.jibun && aptTradeResults.length > 0 && (
                   <div className="flex items-center gap-2 ml-4">
@@ -1056,10 +1071,23 @@ export default function DevCaseDetailPage({
 
                 const filterRange = getFilterRange();
                 const targetBonbun = getBonbun(parsedAddress?.jibun);
+                const targetDong = parsedAddress?.dong?.replace(/[동읍면리가]$/, ''); // "신갈동" → "신갈"
 
-                // 지번 필터 적용
+                // 동 일치 여부 확인 함수
+                const isDongMatch = (item: any) => {
+                  if (!targetDong) return true;
+                  const itemDong = (item.umdNm || item.dong || '').toString().trim().replace(/[동읍면리가]$/, '');
+                  return itemDong === targetDong;
+                };
+
+                // 1단계: 동 필터 적용
+                const dongFilteredResults = dongFilter && targetDong
+                  ? aptTradeResults.filter(isDongMatch)
+                  : aptTradeResults;
+
+                // 2단계: 지번 필터 적용
                 const filteredResults = filterRange !== null && targetBonbun !== null
-                  ? aptTradeResults.filter(item => {
+                  ? dongFilteredResults.filter(item => {
                       const itemBonbun = getBonbun(item.jibun);
                       if (itemBonbun === null) return false;
                       if (filterRange === 0) {
@@ -1069,7 +1097,7 @@ export default function DevCaseDetailPage({
                       // 범위 필터 (±range)
                       return Math.abs(itemBonbun - targetBonbun) <= filterRange;
                     })
-                  : aptTradeResults;
+                  : dongFilteredResults;
 
                 // 지번 일치 여부 확인 함수 (하이라이팅용 - 정확히 일치만)
                 const isJibunMatch = (item: any) => {
@@ -1080,23 +1108,36 @@ export default function DevCaseDetailPage({
 
                 // 필터 설명 텍스트
                 const getFilterDescription = () => {
-                  if (jibunFilter === 'none') return '';
-                  if (jibunFilter === 'exact') return `지번 "${parsedAddress?.jibun}" 정확히 일치`;
-                  const range = filterRange;
-                  return `지번 ${targetBonbun}±${range} 범위 (${Math.max(1, (targetBonbun || 0) - (range || 0))}~${(targetBonbun || 0) + (range || 0)})`;
+                  const parts = [];
+                  if (dongFilter && targetDong) {
+                    parts.push(`동 "${parsedAddress?.dong}"`);
+                  }
+                  if (jibunFilter === 'exact') {
+                    parts.push(`지번 "${parsedAddress?.jibun}" 정확히 일치`);
+                  } else if (jibunFilter !== 'none' && filterRange) {
+                    parts.push(`지번 ${targetBonbun}±${filterRange} 범위`);
+                  }
+                  return parts.join(' + ');
                 };
+
+                const hasAnyFilter = dongFilter || jibunFilter !== 'none';
 
                 return (
                   <div className="border rounded-lg overflow-hidden">
                     <div className="bg-green-50 px-3 py-2 text-sm text-green-800 font-medium flex items-center justify-between">
                       <span>
-                        {jibunFilter !== 'none'
+                        {hasAnyFilter
                           ? `${filteredResults.length}개의 거래 (전체 ${aptTradeResults.length}개 중 ${getFilterDescription()})`
                           : `${aptTradeResults.length}개의 거래를 찾았습니다.`}
                       </span>
-                      {parsedAddress?.jibun && jibunFilter === 'none' && (
+                      {!hasAnyFilter && parsedAddress?.dong && (
+                        <span className="text-blue-600 text-xs mr-2">
+                          💡 동 일치: {aptTradeResults.filter(isDongMatch).length}개
+                        </span>
+                      )}
+                      {!hasAnyFilter && parsedAddress?.jibun && (
                         <span className="text-orange-600 text-xs">
-                          💡 지번 정확히 일치 항목: {aptTradeResults.filter(isJibunMatch).length}개
+                          💡 지번 일치: {aptTradeResults.filter(isJibunMatch).length}개
                         </span>
                       )}
                     </div>
@@ -1118,11 +1159,13 @@ export default function DevCaseDetailPage({
                         </thead>
                         <tbody>
                           {filteredResults.map((item, idx) => {
-                            const matched = isJibunMatch(item);
+                            const jibunMatched = isJibunMatch(item);
+                            const dongMatched = isDongMatch(item);
+                            const bothMatched = jibunMatched && dongMatched;
                             return (
                               <tr
                                 key={idx}
-                                className={`border-t ${matched ? 'bg-orange-50 hover:bg-orange-100' : 'hover:bg-gray-50'}`}
+                                className={`border-t ${bothMatched ? 'bg-green-50 hover:bg-green-100' : jibunMatched ? 'bg-orange-50 hover:bg-orange-100' : dongMatched ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
                               >
                                 <td className="px-3 py-2">
                                   {item.dealYear && item.dealMonth && item.dealDay
@@ -1135,10 +1178,13 @@ export default function DevCaseDetailPage({
                                 <td className="px-3 py-2 text-right font-semibold text-blue-600">
                                   {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
                                 </td>
-                                <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
-                                <td className={`px-3 py-2 ${matched ? 'font-semibold text-orange-700' : ''}`}>
+                                <td className={`px-3 py-2 ${dongMatched ? 'font-semibold text-blue-700' : ''}`}>
+                                  {item.dong || item.umdNm || 'N/A'}
+                                  {dongMatched && <span className="ml-1 text-xs">✓</span>}
+                                </td>
+                                <td className={`px-3 py-2 ${jibunMatched ? 'font-semibold text-orange-700' : ''}`}>
                                   {item.jibun || 'N/A'}
-                                  {matched && <span className="ml-1 text-xs">✓</span>}
+                                  {jibunMatched && <span className="ml-1 text-xs">✓</span>}
                                 </td>
                                 <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
                                 <td className="px-3 py-2 text-center">{item.dealingGbn || '-'}</td>
