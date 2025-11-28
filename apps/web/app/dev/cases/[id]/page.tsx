@@ -84,7 +84,7 @@ export default function DevCaseDetailPage({
   };
 
   const handleDelete = async () => {
-    const confirmed = window.confirm('Delete this case?');
+    const confirmed = window.confirm('이 케이스를 삭제하시겠습니까?');
     if (!confirmed) {
       return;
     }
@@ -233,14 +233,26 @@ export default function DevCaseDetailPage({
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex items-center justify-between mb-4">
             <a
               href="/dev/cases"
               className="text-blue-600 hover:text-blue-800 text-sm font-medium"
             >
-              ← Back to Cases
+              ← 목록으로
             </a>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {deleting ? '삭제 중...' : '케이스 삭제'}
+            </button>
           </div>
+          {deleteError && (
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
+              {deleteError}
+            </div>
+          )}
           <h1 className="text-3xl font-bold mb-2">Analysis Lab: Case Detail</h1>
           <div className="flex items-center gap-4 text-sm text-gray-600">
             <div>
