@@ -92,7 +92,7 @@ export default function DevCaseDetailPage({
   const [aptTradeMonth, setAptTradeMonth] = useState(new Date().getMonth() + 1);
   const [aptTradeResults, setAptTradeResults] = useState<any[]>([]);
   const [aptTradeLoading, setAptTradeLoading] = useState(false);
-  const [jibunFilter, setJibunFilter] = useState(false); // 지번 필터 활성화
+  const [jibunFilter, setJibunFilter] = useState<'none' | 'exact' | 'range100' | 'range200' | 'range300' | 'range400' | 'range500'>('none'); // 지번 필터 모드
 
   // 파싱된 주소 정보 (지번 포함)
   const [parsedAddress, setParsedAddress] = useState<{
@@ -1014,56 +1014,89 @@ export default function DevCaseDetailPage({
                     * 먼저 법정동코드를 선택하세요
                   </span>
                 )}
-                {/* 지번 필터 토글 */}
+                {/* 지번 필터 드롭다운 */}
                 {parsedAddress?.jibun && aptTradeResults.length > 0 && (
-                  <label className="flex items-center gap-2 ml-4 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={jibunFilter}
-                      onChange={(e) => setJibunFilter(e.target.checked)}
-                      className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
-                    />
+                  <div className="flex items-center gap-2 ml-4">
                     <span className="text-sm text-orange-700 font-medium">
-                      지번 필터 ({parsedAddress.jibun})
+                      지번 필터 ({parsedAddress.jibun}):
                     </span>
-                  </label>
+                    <select
+                      value={jibunFilter}
+                      onChange={(e) => setJibunFilter(e.target.value as typeof jibunFilter)}
+                      className="px-2 py-1 text-sm border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    >
+                      <option value="none">필터 없음</option>
+                      <option value="exact">정확히 일치</option>
+                      <option value="range100">±100 범위</option>
+                      <option value="range200">±200 범위</option>
+                      <option value="range300">±300 범위</option>
+                      <option value="range400">±400 범위</option>
+                      <option value="range500">±500 범위</option>
+                    </select>
+                  </div>
                 )}
               </div>
 
               {aptTradeResults.length > 0 && (() => {
+                // 지번에서 본번 추출 (예: 123-45 → 123)
+                const getBonbun = (jibun: string | undefined): number | null => {
+                  if (!jibun) return null;
+                  const bonbun = jibun.toString().trim().split('-')[0];
+                  const num = parseInt(bonbun, 10);
+                  return isNaN(num) ? null : num;
+                };
+
+                // 필터 범위 추출 (예: 'range100' → 100, 'exact' → 0, 'none' → null)
+                const getFilterRange = (): number | null => {
+                  if (jibunFilter === 'none') return null;
+                  if (jibunFilter === 'exact') return 0;
+                  const match = jibunFilter.match(/range(\d+)/);
+                  return match ? parseInt(match[1], 10) : null;
+                };
+
+                const filterRange = getFilterRange();
+                const targetBonbun = getBonbun(parsedAddress?.jibun);
+
                 // 지번 필터 적용
-                const filteredResults = jibunFilter && parsedAddress?.jibun
+                const filteredResults = filterRange !== null && targetBonbun !== null
                   ? aptTradeResults.filter(item => {
-                      const itemJibun = item.jibun?.toString().trim();
-                      const targetJibun = parsedAddress.jibun.trim();
-                      // 본번만 비교 (예: 123-45 → 123)
-                      const itemBonbun = itemJibun?.split('-')[0];
-                      const targetBonbun = targetJibun.split('-')[0];
-                      return itemBonbun === targetBonbun;
+                      const itemBonbun = getBonbun(item.jibun);
+                      if (itemBonbun === null) return false;
+                      if (filterRange === 0) {
+                        // 정확히 일치
+                        return itemBonbun === targetBonbun;
+                      }
+                      // 범위 필터 (±range)
+                      return Math.abs(itemBonbun - targetBonbun) <= filterRange;
                     })
                   : aptTradeResults;
 
-                // 지번 일치 여부 확인 함수
+                // 지번 일치 여부 확인 함수 (하이라이팅용 - 정확히 일치만)
                 const isJibunMatch = (item: any) => {
                   if (!parsedAddress?.jibun) return false;
-                  const itemJibun = item.jibun?.toString().trim();
-                  const targetJibun = parsedAddress.jibun.trim();
-                  const itemBonbun = itemJibun?.split('-')[0];
-                  const targetBonbun = targetJibun.split('-')[0];
+                  const itemBonbun = getBonbun(item.jibun);
                   return itemBonbun === targetBonbun;
+                };
+
+                // 필터 설명 텍스트
+                const getFilterDescription = () => {
+                  if (jibunFilter === 'none') return '';
+                  if (jibunFilter === 'exact') return `지번 "${parsedAddress?.jibun}" 정확히 일치`;
+                  const range = filterRange;
+                  return `지번 ${targetBonbun}±${range} 범위 (${Math.max(1, (targetBonbun || 0) - (range || 0))}~${(targetBonbun || 0) + (range || 0)})`;
                 };
 
                 return (
                   <div className="border rounded-lg overflow-hidden">
                     <div className="bg-green-50 px-3 py-2 text-sm text-green-800 font-medium flex items-center justify-between">
                       <span>
-                        {jibunFilter
-                          ? `${filteredResults.length}개의 거래 (전체 ${aptTradeResults.length}개 중 지번 "${parsedAddress?.jibun}" 필터)`
+                        {jibunFilter !== 'none'
+                          ? `${filteredResults.length}개의 거래 (전체 ${aptTradeResults.length}개 중 ${getFilterDescription()})`
                           : `${aptTradeResults.length}개의 거래를 찾았습니다.`}
                       </span>
-                      {parsedAddress?.jibun && !jibunFilter && (
+                      {parsedAddress?.jibun && jibunFilter === 'none' && (
                         <span className="text-orange-600 text-xs">
-                          💡 지번 일치 항목: {aptTradeResults.filter(isJibunMatch).length}개
+                          💡 지번 정확히 일치 항목: {aptTradeResults.filter(isJibunMatch).length}개
                         </span>
                       )}
                     </div>
