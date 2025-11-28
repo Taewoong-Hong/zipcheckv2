@@ -96,10 +96,11 @@ export default function DevCaseDetailPage({
 
   // 파싱된 주소 정보 (지번 포함)
   const [parsedAddress, setParsedAddress] = useState<{
-    full: string;      // 전체 주소
-    dong: string;      // 동/읍/면/리
-    jibun: string;     // 지번 (예: 123-45)
-    building: string;  // 건물명/호수
+    full: string;           // 전체 주소
+    addressUntilDong: string; // 동까지의 주소 (법정동 검색용)
+    dong: string;           // 동/읍/면/리
+    jibun: string;          // 지번 (예: 123-45)
+    building: string;       // 건물명/호수
   } | null>(null);
 
   const [useLLM, setUseLLM] = useState(false);
@@ -108,11 +109,16 @@ export default function DevCaseDetailPage({
   const parseAddressComponents = (address: string) => {
     if (!address) return null;
 
+    // 동/읍/면/리/가 까지의 주소 추출 (법정동코드 검색용)
+    // 예: "경기도 용인시 기흥구 신갈동 736 ..." → "경기도 용인시 기흥구 신갈동"
+    const addressUntilDongMatch = address.match(/^(.+?(?:동|읍|면|리|가))(?:\s|$)/);
+    const addressUntilDong = addressUntilDongMatch ? addressUntilDongMatch[1].trim() : address;
+
     // 지번 패턴: 숫자-숫자 또는 숫자 (동/리/가 뒤에 오는)
-    const jibunMatch = address.match(/(?:동|리|가)\s+(\d+(?:-\d+)?)/);
+    const jibunMatch = address.match(/(?:동|읍|면|리|가)\s+(\d+(?:-\d+)?)/);
     const jibun = jibunMatch ? jibunMatch[1] : '';
 
-    // 동/읍/면/리 추출
+    // 동/읍/면/리 추출 (마지막 것)
     const dongMatch = address.match(/([가-힣]+(?:동|읍|면|리|가))/g);
     const dong = dongMatch ? dongMatch[dongMatch.length - 1] : '';
 
@@ -122,6 +128,7 @@ export default function DevCaseDetailPage({
 
     return {
       full: address,
+      addressUntilDong, // 동까지의 주소 (법정동 검색용)
       dong,
       jibun,
       building,
@@ -399,10 +406,12 @@ export default function DevCaseDetailPage({
     }
   };
 
-  // 케이스 주소로 법정동 검색 초기화
+  // 케이스 주소로 법정동 검색 초기화 (동까지만)
   useEffect(() => {
     if (case_data?.property_address) {
-      setLegalDongKeyword(case_data.property_address);
+      const parsed = parseAddressComponents(case_data.property_address);
+      // 동까지만 잘라서 검색란에 입력
+      setLegalDongKeyword(parsed?.addressUntilDong || case_data.property_address);
     }
   }, [case_data]);
 
@@ -410,11 +419,13 @@ export default function DevCaseDetailPage({
   useEffect(() => {
     if (step1Result?.success && step1Result.registry_doc_masked?.property_address) {
       const address = step1Result.registry_doc_masked.property_address;
-      setLegalDongKeyword(address);
 
       // 주소에서 지번 추출
       const parsed = parseAddressComponents(address);
       setParsedAddress(parsed);
+
+      // 동까지만 잘라서 검색란에 입력
+      setLegalDongKeyword(parsed?.addressUntilDong || address);
 
       if (parsed?.jibun) {
         console.log('[지번 추출]', parsed);
