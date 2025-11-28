@@ -51,6 +51,7 @@ from routes.report import router_single as report_router_single  # 단수 경로
 from routes.parse import router as parse_router  # 파서 API (가이드 호환)
 from routes.public_data import router as public_data_router  # 공공 데이터 수집 API
 from routes.dev import router as dev_router  # Dev API (디버깅 전용)
+from routes.api_tester import router as api_tester_router  # API 테스터 (Step 2)
 
 # 로깅 설정
 logging.basicConfig(
@@ -132,6 +133,7 @@ app.include_router(report_router_single)  # /report/:id 호환 라우트
 app.include_router(parse_router)  # /parse/*
 app.include_router(public_data_router)  # /fetch/public
 app.include_router(dev_router)  # Dev API (디버깅 전용)
+app.include_router(api_tester_router)  # API 테스터 (Step 2 - 공공데이터 API 테스트)
 
 
 # Pydantic 모델
