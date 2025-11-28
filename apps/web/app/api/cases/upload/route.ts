@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     // 1. FormData 파싱
     const formData = await request.formData();
     const file = formData.get('file') as File;
-    const environment = formData.get('environment') as string || 'dev';
+    // Note: environment와 source는 Lab에서 고정값 사용 (dev, lab)
 
     if (!file) {
       return NextResponse.json(
@@ -87,12 +87,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 6. v2_cases 테이블에 케이스 생성
+    // Lab 케이스: environment='dev', source='lab'
     const { data: caseData, error: caseError } = await supabase
       .from('v2_cases')
       .insert({
         id: caseId,
-        user_id: DEV_SYSTEM_USER_ID, // TODO: 실제 사용자 ID로 교체
-        environment: environment,
+        user_id: DEV_SYSTEM_USER_ID, // Lab 전용 시스템 유저
+        environment: 'dev', // Lab 케이스는 항상 dev
+        source: 'lab', // Lab 케이스 식별자
         current_state: 'registry_ready',
         property_address: `업로드된 파일: ${file.name}`,
         address_road: `업로드된 파일: ${file.name}`, // 백업 필드 (NOT NULL 제약 충족)
@@ -100,7 +102,7 @@ export async function POST(request: NextRequest) {
         created_at: timestamp,
         updated_at: timestamp,
         metadata: {
-          upload_source: 'dev_upload_ui',
+          upload_source: 'lab_upload_ui',
           original_filename: file.name,
           file_size: file.size,
           file_type: file.type,

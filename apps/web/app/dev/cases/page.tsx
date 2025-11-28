@@ -25,8 +25,8 @@ export default function DevCasesPage() {
       setLoading(true);
       setError(null);
 
-      // Fetch cases from Supabase (dev environment only)
-      const response = await fetch('/api/cases?environment=dev');
+      // Fetch Lab cases from Supabase (environment=dev, source=lab)
+      const response = await fetch('/api/cases?environment=dev&source=lab');
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -80,7 +80,8 @@ export default function DevCasesPage() {
           <div>
             <h1 className="text-3xl font-bold">집체크 Analysis Lab</h1>
             <div className="text-sm text-gray-500 mt-1">
-              환경: <span className="font-mono font-medium">dev</span>
+              환경: <span className="font-mono font-medium text-blue-600">dev</span> /
+              소스: <span className="font-mono font-medium text-green-600">lab</span>
             </div>
           </div>
           <Link
@@ -98,7 +99,7 @@ export default function DevCasesPage() {
           <div className="px-6 py-4 border-b border-gray-200">
             <h2 className="text-lg font-semibold">Cases ({cases.length})</h2>
             <p className="text-sm text-gray-600 mt-1">
-              개발 환경에서 생성된 모든 케이스 목록입니다.
+              Analysis Lab에서 생성된 케이스 목록입니다. (source=lab)
             </p>
           </div>
 
