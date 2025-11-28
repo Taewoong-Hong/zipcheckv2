@@ -206,7 +206,8 @@ export default function DevCaseDetailPage({
       setApiTestResult(null);
       setSelectedApiResult(null);
 
-      const response = await fetch('/api/dev/api-tester');
+      // 케이스 ID를 전달하여 실제 주소 데이터로 API 테스트
+      const response = await fetch(`/api/dev/api-tester?case_id=${caseId}`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);

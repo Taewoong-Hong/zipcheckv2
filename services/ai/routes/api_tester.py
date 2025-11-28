@@ -832,7 +832,147 @@ async def test_building_ledger(
 
 
 # ===========================
-# 전체 API 테스트 (일괄 실행)
+# 케이스 기반 API 테스트 (실제 주소 사용)
+# ===========================
+@router.get("/test-by-case/{case_id}", response_model=AllAPITestResult)
+async def test_apis_by_case(case_id: str):
+    """
+    케이스 ID 기반 API 테스트
+
+    - 케이스의 실제 주소를 사용하여 API 호출
+    - AddressConverter로 sigungu_cd, bjdong_cd, lawd_cd 추출
+    - 실제 데이터 반환
+    """
+    from core.supabase_client import get_supabase_client
+    from core.address_converter import AddressConverter
+
+    total_start_time = time.time()
+    results: List[APITestResult] = []
+
+    # Step 1: 케이스 조회
+    supabase = get_supabase_client(service_role=True)
+    case_response = supabase.table("v2_cases").select("*").eq("id", case_id).execute()
+
+    if not case_response.data:
+        return AllAPITestResult(
+            total_apis=0,
+            success_count=0,
+            fail_count=0,
+            total_execution_time_ms=0,
+            results=[APITestResult(
+                success=False,
+                api_name="CaseLookup",
+                api_name_kr="케이스 조회",
+                execution_time_ms=0,
+                error=f"케이스를 찾을 수 없습니다: {case_id}",
+                request_params={"case_id": case_id}
+            )]
+        )
+
+    case = case_response.data[0]
+    property_address = case.get("property_address", "")
+
+    if not property_address:
+        return AllAPITestResult(
+            total_apis=0,
+            success_count=0,
+            fail_count=0,
+            total_execution_time_ms=0,
+            results=[APITestResult(
+                success=False,
+                api_name="AddressCheck",
+                api_name_kr="주소 확인",
+                execution_time_ms=0,
+                error="케이스에 주소가 없습니다",
+                request_params={"case_id": case_id}
+            )]
+        )
+
+    # Step 2: 주소 변환 (AddressConverter)
+    converter = AddressConverter()
+    addr_result = await converter.convert(property_address)
+
+    # 주소 변환 결과를 첫 번째 결과로 추가
+    results.append(APITestResult(
+        success=addr_result.success,
+        api_name="AddressConverter",
+        api_name_kr="주소 변환",
+        execution_time_ms=0,
+        total_count=1 if addr_result.success else 0,
+        sample_data=[{
+            "original_address": property_address,
+            "sigungu_cd": addr_result.sigungu_cd,
+            "bjdong_cd": addr_result.bjdong_cd,
+            "lawd_cd": addr_result.lawd_cd,
+            "bun": addr_result.bun,
+            "ji": addr_result.ji,
+        }] if addr_result.success else None,
+        error=addr_result.error if not addr_result.success else None,
+        request_params={"address": property_address}
+    ))
+
+    if not addr_result.success:
+        total_execution_time = (time.time() - total_start_time) * 1000
+        return AllAPITestResult(
+            total_apis=1,
+            success_count=0,
+            fail_count=1,
+            total_execution_time_ms=round(total_execution_time, 2),
+            results=results
+        )
+
+    # 추출된 코드 사용
+    lawd_cd = addr_result.lawd_cd or addr_result.sigungu_cd or DEFAULT_LAWD_CD
+    sigungu_cd = addr_result.sigungu_cd or DEFAULT_SIGUNGU_CD
+    bjdong_cd = addr_result.bjdong_cd or DEFAULT_BJDONG_CD
+    bun = addr_result.bun or DEFAULT_BUN
+    ji = addr_result.ji or DEFAULT_JI
+    deal_ymd = get_current_deal_ymd()
+
+    logger.info(f"[API Tester] 케이스 기반 테스트: address={property_address}, lawd_cd={lawd_cd}, sigungu_cd={sigungu_cd}, bjdong_cd={bjdong_cd}")
+
+    # Step 3: 15개 API 호출 (실제 코드 사용)
+    # 1. 법정동코드
+    results.append(await test_legal_dong_code(keyword=property_address))
+
+    # 2-14. 실거래가 APIs
+    results.append(await test_apt_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_apt_trade_detail(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_apt_rent(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_apt_silv_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_indu_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_land_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_nrg_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_officetel_rent(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_officetel_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_rh_rent(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_rh_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_sh_rent(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+    results.append(await test_sh_trade(lawd_cd=lawd_cd, deal_ymd=deal_ymd))
+
+    # 15. 건축물대장
+    results.append(await test_building_ledger(
+        sigungu_cd=sigungu_cd,
+        bjdong_cd=bjdong_cd,
+        bun=bun,
+        ji=ji
+    ))
+
+    total_execution_time = (time.time() - total_start_time) * 1000
+    success_count = sum(1 for r in results if r.success)
+    fail_count = len(results) - success_count
+
+    return AllAPITestResult(
+        total_apis=len(results),
+        success_count=success_count,
+        fail_count=fail_count,
+        total_execution_time_ms=round(total_execution_time, 2),
+        results=results
+    )
+
+
+# ===========================
+# 전체 API 테스트 (일괄 실행 - 기본 파라미터)
 # ===========================
 @router.get("/test-all", response_model=AllAPITestResult)
 async def test_all_apis(
