@@ -12,6 +12,7 @@
     "@google-analytics/data": "^5.2.1",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.76.1",
+    "@tailwindcss/typography": "^0.5.19",
     "@tosspayments/tosspayments-sdk": "^2.4.0",
     "@types/node": "^24.8.1",
     "@types/react": "^19.2.2",

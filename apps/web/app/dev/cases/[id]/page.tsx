@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { use } from 'react';
 import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface ParsedRegistryResult {
   success: boolean;
@@ -1646,9 +1648,13 @@ export default function DevCaseDetailPage({
                       </div>
                     )}
                     {step3Result.summary && (
-                      <div className="prose prose-sm max-w-none">
+                      <div>
                         <h3 className="font-medium mb-2">Summary</h3>
-                        <div className="whitespace-pre-wrap text-sm">{step3Result.summary}</div>
+                        <div className="prose prose-sm max-w-none bg-white p-4 rounded-lg border">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {step3Result.summary}
+                          </ReactMarkdown>
+                        </div>
                       </div>
                     )}
                   </div>
