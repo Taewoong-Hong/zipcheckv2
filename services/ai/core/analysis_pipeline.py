@@ -154,11 +154,15 @@ async def _parse_registry(context: AnalysisContext, supabase) -> None:
     )
 
     # RegistryData 모델로 변환 (내부 분석용 - 원본 사용)
+    # 말소되지 않은 근저당/압류만 계산
+    active_mortgages = [m for m in context.registry_doc.mortgages if not m.is_deleted]
+    active_seizures = [s for s in context.registry_doc.seizures if not s.is_deleted]
+
     context.registry_data = RegistryData(
         property_value=None,  # 공공 데이터에서 추정
-        mortgage_total=sum([m.amount or 0 for m in context.registry_doc.mortgages]),
-        seizure_exists=any(s.type == "압류" for s in context.registry_doc.seizures),
-        provisional_attachment_exists=any(s.type == "가압류" for s in context.registry_doc.seizures),
+        mortgage_total=sum([m.amount or 0 for m in active_mortgages]),
+        seizure_exists=any(s.type == "압류" for s in active_seizures),
+        provisional_attachment_exists=any(s.type == "가압류" for s in active_seizures),
         ownership_disputes=False  # TODO: 소유권 분쟁 감지 로직
     )
 
