@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
         LAWD_CD: String(lawdCd),
         DEAL_YMD: String(dealYmd),
         pageNo: '1',
-        numOfRows: '100'
+        numOfRows: '1000'
       }).toString()
 
       const url = `${baseUrl}?${qs}`
