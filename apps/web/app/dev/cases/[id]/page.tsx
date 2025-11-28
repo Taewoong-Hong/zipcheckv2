@@ -81,6 +81,18 @@ export default function DevCaseDetailPage({
   const [apiTestLoading, setApiTestLoading] = useState(false);
   const [selectedApiResult, setSelectedApiResult] = useState<APITestResult | null>(null);
 
+  // 법정동코드 검색 state
+  const [legalDongKeyword, setLegalDongKeyword] = useState('');
+  const [legalDongResults, setLegalDongResults] = useState<any[]>([]);
+  const [legalDongLoading, setLegalDongLoading] = useState(false);
+  const [selectedLegalDong, setSelectedLegalDong] = useState<any>(null);
+
+  // 아파트 실거래가 조회 state
+  const [aptTradeYear, setAptTradeYear] = useState(new Date().getFullYear());
+  const [aptTradeMonth, setAptTradeMonth] = useState(new Date().getMonth() + 1);
+  const [aptTradeResults, setAptTradeResults] = useState<any[]>([]);
+  const [aptTradeLoading, setAptTradeLoading] = useState(false);
+
   const [useLLM, setUseLLM] = useState(false);
 
   useEffect(() => {
@@ -266,6 +278,92 @@ export default function DevCaseDetailPage({
       setStep3Loading(false);
     }
   };
+
+  // 법정동코드 검색
+  const searchLegalDong = async () => {
+    if (!legalDongKeyword.trim()) {
+      alert('검색어를 입력하세요.');
+      return;
+    }
+
+    try {
+      setLegalDongLoading(true);
+      setLegalDongResults([]);
+      setSelectedLegalDong(null);
+
+      const response = await fetch('/api/realestate/legal-dong', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: legalDongKeyword }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.success && data.data?.items) {
+        setLegalDongResults(data.data.items);
+      } else {
+        setLegalDongResults([]);
+      }
+    } catch (err: any) {
+      console.error('Legal dong search failed:', err);
+      alert(`검색 실패: ${err.message}`);
+    } finally {
+      setLegalDongLoading(false);
+    }
+  };
+
+  // 아파트 실거래가 조회
+  const searchAptTrade = async () => {
+    if (!selectedLegalDong) {
+      alert('먼저 법정동코드를 선택하세요.');
+      return;
+    }
+
+    const lawdCd = selectedLegalDong.lawd5 || selectedLegalDong.regionCd?.slice(0, 5);
+    if (!lawdCd || lawdCd.length !== 5) {
+      alert('유효한 LAWD 코드가 없습니다.');
+      return;
+    }
+
+    const dealYmd = `${aptTradeYear}${String(aptTradeMonth).padStart(2, '0')}`;
+
+    try {
+      setAptTradeLoading(true);
+      setAptTradeResults([]);
+
+      const response = await fetch('/api/realestate/apt-trade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lawdCd, dealYmd }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.success && data.items) {
+        setAptTradeResults(data.items);
+      } else {
+        setAptTradeResults([]);
+      }
+    } catch (err: any) {
+      console.error('Apt trade search failed:', err);
+      alert(`조회 실패: ${err.message}`);
+    } finally {
+      setAptTradeLoading(false);
+    }
+  };
+
+  // 케이스 주소로 법정동 검색 초기화
+  useEffect(() => {
+    if (case_data?.property_address) {
+      setLegalDongKeyword(case_data.property_address);
+    }
+  }, [case_data]);
 
   if (loading) {
     return (
@@ -725,6 +823,170 @@ export default function DevCaseDetailPage({
                 )}
               </div>
             )}
+
+            {/* 법정동코드 검색 UI */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-800 mb-3">1. 법정동코드 검색</h3>
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={legalDongKeyword}
+                  onChange={(e) => setLegalDongKeyword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && searchLegalDong()}
+                  placeholder="주소 검색 (예: 강남구 역삼동)"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={searchLegalDong}
+                  disabled={legalDongLoading}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {legalDongLoading ? '검색 중...' : '검색'}
+                </button>
+              </div>
+
+              {legalDongResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left w-12">선택</th>
+                        <th className="px-3 py-2 text-left">법정동코드</th>
+                        <th className="px-3 py-2 text-left">LAWD코드(5자리)</th>
+                        <th className="px-3 py-2 text-left">주소</th>
+                        <th className="px-3 py-2 text-left">최하위지역명</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {legalDongResults.map((item, idx) => (
+                        <tr
+                          key={idx}
+                          className={`border-t cursor-pointer hover:bg-blue-50 ${
+                            selectedLegalDong?.regionCd === item.regionCd ? 'bg-blue-100' : ''
+                          }`}
+                          onClick={() => setSelectedLegalDong(item)}
+                        >
+                          <td className="px-3 py-2">
+                            <input
+                              type="radio"
+                              name="legalDong"
+                              checked={selectedLegalDong?.regionCd === item.regionCd}
+                              onChange={() => setSelectedLegalDong(item)}
+                              className="w-4 h-4 text-blue-600"
+                            />
+                          </td>
+                          <td className="px-3 py-2 font-mono">{item.regionCd || 'N/A'}</td>
+                          <td className="px-3 py-2 font-mono text-blue-600 font-semibold">{item.lawd5 || 'N/A'}</td>
+                          <td className="px-3 py-2">{item.locataddNm || 'N/A'}</td>
+                          <td className="px-3 py-2">{item.locatLowNm || 'N/A'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                    총 {legalDongResults.length}개 결과
+                    {selectedLegalDong && (
+                      <span className="ml-4 text-blue-600 font-medium">
+                        선택됨: {selectedLegalDong.locataddNm} ({selectedLegalDong.lawd5})
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 아파트 실거래가 조회 UI */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-800 mb-3">2. 아파트 실거래가 조회</h3>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex items-center gap-2">
+                  <select
+                    value={aptTradeYear}
+                    onChange={(e) => setAptTradeYear(Number(e.target.value))}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map((year) => (
+                      <option key={year} value={year}>{year}년</option>
+                    ))}
+                  </select>
+                  <select
+                    value={aptTradeMonth}
+                    onChange={(e) => setAptTradeMonth(Number(e.target.value))}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                      <option key={month} value={month}>{month}월</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={searchAptTrade}
+                  disabled={aptTradeLoading || !selectedLegalDong}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {aptTradeLoading ? '조회 중...' : '실거래가 조회'}
+                </button>
+                {!selectedLegalDong && (
+                  <span className="text-sm text-orange-600">
+                    * 먼저 법정동코드를 선택하세요
+                  </span>
+                )}
+              </div>
+
+              {aptTradeResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-green-50 px-3 py-2 text-sm text-green-800 font-medium">
+                    {aptTradeResults.length}개의 거래를 찾았습니다.
+                  </div>
+                  <div className="max-h-96 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">거래일</th>
+                          <th className="px-3 py-2 text-left">아파트명</th>
+                          <th className="px-3 py-2 text-right">전용면적</th>
+                          <th className="px-3 py-2 text-center">층</th>
+                          <th className="px-3 py-2 text-right">거래금액</th>
+                          <th className="px-3 py-2 text-left">법정동</th>
+                          <th className="px-3 py-2 text-left">지번</th>
+                          <th className="px-3 py-2 text-center">건축년도</th>
+                          <th className="px-3 py-2 text-center">거래유형</th>
+                          <th className="px-3 py-2 text-center">해제여부</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {aptTradeResults.map((item, idx) => (
+                          <tr key={idx} className="border-t hover:bg-gray-50">
+                            <td className="px-3 py-2">
+                              {item.dealYear && item.dealMonth && item.dealDay
+                                ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2 font-medium">{item.aptName || item.aptNm || 'N/A'}</td>
+                            <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                            <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-blue-600">
+                              {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                            <td className="px-3 py-2">{item.jibun || 'N/A'}</td>
+                            <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
+                            <td className="px-3 py-2 text-center">{item.dealingGbn || '-'}</td>
+                            <td className="px-3 py-2 text-center">
+                              {item.cancelDealType || item.cdealType ? (
+                                <span className="text-red-600">해제</span>
+                              ) : (
+                                <span className="text-green-600">-</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Original Step 2 Result */}
             {step2Result && (

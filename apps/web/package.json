@@ -19,6 +19,7 @@
     "autoprefixer": "^10.4.21",
     "eslint": "^9.37.0",
     "eslint-config-next": "^15.5.6",
+    "fast-xml-parser": "^5.3.2",
     "framer-motion": "^12.23.24",
     "idb": "^8.0.3",
     "katex": "^0.16.25",
