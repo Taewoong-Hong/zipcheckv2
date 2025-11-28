@@ -473,8 +473,12 @@ export default function DevCaseDetailPage({
       setAutoTradeResult(prev => ({ ...prev, loading: true, error: null }));
 
       try {
-        // 1. 법정동코드 검색
-        const legalDongRes = await fetch(`/api/realestate/legal-dong?keyword=${encodeURIComponent(parsedAddress.addressUntilDong)}`);
+        // 1. 법정동코드 검색 (POST 메서드 사용)
+        const legalDongRes = await fetch('/api/realestate/legal-dong', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword: parsedAddress.addressUntilDong }),
+        });
         const legalDongData = await legalDongRes.json();
 
         if (!legalDongData.body?.items?.length) {
@@ -484,12 +488,19 @@ export default function DevCaseDetailPage({
         const lawdCd = legalDongData.body.items[0].lawd5;
         const lawdName = legalDongData.body.items[0].locataddNm;
 
-        // 2. 실거래가 조회 (현재 년/월)
+        // 2. 실거래가 조회 (현재 년/월, POST 메서드 사용)
         const now = new Date();
         const year = now.getFullYear();
         const month = now.getMonth() + 1;
 
-        const aptTradeRes = await fetch(`/api/realestate/apt-trade?lawdCd=${lawdCd}&dealYmd=${year}${String(month).padStart(2, '0')}`);
+        const aptTradeRes = await fetch('/api/realestate/apt-trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lawdCd,
+            dealYmd: `${year}${String(month).padStart(2, '0')}`,
+          }),
+        });
         const aptTradeData = await aptTradeRes.json();
 
         const allTransactions = aptTradeData.body?.items || [];
