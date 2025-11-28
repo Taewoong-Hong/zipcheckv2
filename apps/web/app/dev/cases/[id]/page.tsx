@@ -488,17 +488,13 @@ export default function DevCaseDetailPage({
         const lawdCd = legalDongData.body.items[0].lawd5;
         const lawdName = legalDongData.body.items[0].locataddNm;
 
-        // 2. 실거래가 조회 (현재 년/월, POST 메서드 사용)
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth() + 1;
-
+        // 2. 실거래가 조회 (2025년 10월 하드코딩)
         const aptTradeRes = await fetch('/api/realestate/apt-trade', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             lawdCd,
-            dealYmd: `${year}${String(month).padStart(2, '0')}`,
+            dealYmd: '202510',
           }),
         });
         const aptTradeData = await aptTradeRes.json();
