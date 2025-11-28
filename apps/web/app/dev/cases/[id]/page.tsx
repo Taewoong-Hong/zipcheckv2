@@ -1033,6 +1033,14 @@ export default function DevCaseDetailPage({
               </div>
             )}
 
+            {/* ===== 수동 검색 도구 섹션 ===== */}
+            <div className="px-6 py-3 bg-gray-100 border-b border-gray-300">
+              <h2 className="font-bold text-gray-700 text-lg flex items-center gap-2">
+                🔍 수동 검색 도구
+                <span className="text-sm font-normal text-gray-500">(직접 검색 및 필터링)</span>
+              </h2>
+            </div>
+
             {/* 법정동코드 검색 UI */}
             <div className="px-6 py-4 border-b border-gray-200">
               <h3 className="font-semibold text-gray-800 mb-3">1. 법정동코드 검색</h3>
@@ -1346,15 +1354,22 @@ export default function DevCaseDetailPage({
               })()}
             </div>
 
-            {/* 자동 실거래가 분석 결과 (파싱된 주소 기반) */}
+            {/* ===== 자동 분석 결과 섹션 ===== */}
             {parsedAddress && (
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-800 mb-3">
-                  📊 자동 실거래가 분석 결과
-                  <span className="ml-2 text-sm font-normal text-gray-500">
-                    (파싱된 주소 기반: 동 + 지번 정확히 일치)
-                  </span>
-                </h3>
+              <>
+                <div className="px-6 py-3 bg-blue-50 border-b border-blue-200">
+                  <h2 className="font-bold text-blue-700 text-lg flex items-center gap-2">
+                    🤖 자동 분석 결과
+                    <span className="text-sm font-normal text-blue-500">(파싱된 주소 기반 자동 조회)</span>
+                  </h2>
+                </div>
+                <div className="px-6 py-4 border-b border-gray-200">
+                  <h3 className="font-semibold text-gray-800 mb-3">
+                    📊 실거래가 분석
+                    <span className="ml-2 text-sm font-normal text-gray-500">
+                      (동 + 지번 정확히 일치 필터링)
+                    </span>
+                  </h3>
 
                 {/* 로딩 상태 */}
                 {autoTradeResult.loading && (
@@ -1505,7 +1520,8 @@ export default function DevCaseDetailPage({
                     먼저 Step 1에서 등기부를 파싱하여 주소 정보를 추출하세요.
                   </div>
                 )}
-              </div>
+                </div>
+              </>
             )}
 
             {/* Original Step 2 Result */}
