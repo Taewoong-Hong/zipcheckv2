@@ -29,8 +29,8 @@ export async function POST(request: NextRequest) {
 
     if (!keyword) {
       return NextResponse.json({
-        success: false,
-        error: '검색어(keyword)는 필수입니다.'
+        header: { resultCode: '400', resultMsg: 'Bad Request' },
+        body: { items: [], totalCount: 0, error: '검색어(keyword)는 필수입니다.' }
       }, { status: 400 })
     }
 
@@ -40,8 +40,8 @@ export async function POST(request: NextRequest) {
     if (!serviceKey) {
       console.error('DATA_GO_KR_API_KEY가 설정되지 않았습니다.')
       return NextResponse.json({
-        success: false,
-        error: 'API 키가 설정되지 않았습니다.'
+        header: { resultCode: '500', resultMsg: 'Configuration Error' },
+        body: { items: [], totalCount: 0, error: 'API 키가 설정되지 않았습니다.' }
       }, { status: 500 })
     }
 
@@ -200,11 +200,15 @@ export async function POST(request: NextRequest) {
             })
             .filter(item => item.regionCd || item.lawd5 || item.locataddNm)
           
+          // FastAPI 형식으로 응답 (header + body)
           return NextResponse.json({
-            success: true,
-            data: {
-              totalCount: items.length,
+            header: {
+              resultCode: '000',
+              resultMsg: 'OK'
+            },
+            body: {
               items,
+              totalCount: items.length,
               params: { keyword: keyword }
             }
           })
@@ -215,19 +219,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 모든 시도 실패 - 원인을 상세히 노출
+    // 모든 시도 실패 - FastAPI 형식으로 에러 응답
     console.error('법정동코드 조회 최종 실패:', lastError)
     return NextResponse.json({
-      error: 'Upstream error',
-      detail: lastError
-    }, { status: 500 })  // 502 대신 500
+      header: {
+        resultCode: '500',
+        resultMsg: 'Upstream error'
+      },
+      body: {
+        items: [],
+        totalCount: 0,
+        error: lastError
+      }
+    }, { status: 500 })
 
   } catch (error) {
     console.error('법정동코드 API 오류:', error)
     return NextResponse.json({
-      success: false,
-      error: '법정동코드 조회 중 오류가 발생했습니다.',
-      details: error instanceof Error ? error.message : String(error)
+      header: { resultCode: '500', resultMsg: 'Internal Server Error' },
+      body: {
+        items: [],
+        totalCount: 0,
+        error: '법정동코드 조회 중 오류가 발생했습니다.',
+        details: error instanceof Error ? error.message : String(error)
+      }
     }, { status: 500 })
   }
 }

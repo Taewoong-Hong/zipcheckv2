@@ -302,10 +302,14 @@ export default function DevCaseDetailPage({
       }
 
       const data = await response.json();
-      if (data.success && data.data?.items) {
-        setLegalDongResults(data.data.items);
+      // FastAPI 형식: { header: { resultCode, resultMsg }, body: { items, totalCount } }
+      if (data.header?.resultCode === '000' && data.body?.items) {
+        setLegalDongResults(data.body.items);
       } else {
         setLegalDongResults([]);
+        if (data.body?.error) {
+          console.warn('Legal dong error:', data.body.error);
+        }
       }
     } catch (err: any) {
       console.error('Legal dong search failed:', err);
@@ -345,10 +349,14 @@ export default function DevCaseDetailPage({
       }
 
       const data = await response.json();
-      if (data.success && data.items) {
-        setAptTradeResults(data.items);
+      // FastAPI 형식: { header: { resultCode, resultMsg }, body: { items, totalCount } }
+      if (data.header?.resultCode === '000' && data.body?.items) {
+        setAptTradeResults(data.body.items);
       } else {
         setAptTradeResults([]);
+        if (data.body?.error || data.body?.message) {
+          console.warn('Apt trade:', data.body.message || data.body.error);
+        }
       }
     } catch (err: any) {
       console.error('Apt trade search failed:', err);

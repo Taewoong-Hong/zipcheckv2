@@ -16,20 +16,20 @@ export async function POST(req: Request) {
 
     // 1) 파라미터 검증
     if (!lawdCd || String(lawdCd).length !== 5 || !/^\d{6}$/.test(String(dealYmd || ''))) {
-      return NextResponse.json(
-        { error: 'Invalid parameters', detail: { lawdCd, dealYmd } },
-        { status: 400 }
-      )
+      return NextResponse.json({
+        header: { resultCode: '400', resultMsg: 'Invalid parameters' },
+        body: { items: [], totalCount: 0, error: { lawdCd, dealYmd } }
+      }, { status: 400 })
     }
 
     // 2) URL 조립 (serviceKey는 .env의 "일반 인증키" 원문 그대로)
     const serviceKey = process.env.DATA_GO_KR_API_KEY!
     if (!serviceKey) {
       console.error('DATA_GO_KR_API_KEY가 설정되지 않았습니다.')
-      return NextResponse.json(
-        { error: 'API 키가 설정되지 않았습니다.' },
-        { status: 500 }
-      )
+      return NextResponse.json({
+        header: { resultCode: '500', resultMsg: 'Configuration Error' },
+        body: { items: [], totalCount: 0, error: 'API 키가 설정되지 않았습니다.' }
+      }, { status: 500 })
     }
     
     // API URL 시도 (새 버전 먼저, 실패하면 구 버전)
@@ -71,19 +71,22 @@ export async function POST(req: Request) {
     }
 
     if (!res || !text) {
-      return NextResponse.json({ 
-        error: 'API 호출 실패', 
-        detail: '모든 API 엔드포인트 호출 실패' 
+      return NextResponse.json({
+        header: { resultCode: '502', resultMsg: 'API 호출 실패' },
+        body: { items: [], totalCount: 0, error: '모든 API 엔드포인트 호출 실패' }
       }, { status: 502 })
     }
 
     if (!res.ok) {
       console.error('[APT-TRADE] Upstream error:', res.status, text.slice(0, 800))
-      return NextResponse.json({ 
-        error: 'Upstream error', 
-        status: res.status, 
-        body: text.slice(0,800),
-        url: usedUrl.replace(serviceKey, 'API_KEY_HIDDEN')
+      return NextResponse.json({
+        header: { resultCode: String(res.status), resultMsg: 'Upstream error' },
+        body: {
+          items: [],
+          totalCount: 0,
+          error: text.slice(0, 800),
+          url: usedUrl.replace(serviceKey, 'API_KEY_HIDDEN')
+        }
       }, { status: 502 })
     }
 
@@ -101,10 +104,9 @@ export async function POST(req: Request) {
     
     if (resultCode && !successCodes.includes(resultCode) && !isNoData) {
       console.error('[APT-TRADE] API Error:', { resultCode, resultMsg })
-      return NextResponse.json({ 
-        error: `API 오류: ${resultMsg || 'Unknown error'}`, 
-        resultCode, 
-        detail: { lawdCd, dealYmd }
+      return NextResponse.json({
+        header: { resultCode: resultCode || '400', resultMsg: resultMsg || 'Unknown error' },
+        body: { items: [], totalCount: 0, params: { lawdCd, dealYmd } }
       }, { status: 400 })
     }
     
@@ -112,11 +114,13 @@ export async function POST(req: Request) {
     if (isNoData) {
       console.log('[APT-TRADE] No data for:', { lawdCd, dealYmd })
       return NextResponse.json({
-        success: true,
-        query: { lawdCd, dealYmd },
-        count: 0,
-        items: [],
-        message: '해당 기간에 거래 내역이 없습니다.'
+        header: { resultCode: '000', resultMsg: 'OK' },
+        body: {
+          items: [],
+          totalCount: 0,
+          params: { lawdCd, dealYmd },
+          message: '해당 기간에 거래 내역이 없습니다.'
+        }
       })
     }
 
@@ -199,20 +203,24 @@ export async function POST(req: Request) {
       }
     }
 
+    // FastAPI 형식으로 응답 (header + body)
     return NextResponse.json({
-      success: true,
-      query: { lawdCd, dealYmd },
-      count: list.length,
-      items: normalized,
-      // 기존 호환성을 위한 data 필드
-      data: {
-        totalCount: list.length,
+      header: { resultCode: '000', resultMsg: 'OK' },
+      body: {
         items: normalized,
+        totalCount: list.length,
         params: { lawdCd, dealYmd }
       }
     })
   } catch (err: any) {
     console.error('apt-trade error', err)
-    return NextResponse.json({ error: 'Server error', detail: err?.message ?? String(err) }, { status: 500 })
+    return NextResponse.json({
+      header: { resultCode: '500', resultMsg: 'Internal Server Error' },
+      body: {
+        items: [],
+        totalCount: 0,
+        error: err?.message ?? String(err)
+      }
+    }, { status: 500 })
   }
 }
