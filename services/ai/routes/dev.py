@@ -38,6 +38,9 @@ class PrepareSummaryRequest(BaseModel):
     """요약 리포트 생성 요청"""
     case_id: str
     use_llm: bool = False
+    # Step 2에서 전달받은 데이터 (Lab에서 사용)
+    property_value_estimate: int | None = None  # 매매 실거래가 평균 (만원)
+    jeonse_market_average: int | None = None  # 전세 실거래가 평균 (만원)
 
 
 # ===========================
@@ -103,11 +106,18 @@ async def prepare_summary_endpoint(request: PrepareSummaryRequest):
     - 규칙 기반 또는 LLM 요약
     - 리스크 점수 계산
     - 협상 포인트 추출
+    - Step 2에서 전달받은 실거래가 데이터 활용
     """
-    logger.info(f"[Dev] 요약 리포트 생성 요청: case_id={request.case_id}, use_llm={request.use_llm}")
+    logger.info(f"[Dev] 요약 리포트 생성 요청: case_id={request.case_id}, use_llm={request.use_llm}, "
+                f"property_value_estimate={request.property_value_estimate}, jeonse_market_average={request.jeonse_market_average}")
 
     try:
-        result = await prepare_summary(request.case_id, use_llm=request.use_llm)
+        result = await prepare_summary(
+            request.case_id,
+            use_llm=request.use_llm,
+            property_value_estimate=request.property_value_estimate,
+            jeonse_market_average=request.jeonse_market_average,
+        )
 
         if result.success:
             logger.info(f"[Dev] 요약 리포트 생성 성공: {result.execution_time_ms}ms")

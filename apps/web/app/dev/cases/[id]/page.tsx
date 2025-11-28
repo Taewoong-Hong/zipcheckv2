@@ -324,10 +324,25 @@ export default function DevCaseDetailPage({
       setStep3Loading(true);
       setStep3Result(null);
 
+      // Step 2 결과에서 실거래가 데이터 추출 (없으면 자동 조회 결과 사용)
+      const propertyValueEstimate =
+        step2Result?.property_value_estimate ||
+        autoTradeResult?.averagePrice ||
+        null;
+      const jeonseMarketAverage =
+        step2Result?.jeonse_market_average ||
+        null;
+
       const response = await fetch('/api/dev/prepare-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ case_id: caseId, use_llm: useLLM }),
+        body: JSON.stringify({
+          case_id: caseId,
+          use_llm: useLLM,
+          // Step 2에서 수집한 실거래가 데이터 전달
+          property_value_estimate: propertyValueEstimate,
+          jeonse_market_average: jeonseMarketAverage,
+        }),
       });
 
       if (!response.ok) {

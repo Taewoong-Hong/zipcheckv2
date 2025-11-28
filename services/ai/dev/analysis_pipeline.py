@@ -542,7 +542,9 @@ async def collect_public_data(
 
 async def prepare_summary(
     case_id: str,
-    use_llm: bool = False
+    use_llm: bool = False,
+    property_value_estimate: int | None = None,
+    jeonse_market_average: int | None = None,
 ) -> SummaryResult:
     """
     요약 리포트 생성 (규칙 기반 or LLM)
@@ -550,6 +552,8 @@ async def prepare_summary(
     Args:
         case_id: 케이스 UUID
         use_llm: LLM 사용 여부 (False이면 규칙 기반만)
+        property_value_estimate: Step 2에서 전달받은 매매 실거래가 평균 (만원)
+        jeonse_market_average: Step 2에서 전달받은 전세 실거래가 평균 (만원)
 
     Returns:
         SummaryResult: 요약 결과
@@ -566,8 +570,11 @@ async def prepare_summary(
             # 분석 컨텍스트 빌드 (등기부 + 공공데이터 + 리스크 점수)
             context = await build_analysis_context(case_id)
 
+            # Step 2에서 전달받은 값이 있으면 사용, 없으면 context 값 사용
+            effective_property_value = property_value_estimate or context.property_value_estimate
+            effective_jeonse_market = jeonse_market_average or context.jeonse_market_average
+
             # Lab 테스트용 하드코딩 값 (실제 서비스에서는 유저 입력값 사용)
-            # TODO: 프론트엔드에서 유저 입력값 전달 받도록 수정
             case = context.case
             test_user_deposit = case.get('metadata', {}).get('deposit') or 50000  # 5억원 (만원 단위)
             test_user_price = case.get('metadata', {}).get('price') or 80000  # 8억원 (만원 단위)
@@ -591,103 +598,233 @@ async def prepare_summary(
                         case_id, "prepare_summary", "LLM 요약 생성", llm_time, threshold_ms=10000
                     )
             else:
-                # 규칙 기반 요약
+                # 규칙 기반 요약 (Notion 스타일 마크다운)
                 risk_result = context.risk_result
                 contract_type = case.get('contract_type', '전세')
 
-                summary_parts = [
-                    "# 부동산 분석 리포트 (규칙 기반)\n",
-                    f"**주소**: {case.get('property_address', 'N/A')}\n",
-                    f"**계약 유형**: {contract_type}\n",
-                ]
+                # 등기부 데이터 추출
+                registry_doc_masked = context.registry_doc_masked
+                registry_doc = context.registry_doc
 
-                # 가격 비교 분석 섹션 추가
-                summary_parts.append(f"\n## 💰 가격 비교 분석\n")
+                summary_parts = []
+
+                # ===== 헤더 섹션 =====
+                summary_parts.append("# 📋 부동산 계약 분석 리포트\n\n")
+                summary_parts.append("---\n\n")
+
+                # 기본 정보 테이블
+                summary_parts.append("## 📍 기본 정보\n\n")
+                summary_parts.append("| 항목 | 내용 |\n")
+                summary_parts.append("|------|------|\n")
+                summary_parts.append(f"| **주소** | {case.get('property_address', 'N/A')} |\n")
+                summary_parts.append(f"| **계약 유형** | {contract_type} |\n")
 
                 if contract_type in ['전세', '월세']:
-                    # 전세/월세: 보증금 vs 전세 시장 평균
-                    user_deposit = test_user_deposit
-                    market_avg = context.jeonse_market_average or context.property_value_estimate
+                    summary_parts.append(f"| **보증금** | {test_user_deposit:,}만원 |\n")
+                else:
+                    summary_parts.append(f"| **매매가** | {test_user_price:,}만원 |\n")
 
-                    summary_parts.append(f"- **유저 입력 보증금**: {user_deposit:,}만원\n")
+                summary_parts.append("\n---\n\n")
+
+                # ===== 가격 비교 분석 섹션 =====
+                summary_parts.append("## 💰 가격 비교 분석\n\n")
+
+                if contract_type in ['전세', '월세']:
+                    user_deposit = test_user_deposit
+                    market_avg = effective_jeonse_market or effective_property_value
 
                     if market_avg:
-                        summary_parts.append(f"- **시장 평균 전세가**: {market_avg:,}만원\n")
                         diff = user_deposit - market_avg
                         diff_percent = (diff / market_avg) * 100 if market_avg > 0 else 0
 
-                        if diff > 0:
-                            summary_parts.append(f"- **차액**: +{diff:,}만원 (시세 대비 **{diff_percent:.1f}% 높음** ⚠️)\n")
-                        elif diff < 0:
-                            summary_parts.append(f"- **차액**: {diff:,}만원 (시세 대비 **{abs(diff_percent):.1f}% 낮음** ✅)\n")
-                        else:
-                            summary_parts.append(f"- **차액**: 0원 (시세와 동일)\n")
+                        # 가격 비교 테이블
+                        summary_parts.append("| 구분 | 금액 | 비고 |\n")
+                        summary_parts.append("|------|------|------|\n")
+                        summary_parts.append(f"| 입력 보증금 | **{user_deposit:,}만원** | 검토 대상 |\n")
+                        summary_parts.append(f"| 시장 평균 | **{market_avg:,}만원** | 최근 실거래가 기준 |\n")
 
-                        # 가격 적정성 판단
-                        if diff_percent > 10:
-                            summary_parts.append(f"- **판단**: ❌ 시세 대비 과도하게 높습니다. 가격 협상을 권장합니다.\n")
-                        elif diff_percent > 5:
-                            summary_parts.append(f"- **판단**: ⚠️ 시세 대비 다소 높습니다. 가격 재검토를 권장합니다.\n")
-                        elif diff_percent < -10:
-                            summary_parts.append(f"- **판단**: ✅ 시세 대비 매우 유리한 조건입니다.\n")
+                        if diff > 0:
+                            summary_parts.append(f"| 차액 | **+{diff:,}만원** | 시세 대비 {diff_percent:.1f}% 높음 |\n")
+                        elif diff < 0:
+                            summary_parts.append(f"| 차액 | **{diff:,}만원** | 시세 대비 {abs(diff_percent):.1f}% 낮음 |\n")
                         else:
-                            summary_parts.append(f"- **판단**: ✅ 시세 대비 적정한 수준입니다.\n")
+                            summary_parts.append("| 차액 | **0만원** | 시세와 동일 |\n")
+
+                        summary_parts.append("\n")
+
+                        # 가격 적정성 판단 (Callout 스타일)
+                        if diff_percent > 10:
+                            summary_parts.append("> ❌ **주의 필요**: 시세 대비 과도하게 높습니다. **가격 협상을 권장**합니다.\n\n")
+                        elif diff_percent > 5:
+                            summary_parts.append("> ⚠️ **검토 필요**: 시세 대비 다소 높습니다. 가격 재검토를 권장합니다.\n\n")
+                        elif diff_percent < -10:
+                            summary_parts.append("> ✅ **유리한 조건**: 시세 대비 매우 유리한 조건입니다.\n\n")
+                        else:
+                            summary_parts.append("> ✅ **적정 수준**: 시세 대비 적정한 가격입니다.\n\n")
                     else:
-                        summary_parts.append(f"- **시장 평균 전세가**: 데이터 없음\n")
+                        summary_parts.append("> ⚠️ **데이터 없음**: 시장 평균 전세가 데이터를 조회하지 못했습니다.\n\n")
 
                 else:  # 매매
                     user_price = test_user_price
-                    market_avg = context.property_value_estimate
-
-                    summary_parts.append(f"- **유저 입력 매매가**: {user_price:,}만원\n")
+                    market_avg = effective_property_value
 
                     if market_avg:
-                        summary_parts.append(f"- **시장 평균 실거래가**: {market_avg:,}만원\n")
                         diff = user_price - market_avg
                         diff_percent = (diff / market_avg) * 100 if market_avg > 0 else 0
 
+                        # 가격 비교 테이블
+                        summary_parts.append("| 구분 | 금액 | 비고 |\n")
+                        summary_parts.append("|------|------|------|\n")
+                        summary_parts.append(f"| 입력 매매가 | **{user_price:,}만원** | 검토 대상 |\n")
+                        summary_parts.append(f"| 시장 평균 | **{market_avg:,}만원** | 최근 실거래가 기준 |\n")
+
                         if diff > 0:
-                            summary_parts.append(f"- **차액**: +{diff:,}만원 (시세 대비 **{diff_percent:.1f}% 높음** ⚠️)\n")
+                            summary_parts.append(f"| 차액 | **+{diff:,}만원** | 시세 대비 {diff_percent:.1f}% 높음 |\n")
                         elif diff < 0:
-                            summary_parts.append(f"- **차액**: {diff:,}만원 (시세 대비 **{abs(diff_percent):.1f}% 낮음** ✅)\n")
+                            summary_parts.append(f"| 차액 | **{diff:,}만원** | 시세 대비 {abs(diff_percent):.1f}% 낮음 |\n")
                         else:
-                            summary_parts.append(f"- **차액**: 0원 (시세와 동일)\n")
+                            summary_parts.append("| 차액 | **0만원** | 시세와 동일 |\n")
 
-                        # 가격 적정성 판단
+                        summary_parts.append("\n")
+
+                        # 가격 적정성 판단 (Callout 스타일)
                         if diff_percent > 15:
-                            summary_parts.append(f"- **판단**: ❌ 시세 대비 과도하게 높습니다. 가격 협상을 강력히 권장합니다.\n")
+                            summary_parts.append("> ❌ **주의 필요**: 시세 대비 과도하게 높습니다. **가격 협상을 강력히 권장**합니다.\n\n")
                         elif diff_percent > 5:
-                            summary_parts.append(f"- **판단**: ⚠️ 시세 대비 다소 높습니다. 가격 재검토를 권장합니다.\n")
+                            summary_parts.append("> ⚠️ **검토 필요**: 시세 대비 다소 높습니다. 가격 재검토를 권장합니다.\n\n")
                         elif diff_percent < -15:
-                            summary_parts.append(f"- **판단**: ✅ 시세 대비 매우 유리한 조건입니다. (급매 가능성 확인 필요)\n")
+                            summary_parts.append("> ✅ **유리한 조건**: 시세 대비 매우 유리한 조건입니다. (급매 가능성 확인 필요)\n\n")
                         else:
-                            summary_parts.append(f"- **판단**: ✅ 시세 대비 적정한 수준입니다.\n")
+                            summary_parts.append("> ✅ **적정 수준**: 시세 대비 적정한 가격입니다.\n\n")
                     else:
-                        summary_parts.append(f"- **시장 평균 실거래가**: 데이터 없음\n")
+                        summary_parts.append("> ⚠️ **데이터 없음**: 시장 평균 실거래가 데이터를 조회하지 못했습니다.\n\n")
 
-                summary_parts.append(f"\n## 📊 리스크 점수\n")
+                summary_parts.append("---\n\n")
+
+                # ===== 등기부 분석 섹션 =====
+                summary_parts.append("## 📄 등기부 분석\n\n")
+
+                if registry_doc_masked:
+                    # 소유자 정보
+                    owner_info = registry_doc_masked.get('owner')
+                    if owner_info and owner_info.get('name'):
+                        summary_parts.append(f"### 👤 소유자 정보\n")
+                        summary_parts.append(f"- **소유자**: {owner_info.get('name')}\n\n")
+
+                    # 근저당 정보 (말소 처리 반영)
+                    mortgages = registry_doc_masked.get('mortgages', [])
+                    active_mortgages = [m for m in mortgages if not m.get('is_deleted')]
+                    deleted_mortgages = [m for m in mortgages if m.get('is_deleted')]
+
+                    summary_parts.append(f"### 🏦 근저당권 현황\n\n")
+
+                    if active_mortgages:
+                        total_active = sum(m.get('amount') or 0 for m in active_mortgages)
+                        summary_parts.append(f"**유효 근저당**: {len(active_mortgages)}건 (총 **{total_active:,}만원**)\n\n")
+
+                        summary_parts.append("| 채권자 | 채권최고액 | 상태 |\n")
+                        summary_parts.append("|--------|------------|------|\n")
+                        for m in active_mortgages:
+                            creditor = m.get('creditor') or '미상'
+                            amount = m.get('amount') or 0
+                            summary_parts.append(f"| {creditor} | {amount:,}만원 | 🔴 유효 |\n")
+                        summary_parts.append("\n")
+                    else:
+                        summary_parts.append("> ✅ 유효한 근저당권이 없습니다.\n\n")
+
+                    if deleted_mortgages:
+                        total_deleted = sum(m.get('amount') or 0 for m in deleted_mortgages)
+                        summary_parts.append(f"**말소된 근저당**: {len(deleted_mortgages)}건 (총 {total_deleted:,}만원) - ✅ 처리 완료\n\n")
+
+                    # 압류/가압류 정보
+                    seizures = registry_doc_masked.get('seizures', [])
+                    active_seizures = [s for s in seizures if not s.get('is_deleted')]
+                    deleted_seizures = [s for s in seizures if s.get('is_deleted')]
+
+                    summary_parts.append(f"### ⚖️ 압류/가압류 현황\n\n")
+
+                    if active_seizures:
+                        summary_parts.append(f"**유효 압류/가압류**: {len(active_seizures)}건\n\n")
+
+                        summary_parts.append("| 유형 | 채권자 | 상태 |\n")
+                        summary_parts.append("|------|--------|------|\n")
+                        for s in active_seizures:
+                            s_type = s.get('type') or '미상'
+                            creditor = s.get('creditor') or '미상'
+                            summary_parts.append(f"| {s_type} | {creditor} | 🔴 유효 |\n")
+                        summary_parts.append("\n")
+
+                        summary_parts.append("> ❌ **주의**: 유효한 압류/가압류가 있습니다. 반드시 해결 후 계약을 진행하세요.\n\n")
+                    else:
+                        summary_parts.append("> ✅ 유효한 압류/가압류가 없습니다.\n\n")
+
+                    if deleted_seizures:
+                        summary_parts.append(f"**말소된 압류/가압류**: {len(deleted_seizures)}건 - ✅ 처리 완료\n\n")
+                else:
+                    summary_parts.append("> ℹ️ 등기부 데이터가 없습니다.\n\n")
+
+                summary_parts.append("---\n\n")
+
+                # ===== 리스크 점수 섹션 =====
+                summary_parts.append("## 📊 리스크 분석\n\n")
 
                 if risk_result:
-                    summary_parts.append(f"- **총점**: {risk_result.risk_score.total_score:.1f}점\n")
-                    summary_parts.append(f"- **위험 등급**: {risk_result.risk_score.risk_level}\n")
+                    # 리스크 점수 요약 박스
+                    risk_level = risk_result.risk_score.risk_level
+                    total_score = risk_result.risk_score.total_score
 
-                    if risk_result.risk_score.jeonse_ratio:
-                        summary_parts.append(f"- **전세가율**: {risk_result.risk_score.jeonse_ratio:.1f}%\n")
+                    # 리스크 레벨에 따른 이모지
+                    level_emoji = {"안전": "🟢", "주의": "🟡", "위험": "🟠", "심각": "🔴"}.get(risk_level, "⚪")
 
-                    if risk_result.risk_score.mortgage_ratio:
-                        summary_parts.append(f"- **근저당 비율**: {risk_result.risk_score.mortgage_ratio:.1f}%\n")
+                    summary_parts.append(f"### {level_emoji} 종합 리스크: **{risk_level}** ({total_score:.0f}점/100점)\n\n")
 
-                    summary_parts.append(f"\n## ⚠️ 위험 요인\n")
-                    for factor in risk_result.risk_score.risk_factors:
-                        summary_parts.append(f"- {factor}\n")
+                    # 세부 지표 테이블
+                    summary_parts.append("| 지표 | 값 | 평가 |\n")
+                    summary_parts.append("|------|-----|------|\n")
 
-                    summary_parts.append(f"\n## 🤝 협상 포인트\n")
-                    for point in risk_result.negotiation_points:
-                        summary_parts.append(f"- **[{point.category}]** {point.point} (영향: {point.impact})\n")
+                    if risk_result.risk_score.jeonse_ratio is not None:
+                        jr = risk_result.risk_score.jeonse_ratio
+                        jr_status = "🟢 안전" if jr < 70 else ("🟡 주의" if jr < 80 else ("🟠 위험" if jr < 90 else "🔴 심각"))
+                        summary_parts.append(f"| 전세가율 | {jr:.1f}% | {jr_status} |\n")
 
-                    summary_parts.append(f"\n## ✅ 권장 조치\n")
-                    for rec in risk_result.recommendations:
-                        summary_parts.append(f"- {rec}\n")
+                    if risk_result.risk_score.mortgage_ratio is not None:
+                        mr = risk_result.risk_score.mortgage_ratio
+                        mr_status = "🟢 안전" if mr < 40 else ("🟡 주의" if mr < 60 else ("🟠 위험" if mr < 80 else "🔴 심각"))
+                        summary_parts.append(f"| 근저당 비율 | {mr:.1f}% | {mr_status} |\n")
+
+                    summary_parts.append("\n")
+
+                    # 위험 요인 (Callout 스타일)
+                    if risk_result.risk_score.risk_factors:
+                        summary_parts.append("### ⚠️ 위험 요인\n\n")
+                        for factor in risk_result.risk_score.risk_factors:
+                            summary_parts.append(f"- {factor}\n")
+                        summary_parts.append("\n")
+
+                    summary_parts.append("---\n\n")
+
+                    # ===== 협상 포인트 섹션 =====
+                    if risk_result.negotiation_points:
+                        summary_parts.append("## 🤝 협상 포인트\n\n")
+                        for point in risk_result.negotiation_points:
+                            impact_emoji = {"높음": "🔴", "중간": "🟡", "낮음": "🟢"}.get(point.impact, "⚪")
+                            summary_parts.append(f"- **[{point.category}]** {point.point}\n")
+                            summary_parts.append(f"  - 영향도: {impact_emoji} {point.impact}\n")
+                        summary_parts.append("\n---\n\n")
+
+                    # ===== 권장 조치 섹션 =====
+                    if risk_result.recommendations:
+                        summary_parts.append("## ✅ 권장 조치\n\n")
+                        for i, rec in enumerate(risk_result.recommendations, 1):
+                            summary_parts.append(f"{i}. {rec}\n")
+                        summary_parts.append("\n")
+
+                else:
+                    summary_parts.append("> ℹ️ 리스크 분석 데이터가 없습니다.\n\n")
+
+                # ===== 푸터 =====
+                summary_parts.append("---\n\n")
+                summary_parts.append("*이 리포트는 자동 분석 결과이며, 최종 판단은 전문가와 상담하시기 바랍니다.*\n")
 
                 final_answer = "".join(summary_parts)
 
@@ -699,10 +836,10 @@ async def prepare_summary(
                 contract_type = context.case.get('contract_type', '전세')
                 if contract_type in ['전세', '월세']:
                     user_val = test_user_deposit
-                    market_val = context.jeonse_market_average or context.property_value_estimate
+                    market_val = effective_jeonse_market or effective_property_value
                 else:
                     user_val = test_user_price
-                    market_val = context.property_value_estimate
+                    market_val = effective_property_value
 
                 if market_val:
                     price_comparison = {
@@ -720,10 +857,13 @@ async def prepare_summary(
                 metadata={
                     "use_llm": use_llm,
                     "has_registry": bool(context.registry_doc),
-                    "has_market_data": bool(context.property_value_estimate),
-                    "jeonse_market_average": context.jeonse_market_average,
-                    "property_value_estimate": context.property_value_estimate,
+                    "has_market_data": bool(effective_property_value),
+                    "jeonse_market_average": effective_jeonse_market,
+                    "property_value_estimate": effective_property_value,
                     "price_comparison": price_comparison,
+                    # Step 2에서 전달받은 원본 값 (디버깅용)
+                    "step2_property_value_estimate": property_value_estimate,
+                    "step2_jeonse_market_average": jeonse_market_average,
                 }
             )
 
