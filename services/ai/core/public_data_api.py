@@ -390,6 +390,17 @@ class AptTradeAPIClient(BasePublicDataAPI):
 
                 logger.info(f"아파트 실거래가 조회 성공: {len(items)}개 결과")
 
+                # DEBUG: 첫 번째 아이템의 원본 필드 확인 (전용면적 디버깅)
+                if items:
+                    first_item = items[0]
+                    logger.info(f"[DEBUG] 원본 아이템 키: {list(first_item.keys())}")
+                    logger.info(f"[DEBUG] excluUseAr 값: '{first_item.get('excluUseAr')}'")
+                    logger.info(f"[DEBUG] 전용면적 값: '{first_item.get('전용면적')}'")
+                    # 모든 필드 값 로깅 (처음 3개 아이템)
+                    for i, item in enumerate(items[:3]):
+                        area_fields = {k: v for k, v in item.items() if '면적' in str(k) or 'UseAr' in str(k) or 'Area' in str(k)}
+                        logger.info(f"[DEBUG] item[{i}] 면적 관련 필드: {area_fields}")
+
                 return {
                     "header": {
                         "resultCode": result_code or "000",
