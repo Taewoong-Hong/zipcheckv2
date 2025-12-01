@@ -664,6 +664,15 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
     # 말소 여부 판별 키워드 (fallback용)
     deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
 
+    # 채권자로 잘못 추출되면 안 되는 단어들 (제외 목록)
+    invalid_creditors = {
+        '가압류', '가처분', '압류', '경매', '개시결정', '결정', '등기',
+        '말소', '해제', '해지', '취하', '년', '월', '일', '등', '호',
+        '소유권', '이전', '설정', '근저당', '전세권', '임의', '강제',
+        '기입', '촉탁', '신청', '접수', '완료', '처분', '금지', '가등기',
+        '채권자', '권리자', '신청인', '의하여', '대하여', '청구',
+    }
+
     for keyword, seizure_type in seizure_keywords.items():
         # 키워드가 있는지 확인
         pattern_search = f'{keyword}'
@@ -674,19 +683,37 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
         for keyword_match in re.finditer(re.escape(keyword), text):
             keyword_pos = keyword_match.start()
 
-            # 컨텍스트 추출 (앞뒤 200자)
-            start = max(0, keyword_pos - 100)
-            end = min(len(text), keyword_pos + 300)
+            # 컨텍스트 추출 (앞뒤 300자로 확대)
+            start = max(0, keyword_pos - 150)
+            end = min(len(text), keyword_pos + 400)
             context = text[start:end]
 
-            # 근처에서 채권자 찾기
-            pattern = f'{re.escape(keyword)}[^가-힣]{{0,50}}([가-힣]+(?:캐피탈|은행|금융|신협|저축|증권|국세청|시청|구청)?)'
-            match = re.search(pattern, context)
-            creditor = match.group(1).strip() if match else None
+            # 근처에서 채권자 찾기 (여러 패턴 시도, 우선순위 순서)
+            creditor = None
+            creditor_patterns = [
+                # 1. 명시적 "채권자", "권리자" 패턴
+                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]?\s*([가-힣]+(?:국세청|세무서|시청|구청|군청|은행|캐피탈|금융|신협|저축|증권|보험|공사|공단)?)',
+                # 2. 기관명 직접 매칭 (XX국세청, XX세무서 등)
+                r'([가-힣]{2,8}(?:지방국세청|국세청|세무서))',
+                r'([가-힣]{2,8}(?:시청|구청|군청|도청))',
+                # 3. 금융기관 매칭
+                r'([가-힣]{2,10}(?:은행|캐피탈|금융|신협|저축은행|증권|보험|공사|공단))',
+                # 4. 지자체 패턴 (XX시, XX구, XX군) - 뒤에 "장" 붙은 경우
+                r'([가-힣]{2,6}(?:특별시|광역시|시|구|군))\s*(?:장)?(?:\s|$)',
+            ]
+
+            for creditor_pattern in creditor_patterns:
+                match = re.search(creditor_pattern, context)
+                if match:
+                    candidate = match.group(1).strip()
+                    # 유효한 채권자인지 확인
+                    if candidate and len(candidate) >= 2 and candidate not in invalid_creditors:
+                        creditor = candidate
+                        break
 
             # 금액 찾기 (있을 경우)
             amount = None
-            amount_pattern = rf'{re.escape(keyword)}[^0-9]{{0,100}}금?\s*([\d,]+)\s*원'
+            amount_pattern = r'(?:청구금액|채권금액|금)\s*([\d,]+)\s*원'
             amount_match = re.search(amount_pattern, context)
             if amount_match:
                 amount_str = amount_match.group(1).replace(',', '')
