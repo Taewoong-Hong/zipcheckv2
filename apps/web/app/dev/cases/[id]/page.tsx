@@ -31,6 +31,25 @@ interface SummaryResult {
   error?: string;
   execution_time_ms: number;
   used_llm: boolean;
+  metadata?: {
+    use_llm?: boolean;
+    has_registry?: boolean;
+    has_market_data?: boolean;
+    jeonse_market_average?: number;
+    property_value_estimate?: number;
+    price_comparison?: {
+      user_value?: number;
+      market_average?: number;
+      difference?: number;
+      difference_percent?: number;
+    };
+    step2_property_value_estimate?: number;
+    step2_jeonse_market_average?: number;
+    user_contract_type?: string;
+    user_deposit?: number;
+    user_price?: number;
+    user_monthly_rent?: number;
+  };
 }
 
 // API Tester Types
@@ -142,6 +161,12 @@ export default function DevCaseDetailPage({
   } | null>(null);
 
   const [useLLM, setUseLLM] = useState(false);
+
+  // 계약 정보 입력 state
+  const [contractType, setContractType] = useState<'전세' | '월세' | '매매'>('전세');
+  const [depositAmount, setDepositAmount] = useState<string>(''); // 보증금 (만원)
+  const [priceAmount, setPriceAmount] = useState<string>(''); // 매매가 (만원)
+  const [monthlyRentAmount, setMonthlyRentAmount] = useState<string>(''); // 월세 (만원)
 
   // 주소에서 지번 추출하는 함수
   const parseAddressComponents = (address: string) => {
@@ -341,6 +366,11 @@ export default function DevCaseDetailPage({
         step2Result?.jeonse_market_average ||
         null;
 
+      // 계약 정보 파싱
+      const deposit = depositAmount ? parseInt(depositAmount, 10) : null;
+      const price = priceAmount ? parseInt(priceAmount, 10) : null;
+      const monthlyRent = monthlyRentAmount ? parseInt(monthlyRentAmount, 10) : null;
+
       const response = await fetch('/api/dev/prepare-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -350,6 +380,11 @@ export default function DevCaseDetailPage({
           // Step 2에서 수집한 실거래가 데이터 전달
           property_value_estimate: propertyValueEstimate,
           jeonse_market_average: jeonseMarketAverage,
+          // 계약 정보 전달
+          contract_type: contractType,
+          deposit: deposit,         // 보증금 (전세/월세)
+          price: price,             // 매매가 (매매)
+          monthly_rent: monthlyRent, // 월세 (월세)
         }),
       });
 
@@ -1711,6 +1746,123 @@ export default function DevCaseDetailPage({
             )}
           </div>
 
+          {/* Contract Info Input: 계약 정보 입력 */}
+          <div className="bg-white rounded-lg shadow border-2 border-blue-200">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold">📋 계약 정보 입력</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                리스크 분석을 위한 계약 유형과 금액을 입력하세요
+              </p>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              {/* 계약 유형 선택 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  계약 유형
+                </label>
+                <div className="flex gap-4">
+                  {(['전세', '월세', '매매'] as const).map((type) => (
+                    <label key={type} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="contractType"
+                        value={type}
+                        checked={contractType === type}
+                        onChange={(e) => setContractType(e.target.value as '전세' | '월세' | '매매')}
+                        className="w-4 h-4 text-blue-600"
+                      />
+                      <span className={`text-sm ${contractType === type ? 'font-semibold text-blue-600' : 'text-gray-700'}`}>
+                        {type}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 금액 입력 - 계약 유형별 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 전세/월세: 보증금 */}
+                {(contractType === '전세' || contractType === '월세') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      보증금 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="예: 30000"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {depositAmount && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        = {(parseInt(depositAmount, 10) / 10000).toLocaleString()}억원
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* 월세: 월세액 */}
+                {contractType === '월세' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      월세 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={monthlyRentAmount}
+                      onChange={(e) => setMonthlyRentAmount(e.target.value)}
+                      placeholder="예: 100"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                )}
+
+                {/* 매매: 매매가 */}
+                {contractType === '매매' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      매매가 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={priceAmount}
+                      onChange={(e) => setPriceAmount(e.target.value)}
+                      placeholder="예: 80000"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {priceAmount && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        = {(parseInt(priceAmount, 10) / 10000).toLocaleString()}억원
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 입력 요약 */}
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                <p className="text-sm font-medium text-blue-800">
+                  📊 입력된 계약 정보:
+                </p>
+                <p className="text-sm text-blue-700 mt-1">
+                  {contractType === '전세' && depositAmount && (
+                    <>전세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원</>
+                  )}
+                  {contractType === '월세' && depositAmount && (
+                    <>월세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원 / 월세 {monthlyRentAmount ? parseInt(monthlyRentAmount, 10).toLocaleString() : 0}만원</>
+                  )}
+                  {contractType === '매매' && priceAmount && (
+                    <>매매 계약 - 매매가 {parseInt(priceAmount, 10).toLocaleString()}만원</>
+                  )}
+                  {!depositAmount && !priceAmount && (
+                    <span className="text-gray-500">금액을 입력해주세요</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Step 3: Prepare Summary */}
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
@@ -1742,25 +1894,196 @@ export default function DevCaseDetailPage({
             {step3Result && (
               <div className="px-6 py-4">
                 {step3Result.success ? (
-                  <div>
-                    <div className="flex items-center gap-2 mb-4">
+                  <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-center gap-2">
                       <span className="text-green-600 font-medium">✓ Success</span>
                       <span className="text-gray-500 text-sm">
-                        ({step3Result.execution_time_ms}ms, {step3Result.used_llm ? 'LLM' : '규칙 기반'})
+                        ({step3Result.execution_time_ms}ms, {step3Result.metadata?.use_llm ? 'LLM' : '규칙 기반'})
                       </span>
                     </div>
-                    {step3Result.risk_score && (
-                      <div className="mb-4 p-4 bg-gray-50 rounded">
-                        <h3 className="font-medium mb-2">Risk Score</h3>
-                        <pre className="text-xs overflow-auto">
-                          {JSON.stringify(step3Result.risk_score, null, 2)}
-                        </pre>
+
+                    {/* 입력 데이터 요약 (Metadata) */}
+                    {step3Result.metadata && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* 유저 입력 계약 정보 */}
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <h4 className="font-medium text-blue-800 mb-3">📋 입력 계약 정보</h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">계약 유형:</span>
+                              <span className="font-medium">{step3Result.metadata.user_contract_type || 'N/A'}</span>
+                            </div>
+                            {(step3Result.metadata.user_contract_type === '전세' || step3Result.metadata.user_contract_type === '월세') && (
+                              <>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">입력 보증금:</span>
+                                  <span className="font-medium">
+                                    {step3Result.metadata.user_deposit
+                                      ? `${step3Result.metadata.user_deposit.toLocaleString()}만원`
+                                      : '미입력'}
+                                  </span>
+                                </div>
+                                {step3Result.metadata.user_contract_type === '월세' && (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">입력 월세:</span>
+                                    <span className="font-medium">
+                                      {step3Result.metadata.user_monthly_rent
+                                        ? `${step3Result.metadata.user_monthly_rent.toLocaleString()}만원`
+                                        : '미입력'}
+                                    </span>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            {step3Result.metadata.user_contract_type === '매매' && (
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">입력 매매가:</span>
+                                <span className="font-medium">
+                                  {step3Result.metadata.user_price
+                                    ? `${step3Result.metadata.user_price.toLocaleString()}만원`
+                                    : '미입력'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 시장 데이터 (Step 2) */}
+                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                          <h4 className="font-medium text-green-800 mb-3">📊 시장 데이터 (Step 2)</h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">매매 실거래가 평균:</span>
+                              <span className="font-medium">
+                                {step3Result.metadata.property_value_estimate
+                                  ? `${step3Result.metadata.property_value_estimate.toLocaleString()}만원`
+                                  : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">전세 실거래가 평균:</span>
+                              <span className="font-medium">
+                                {step3Result.metadata.jeonse_market_average
+                                  ? `${step3Result.metadata.jeonse_market_average.toLocaleString()}만원`
+                                  : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">등기부 데이터:</span>
+                              <span className={`font-medium ${step3Result.metadata.has_registry ? 'text-green-600' : 'text-red-600'}`}>
+                                {step3Result.metadata.has_registry ? '✓ 있음' : '✗ 없음'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
+
+                    {/* 가격 비교 결과 */}
+                    {step3Result.metadata?.price_comparison && step3Result.metadata.price_comparison.user_value && (
+                      <div className={`p-4 rounded-lg border ${
+                        (step3Result.metadata.price_comparison.difference_percent ?? 0) > 10
+                          ? 'bg-red-50 border-red-200'
+                          : (step3Result.metadata.price_comparison.difference_percent ?? 0) > 5
+                            ? 'bg-yellow-50 border-yellow-200'
+                            : 'bg-green-50 border-green-200'
+                      }`}>
+                        <h4 className="font-medium mb-3">💰 가격 비교 분석</h4>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                          <div>
+                            <div className="text-sm text-gray-600">입력 금액</div>
+                            <div className="text-lg font-bold text-blue-600">
+                              {step3Result.metadata.price_comparison.user_value.toLocaleString()}만원
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-sm text-gray-600">시장 평균</div>
+                            <div className="text-lg font-bold text-gray-700">
+                              {step3Result.metadata.price_comparison.market_average?.toLocaleString()}만원
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-sm text-gray-600">차이</div>
+                            <div className={`text-lg font-bold ${
+                              (step3Result.metadata.price_comparison.difference ?? 0) > 0
+                                ? 'text-red-600'
+                                : 'text-green-600'
+                            }`}>
+                              {(step3Result.metadata.price_comparison.difference ?? 0) > 0 ? '+' : ''}
+                              {step3Result.metadata.price_comparison.difference?.toLocaleString()}만원
+                              <span className="text-sm ml-1">
+                                ({(step3Result.metadata.price_comparison.difference_percent ?? 0) > 0 ? '+' : ''}
+                                {step3Result.metadata.price_comparison.difference_percent?.toFixed(1)}%)
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Risk Score */}
+                    {step3Result.risk_score && (
+                      <div className="p-4 bg-gray-50 rounded-lg border">
+                        <h4 className="font-medium mb-3">📊 리스크 점수</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                          <div className="text-center p-3 bg-white rounded border">
+                            <div className="text-sm text-gray-600">종합 점수</div>
+                            <div className={`text-2xl font-bold ${
+                              step3Result.risk_score.total_score >= 71 ? 'text-red-600' :
+                              step3Result.risk_score.total_score >= 51 ? 'text-orange-500' :
+                              step3Result.risk_score.total_score >= 31 ? 'text-yellow-600' : 'text-green-600'
+                            }`}>
+                              {step3Result.risk_score.total_score?.toFixed(0) ?? 'N/A'}
+                            </div>
+                          </div>
+                          <div className="text-center p-3 bg-white rounded border">
+                            <div className="text-sm text-gray-600">위험 등급</div>
+                            <div className={`text-xl font-bold ${
+                              step3Result.risk_score.risk_level === '심각' ? 'text-red-600' :
+                              step3Result.risk_score.risk_level === '위험' ? 'text-orange-500' :
+                              step3Result.risk_score.risk_level === '주의' ? 'text-yellow-600' : 'text-green-600'
+                            }`}>
+                              {step3Result.risk_score.risk_level ?? 'N/A'}
+                            </div>
+                          </div>
+                          {step3Result.risk_score.jeonse_ratio != null && (
+                            <div className="text-center p-3 bg-white rounded border">
+                              <div className="text-sm text-gray-600">전세가율</div>
+                              <div className="text-xl font-bold">
+                                {step3Result.risk_score.jeonse_ratio?.toFixed(1)}%
+                              </div>
+                            </div>
+                          )}
+                          {step3Result.risk_score.mortgage_ratio != null && (
+                            <div className="text-center p-3 bg-white rounded border">
+                              <div className="text-sm text-gray-600">근저당 비율</div>
+                              <div className="text-xl font-bold">
+                                {step3Result.risk_score.mortgage_ratio?.toFixed(1)}%
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 위험 요인 */}
+                        {step3Result.risk_score.risk_factors && step3Result.risk_score.risk_factors.length > 0 && (
+                          <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                            <div className="text-sm font-medium text-yellow-800 mb-2">⚠️ 위험 요인</div>
+                            <ul className="text-sm text-gray-700 space-y-1">
+                              {step3Result.risk_score.risk_factors.map((factor: string, idx: number) => (
+                                <li key={idx}>• {factor}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Summary (Markdown) */}
                     {step3Result.summary && (
                       <div>
-                        <h3 className="font-medium mb-2">Summary</h3>
-                        <div className="prose prose-sm max-w-none bg-white p-4 rounded-lg border">
+                        <h4 className="font-medium mb-3">📝 종합 분석 리포트</h4>
+                        <div className="prose prose-sm max-w-none bg-white p-6 rounded-lg border shadow-sm">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {step3Result.summary}
                           </ReactMarkdown>
