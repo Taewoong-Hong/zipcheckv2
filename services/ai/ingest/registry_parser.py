@@ -381,29 +381,64 @@ def extract_building_type(text: str) -> Optional[str]:
 
     판별 기준:
     1. 표제부 용도가 '공동주택(아파트)' → 아파트
-    2. 층수가 6층 이상 존재 → 아파트
-    3. 기타 키워드 기반 판별
+    2. 복합 건물의 경우: "N층 [주택유형]" 패턴에서 주택유형 추출
+       - 예: "6층 다세대주택" → 다세대
+       - 1층이 근린생활시설이어도 상위층 주택유형 우선
+    3. 층수가 6층 이상 존재 → 아파트
+    4. 기타 키워드 기반 판별
     """
-    # 1. 용도 표시에서 직접 확인
-    usage_patterns = [
-        (r'공동주택\s*\(\s*아파트\s*\)', '아파트'),
-        (r'아파트', '아파트'),
-        (r'오피스텔', '오피스텔'),
-        (r'근린생활시설', '근린생활주택'),
-        (r'다가구주택', '다가구'),
+    # 0. 아파트 관련 패턴 우선 확인 (가장 명확한 경우)
+    apt_patterns = [
+        r'공동주택\s*\(\s*아파트\s*\)',
+        r'아파트',
+    ]
+    for pattern in apt_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            logger.info(f"   └─ 건물유형 (아파트 키워드): 아파트")
+            return '아파트'
+
+    # 1. 복합 건물 패턴: "N층 [주택유형]" (건물 내역 첫 줄)
+    # 예: "6층 다세대주택", "5층 다가구주택", "7층 연립주택"
+    # 이 패턴이 발견되면 해당 주택유형을 우선 사용 (복합건물 대응)
+    total_floor_type_patterns = [
+        (r'(\d{1,2})층\s*(다세대주택|다세대)', '다세대'),
+        (r'(\d{1,2})층\s*(다가구주택|다가구)', '다가구'),
+        (r'(\d{1,2})층\s*(연립주택|연립)', '연립'),
+        (r'(\d{1,2})층\s*오피스텔', '오피스텔'),
+    ]
+
+    for pattern, building_type in total_floor_type_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            floor_num = match.group(1)
+            logger.info(f"   └─ 건물유형 (총층수 패턴 {floor_num}층): {building_type}")
+            return building_type
+
+    # 2. 주택 유형 키워드 확인 (근린생활시설보다 주택 유형 우선)
+    # 복합 건물에서 1층이 근린생활시설이어도 주택 유형이 있으면 그것을 사용
+    residential_patterns = [
         (r'다세대주택', '다세대'),
         (r'다세대', '다세대'),
+        (r'다가구주택', '다가구'),
         (r'다가구', '다가구'),
         (r'연립주택', '연립'),
         (r'단독주택', '단독주택'),
+        (r'오피스텔', '오피스텔'),
     ]
 
-    for pattern, building_type in usage_patterns:
+    for pattern, building_type in residential_patterns:
         if re.search(pattern, text, re.IGNORECASE):
-            logger.info(f"   └─ 건물유형 (용도 키워드): {building_type}")
+            logger.info(f"   └─ 건물유형 (주택 키워드): {building_type}")
             return building_type
 
-    # 2. 층수 확인 (6층 이상이면 아파트)
+    # 3. 근린생활시설만 있는 경우 (순수 상가 건물)
+    if re.search(r'근린생활시설', text, re.IGNORECASE):
+        # 주택 관련 키워드가 없는지 다시 확인
+        if not re.search(r'(다세대|다가구|연립|단독주택|주택)', text, re.IGNORECASE):
+            logger.info(f"   └─ 건물유형 (순수 상가): 근린생활주택")
+            return '근린생활주택'
+
+    # 4. 층수 확인 (6층 이상이면 아파트)
     # 패턴: "7층", "10층", "15층" 등
     floor_pattern = r'(\d{1,2})층\s*[\d,.]+'
     floor_matches = re.findall(floor_pattern, text)
@@ -414,7 +449,7 @@ def extract_building_type(text: str) -> Optional[str]:
             logger.info(f"   └─ 건물유형 (층수 {max_floor}층 ≥ 6층): 아파트")
             return '아파트'
 
-    # 3. 건물 내역에서 층수 확인 (예: "제4층 제406호")
+    # 5. 건물 내역에서 층수 확인 (예: "제4층 제406호")
     unit_floor_pattern = r'제\s*(\d{1,2})\s*층'
     unit_floor_matches = re.findall(unit_floor_pattern, text)
 
