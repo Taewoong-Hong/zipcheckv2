@@ -545,6 +545,10 @@ async def prepare_summary(
     use_llm: bool = False,
     property_value_estimate: int | None = None,
     jeonse_market_average: int | None = None,
+    contract_type: str | None = None,
+    deposit: int | None = None,
+    price: int | None = None,
+    monthly_rent: int | None = None,
 ) -> SummaryResult:
     """
     요약 리포트 생성 (규칙 기반 or LLM)
@@ -554,6 +558,10 @@ async def prepare_summary(
         use_llm: LLM 사용 여부 (False이면 규칙 기반만)
         property_value_estimate: Step 2에서 전달받은 매매 실거래가 평균 (만원)
         jeonse_market_average: Step 2에서 전달받은 전세 실거래가 평균 (만원)
+        contract_type: 계약 유형 ("전세" | "월세" | "매매")
+        deposit: 보증금 (만원) - 전세/월세
+        price: 매매가 (만원) - 매매
+        monthly_rent: 월세 (만원) - 월세
 
     Returns:
         SummaryResult: 요약 결과
@@ -574,10 +582,14 @@ async def prepare_summary(
             effective_property_value = property_value_estimate or context.property_value_estimate
             effective_jeonse_market = jeonse_market_average or context.jeonse_market_average
 
-            # Lab 테스트용 하드코딩 값 (실제 서비스에서는 유저 입력값 사용)
+            # 유저 입력 계약 정보 사용 (없으면 case metadata에서 fallback)
             case = context.case
-            test_user_deposit = case.get('metadata', {}).get('deposit') or 50000  # 5억원 (만원 단위)
-            test_user_price = case.get('metadata', {}).get('price') or 80000  # 8억원 (만원 단위)
+            effective_contract_type = contract_type or case.get('contract_type', '전세')
+            user_deposit = deposit or case.get('metadata', {}).get('deposit')  # 보증금 (전세/월세)
+            user_price = price or case.get('metadata', {}).get('price')  # 매매가 (매매)
+            user_monthly_rent = monthly_rent or case.get('metadata', {}).get('monthly_rent')  # 월세
+
+            logger.info(f"[prepare_summary] 계약정보: type={effective_contract_type}, deposit={user_deposit}, price={user_price}, monthly_rent={user_monthly_rent}")
 
             if use_llm:
                 # LLM 요약 (10000ms 임계값 모니터링)
@@ -600,7 +612,6 @@ async def prepare_summary(
             else:
                 # 규칙 기반 요약 (Notion 스타일 마크다운)
                 risk_result = context.risk_result
-                contract_type = case.get('contract_type', '전세')
 
                 # 등기부 데이터 추출
                 registry_doc_masked = context.registry_doc_masked
@@ -617,23 +628,26 @@ async def prepare_summary(
                 summary_parts.append("| 항목 | 내용 |\n")
                 summary_parts.append("|------|------|\n")
                 summary_parts.append(f"| **주소** | {case.get('property_address', 'N/A')} |\n")
-                summary_parts.append(f"| **계약 유형** | {contract_type} |\n")
+                summary_parts.append(f"| **계약 유형** | {effective_contract_type} |\n")
 
-                if contract_type in ['전세', '월세']:
-                    summary_parts.append(f"| **보증금** | {test_user_deposit:,}만원 |\n")
+                if effective_contract_type in ['전세', '월세']:
+                    deposit_display = f"{user_deposit:,}만원" if user_deposit else "미입력"
+                    summary_parts.append(f"| **보증금** | {deposit_display} |\n")
+                    if effective_contract_type == '월세' and user_monthly_rent:
+                        summary_parts.append(f"| **월세** | {user_monthly_rent:,}만원 |\n")
                 else:
-                    summary_parts.append(f"| **매매가** | {test_user_price:,}만원 |\n")
+                    price_display = f"{user_price:,}만원" if user_price else "미입력"
+                    summary_parts.append(f"| **매매가** | {price_display} |\n")
 
                 summary_parts.append("\n---\n\n")
 
                 # ===== 가격 비교 분석 섹션 =====
                 summary_parts.append("## 💰 가격 비교 분석\n\n")
 
-                if contract_type in ['전세', '월세']:
-                    user_deposit = test_user_deposit
+                if effective_contract_type in ['전세', '월세']:
                     market_avg = effective_jeonse_market or effective_property_value
 
-                    if market_avg:
+                    if user_deposit and market_avg:
                         diff = user_deposit - market_avg
                         diff_percent = (diff / market_avg) * 100 if market_avg > 0 else 0
 
@@ -661,14 +675,15 @@ async def prepare_summary(
                             summary_parts.append("> ✅ **유리한 조건**: 시세 대비 매우 유리한 조건입니다.\n\n")
                         else:
                             summary_parts.append("> ✅ **적정 수준**: 시세 대비 적정한 가격입니다.\n\n")
+                    elif not user_deposit:
+                        summary_parts.append("> ⚠️ **보증금 미입력**: 보증금을 입력해주세요.\n\n")
                     else:
                         summary_parts.append("> ⚠️ **데이터 없음**: 시장 평균 전세가 데이터를 조회하지 못했습니다.\n\n")
 
                 else:  # 매매
-                    user_price = test_user_price
                     market_avg = effective_property_value
 
-                    if market_avg:
+                    if user_price and market_avg:
                         diff = user_price - market_avg
                         diff_percent = (diff / market_avg) * 100 if market_avg > 0 else 0
 
@@ -696,6 +711,8 @@ async def prepare_summary(
                             summary_parts.append("> ✅ **유리한 조건**: 시세 대비 매우 유리한 조건입니다. (급매 가능성 확인 필요)\n\n")
                         else:
                             summary_parts.append("> ✅ **적정 수준**: 시세 대비 적정한 가격입니다.\n\n")
+                    elif not user_price:
+                        summary_parts.append("> ⚠️ **매매가 미입력**: 매매가를 입력해주세요.\n\n")
                     else:
                         summary_parts.append("> ⚠️ **데이터 없음**: 시장 평균 실거래가 데이터를 조회하지 못했습니다.\n\n")
 
@@ -833,15 +850,14 @@ async def prepare_summary(
             # 가격 비교 데이터 수집 (metadata용)
             price_comparison = {}
             if not use_llm:
-                contract_type = context.case.get('contract_type', '전세')
-                if contract_type in ['전세', '월세']:
-                    user_val = test_user_deposit
+                if effective_contract_type in ['전세', '월세']:
+                    user_val = user_deposit
                     market_val = effective_jeonse_market or effective_property_value
                 else:
-                    user_val = test_user_price
+                    user_val = user_price
                     market_val = effective_property_value
 
-                if market_val:
+                if user_val and market_val:
                     price_comparison = {
                         "user_value": user_val,
                         "market_average": market_val,
@@ -864,6 +880,11 @@ async def prepare_summary(
                     # Step 2에서 전달받은 원본 값 (디버깅용)
                     "step2_property_value_estimate": property_value_estimate,
                     "step2_jeonse_market_average": jeonse_market_average,
+                    # Step 3 유저 입력 계약 정보 (디버깅용)
+                    "user_contract_type": effective_contract_type,
+                    "user_deposit": user_deposit,
+                    "user_price": user_price,
+                    "user_monthly_rent": user_monthly_rent,
                 }
             )
 

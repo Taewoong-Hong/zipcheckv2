@@ -31,6 +31,25 @@ interface SummaryResult {
   error?: string;
   execution_time_ms: number;
   used_llm: boolean;
+  metadata?: {
+    use_llm?: boolean;
+    has_registry?: boolean;
+    has_market_data?: boolean;
+    jeonse_market_average?: number;
+    property_value_estimate?: number;
+    price_comparison?: {
+      user_value?: number;
+      market_average?: number;
+      difference?: number;
+      difference_percent?: number;
+    };
+    step2_property_value_estimate?: number;
+    step2_jeonse_market_average?: number;
+    user_contract_type?: string;
+    user_deposit?: number;
+    user_price?: number;
+    user_monthly_rent?: number;
+  };
 }
 
 // API Tester Types
@@ -1875,25 +1894,196 @@ export default function DevCaseDetailPage({
             {step3Result && (
               <div className="px-6 py-4">
                 {step3Result.success ? (
-                  <div>
-                    <div className="flex items-center gap-2 mb-4">
+                  <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-center gap-2">
                       <span className="text-green-600 font-medium">✓ Success</span>
                       <span className="text-gray-500 text-sm">
-                        ({step3Result.execution_time_ms}ms, {step3Result.used_llm ? 'LLM' : '규칙 기반'})
+                        ({step3Result.execution_time_ms}ms, {step3Result.metadata?.use_llm ? 'LLM' : '규칙 기반'})
                       </span>
                     </div>
-                    {step3Result.risk_score && (
-                      <div className="mb-4 p-4 bg-gray-50 rounded">
-                        <h3 className="font-medium mb-2">Risk Score</h3>
-                        <pre className="text-xs overflow-auto">
-                          {JSON.stringify(step3Result.risk_score, null, 2)}
-                        </pre>
+
+                    {/* 입력 데이터 요약 (Metadata) */}
+                    {step3Result.metadata && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* 유저 입력 계약 정보 */}
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <h4 className="font-medium text-blue-800 mb-3">📋 입력 계약 정보</h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">계약 유형:</span>
+                              <span className="font-medium">{step3Result.metadata.user_contract_type || 'N/A'}</span>
+                            </div>
+                            {(step3Result.metadata.user_contract_type === '전세' || step3Result.metadata.user_contract_type === '월세') && (
+                              <>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-600">입력 보증금:</span>
+                                  <span className="font-medium">
+                                    {step3Result.metadata.user_deposit
+                                      ? `${step3Result.metadata.user_deposit.toLocaleString()}만원`
+                                      : '미입력'}
+                                  </span>
+                                </div>
+                                {step3Result.metadata.user_contract_type === '월세' && (
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600">입력 월세:</span>
+                                    <span className="font-medium">
+                                      {step3Result.metadata.user_monthly_rent
+                                        ? `${step3Result.metadata.user_monthly_rent.toLocaleString()}만원`
+                                        : '미입력'}
+                                    </span>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            {step3Result.metadata.user_contract_type === '매매' && (
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">입력 매매가:</span>
+                                <span className="font-medium">
+                                  {step3Result.metadata.user_price
+                                    ? `${step3Result.metadata.user_price.toLocaleString()}만원`
+                                    : '미입력'}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 시장 데이터 (Step 2) */}
+                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                          <h4 className="font-medium text-green-800 mb-3">📊 시장 데이터 (Step 2)</h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">매매 실거래가 평균:</span>
+                              <span className="font-medium">
+                                {step3Result.metadata.property_value_estimate
+                                  ? `${step3Result.metadata.property_value_estimate.toLocaleString()}만원`
+                                  : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">전세 실거래가 평균:</span>
+                              <span className="font-medium">
+                                {step3Result.metadata.jeonse_market_average
+                                  ? `${step3Result.metadata.jeonse_market_average.toLocaleString()}만원`
+                                  : 'N/A'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-600">등기부 데이터:</span>
+                              <span className={`font-medium ${step3Result.metadata.has_registry ? 'text-green-600' : 'text-red-600'}`}>
+                                {step3Result.metadata.has_registry ? '✓ 있음' : '✗ 없음'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
+
+                    {/* 가격 비교 결과 */}
+                    {step3Result.metadata?.price_comparison && step3Result.metadata.price_comparison.user_value && (
+                      <div className={`p-4 rounded-lg border ${
+                        (step3Result.metadata.price_comparison.difference_percent ?? 0) > 10
+                          ? 'bg-red-50 border-red-200'
+                          : (step3Result.metadata.price_comparison.difference_percent ?? 0) > 5
+                            ? 'bg-yellow-50 border-yellow-200'
+                            : 'bg-green-50 border-green-200'
+                      }`}>
+                        <h4 className="font-medium mb-3">💰 가격 비교 분석</h4>
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                          <div>
+                            <div className="text-sm text-gray-600">입력 금액</div>
+                            <div className="text-lg font-bold text-blue-600">
+                              {step3Result.metadata.price_comparison.user_value.toLocaleString()}만원
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-sm text-gray-600">시장 평균</div>
+                            <div className="text-lg font-bold text-gray-700">
+                              {step3Result.metadata.price_comparison.market_average?.toLocaleString()}만원
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-sm text-gray-600">차이</div>
+                            <div className={`text-lg font-bold ${
+                              (step3Result.metadata.price_comparison.difference ?? 0) > 0
+                                ? 'text-red-600'
+                                : 'text-green-600'
+                            }`}>
+                              {(step3Result.metadata.price_comparison.difference ?? 0) > 0 ? '+' : ''}
+                              {step3Result.metadata.price_comparison.difference?.toLocaleString()}만원
+                              <span className="text-sm ml-1">
+                                ({(step3Result.metadata.price_comparison.difference_percent ?? 0) > 0 ? '+' : ''}
+                                {step3Result.metadata.price_comparison.difference_percent?.toFixed(1)}%)
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Risk Score */}
+                    {step3Result.risk_score && (
+                      <div className="p-4 bg-gray-50 rounded-lg border">
+                        <h4 className="font-medium mb-3">📊 리스크 점수</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                          <div className="text-center p-3 bg-white rounded border">
+                            <div className="text-sm text-gray-600">종합 점수</div>
+                            <div className={`text-2xl font-bold ${
+                              step3Result.risk_score.total_score >= 71 ? 'text-red-600' :
+                              step3Result.risk_score.total_score >= 51 ? 'text-orange-500' :
+                              step3Result.risk_score.total_score >= 31 ? 'text-yellow-600' : 'text-green-600'
+                            }`}>
+                              {step3Result.risk_score.total_score?.toFixed(0) ?? 'N/A'}
+                            </div>
+                          </div>
+                          <div className="text-center p-3 bg-white rounded border">
+                            <div className="text-sm text-gray-600">위험 등급</div>
+                            <div className={`text-xl font-bold ${
+                              step3Result.risk_score.risk_level === '심각' ? 'text-red-600' :
+                              step3Result.risk_score.risk_level === '위험' ? 'text-orange-500' :
+                              step3Result.risk_score.risk_level === '주의' ? 'text-yellow-600' : 'text-green-600'
+                            }`}>
+                              {step3Result.risk_score.risk_level ?? 'N/A'}
+                            </div>
+                          </div>
+                          {step3Result.risk_score.jeonse_ratio != null && (
+                            <div className="text-center p-3 bg-white rounded border">
+                              <div className="text-sm text-gray-600">전세가율</div>
+                              <div className="text-xl font-bold">
+                                {step3Result.risk_score.jeonse_ratio?.toFixed(1)}%
+                              </div>
+                            </div>
+                          )}
+                          {step3Result.risk_score.mortgage_ratio != null && (
+                            <div className="text-center p-3 bg-white rounded border">
+                              <div className="text-sm text-gray-600">근저당 비율</div>
+                              <div className="text-xl font-bold">
+                                {step3Result.risk_score.mortgage_ratio?.toFixed(1)}%
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 위험 요인 */}
+                        {step3Result.risk_score.risk_factors && step3Result.risk_score.risk_factors.length > 0 && (
+                          <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
+                            <div className="text-sm font-medium text-yellow-800 mb-2">⚠️ 위험 요인</div>
+                            <ul className="text-sm text-gray-700 space-y-1">
+                              {step3Result.risk_score.risk_factors.map((factor: string, idx: number) => (
+                                <li key={idx}>• {factor}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Summary (Markdown) */}
                     {step3Result.summary && (
                       <div>
-                        <h3 className="font-medium mb-2">Summary</h3>
-                        <div className="prose prose-sm max-w-none bg-white p-4 rounded-lg border">
+                        <h4 className="font-medium mb-3">📝 종합 분석 리포트</h4>
+                        <div className="prose prose-sm max-w-none bg-white p-6 rounded-lg border shadow-sm">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {step3Result.summary}
                           </ReactMarkdown>
