@@ -23,9 +23,9 @@ export async function POST(request: NextRequest) {
       throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
     }
 
-    // PDF 파싱은 시간이 오래 걸릴 수 있으므로 60초 타임아웃 설정
+    // PDF 파싱은 시간이 오래 걸릴 수 있으므로 180초 타임아웃 설정 (이미지 PDF OCR 포함)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60초
+    const timeoutId = setTimeout(() => controller.abort(), 180000); // 180초 (3분)
 
     const response = await fetch(`${AI_API_URL}/dev/parse-registry`, {
       method: 'POST',
