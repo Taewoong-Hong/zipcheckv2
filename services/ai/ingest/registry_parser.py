@@ -381,29 +381,64 @@ def extract_building_type(text: str) -> Optional[str]:
 
     판별 기준:
     1. 표제부 용도가 '공동주택(아파트)' → 아파트
-    2. 층수가 6층 이상 존재 → 아파트
-    3. 기타 키워드 기반 판별
+    2. 복합 건물의 경우: "N층 [주택유형]" 패턴에서 주택유형 추출
+       - 예: "6층 다세대주택" → 다세대
+       - 1층이 근린생활시설이어도 상위층 주택유형 우선
+    3. 층수가 6층 이상 존재 → 아파트
+    4. 기타 키워드 기반 판별
     """
-    # 1. 용도 표시에서 직접 확인
-    usage_patterns = [
-        (r'공동주택\s*\(\s*아파트\s*\)', '아파트'),
-        (r'아파트', '아파트'),
-        (r'오피스텔', '오피스텔'),
-        (r'근린생활시설', '근린생활주택'),
-        (r'다가구주택', '다가구'),
+    # 0. 아파트 관련 패턴 우선 확인 (가장 명확한 경우)
+    apt_patterns = [
+        r'공동주택\s*\(\s*아파트\s*\)',
+        r'아파트',
+    ]
+    for pattern in apt_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            logger.info(f"   └─ 건물유형 (아파트 키워드): 아파트")
+            return '아파트'
+
+    # 1. 복합 건물 패턴: "N층 [주택유형]" (건물 내역 첫 줄)
+    # 예: "6층 다세대주택", "5층 다가구주택", "7층 연립주택"
+    # 이 패턴이 발견되면 해당 주택유형을 우선 사용 (복합건물 대응)
+    total_floor_type_patterns = [
+        (r'(\d{1,2})층\s*(다세대주택|다세대)', '다세대'),
+        (r'(\d{1,2})층\s*(다가구주택|다가구)', '다가구'),
+        (r'(\d{1,2})층\s*(연립주택|연립)', '연립'),
+        (r'(\d{1,2})층\s*오피스텔', '오피스텔'),
+    ]
+
+    for pattern, building_type in total_floor_type_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            floor_num = match.group(1)
+            logger.info(f"   └─ 건물유형 (총층수 패턴 {floor_num}층): {building_type}")
+            return building_type
+
+    # 2. 주택 유형 키워드 확인 (근린생활시설보다 주택 유형 우선)
+    # 복합 건물에서 1층이 근린생활시설이어도 주택 유형이 있으면 그것을 사용
+    residential_patterns = [
         (r'다세대주택', '다세대'),
         (r'다세대', '다세대'),
+        (r'다가구주택', '다가구'),
         (r'다가구', '다가구'),
         (r'연립주택', '연립'),
         (r'단독주택', '단독주택'),
+        (r'오피스텔', '오피스텔'),
     ]
 
-    for pattern, building_type in usage_patterns:
+    for pattern, building_type in residential_patterns:
         if re.search(pattern, text, re.IGNORECASE):
-            logger.info(f"   └─ 건물유형 (용도 키워드): {building_type}")
+            logger.info(f"   └─ 건물유형 (주택 키워드): {building_type}")
             return building_type
 
-    # 2. 층수 확인 (6층 이상이면 아파트)
+    # 3. 근린생활시설만 있는 경우 (순수 상가 건물)
+    if re.search(r'근린생활시설', text, re.IGNORECASE):
+        # 주택 관련 키워드가 없는지 다시 확인
+        if not re.search(r'(다세대|다가구|연립|단독주택|주택)', text, re.IGNORECASE):
+            logger.info(f"   └─ 건물유형 (순수 상가): 근린생활주택")
+            return '근린생활주택'
+
+    # 4. 층수 확인 (6층 이상이면 아파트)
     # 패턴: "7층", "10층", "15층" 등
     floor_pattern = r'(\d{1,2})층\s*[\d,.]+'
     floor_matches = re.findall(floor_pattern, text)
@@ -414,7 +449,7 @@ def extract_building_type(text: str) -> Optional[str]:
             logger.info(f"   └─ 건물유형 (층수 {max_floor}층 ≥ 6층): 아파트")
             return '아파트'
 
-    # 3. 건물 내역에서 층수 확인 (예: "제4층 제406호")
+    # 5. 건물 내역에서 층수 확인 (예: "제4층 제406호")
     unit_floor_pattern = r'제\s*(\d{1,2})\s*층'
     unit_floor_matches = re.findall(unit_floor_pattern, text)
 
@@ -476,14 +511,14 @@ def extract_exclusive_area(text: str) -> Optional[float]:
 
     # 2. "건물 내역" 컬럼에서 면적 추출
     # 패턴: "철근콘크리트구조 59.9818㎡" 또는 "철근콘크리트조 68.04㎡"
-    # 소수점 자릿수: 2~4자리 (68.04, 59.9818 등)
+    # 소수점 자릿수: 1~5자리 (68.0, 68.04, 59.9818 등)
     building_detail_patterns = [
         # 구조 + 면적 (공백/줄바꿈 허용, 소수점 1~5자리)
         r'(?:철근콘크리트구조|철근콘크리트조|철골철근콘크리트조|철골조|조적조|목조|벽돌조|블록조)[\s\n]*([\d]+\.[\d]{1,5})\s*[㎡m²m2]?',
         # 구조 + 면적 (㎡ 바로 붙은 경우)
-        r'(?:철근콘크리트구조|철근콘크리트조|철골철근콘크리트조|철골조|조적조|목조)[\s\n]*([\d]+\.[\d]{1,5})[㎡m²m2]',
-        # 숫자.소수점 + ㎡ (구조 키워드 없이)
-        r'([\d]+\.[\d]{2,5})\s*[㎡m²m2]',
+        r'(?:철근콘크리트구조|철근콘크리트조|철골철근콘크리트조|철골조|조적조|목조|벽돌조|블록조)[\s\n]*([\d]+\.[\d]{1,5})[㎡m²m2]',
+        # 숫자.소수점 + ㎡ (구조 키워드 없이, 소수점 1~5자리)
+        r'([\d]+\.[\d]{1,5})\s*[㎡m²m2]',
     ]
 
     logger.info(f"   └─ 전유부분 섹션 내용 미리보기: {jeonyu_section[:200]}...")
@@ -629,6 +664,15 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
     # 말소 여부 판별 키워드 (fallback용)
     deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
 
+    # 채권자로 잘못 추출되면 안 되는 단어들 (제외 목록)
+    invalid_creditors = {
+        '가압류', '가처분', '압류', '경매', '개시결정', '결정', '등기',
+        '말소', '해제', '해지', '취하', '년', '월', '일', '등', '호',
+        '소유권', '이전', '설정', '근저당', '전세권', '임의', '강제',
+        '기입', '촉탁', '신청', '접수', '완료', '처분', '금지', '가등기',
+        '채권자', '권리자', '신청인', '의하여', '대하여', '청구',
+    }
+
     for keyword, seizure_type in seizure_keywords.items():
         # 키워드가 있는지 확인
         pattern_search = f'{keyword}'
@@ -639,19 +683,37 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
         for keyword_match in re.finditer(re.escape(keyword), text):
             keyword_pos = keyword_match.start()
 
-            # 컨텍스트 추출 (앞뒤 200자)
-            start = max(0, keyword_pos - 100)
-            end = min(len(text), keyword_pos + 300)
+            # 컨텍스트 추출 (앞뒤 300자로 확대)
+            start = max(0, keyword_pos - 150)
+            end = min(len(text), keyword_pos + 400)
             context = text[start:end]
 
-            # 근처에서 채권자 찾기
-            pattern = f'{re.escape(keyword)}[^가-힣]{{0,50}}([가-힣]+(?:캐피탈|은행|금융|신협|저축|증권|국세청|시청|구청)?)'
-            match = re.search(pattern, context)
-            creditor = match.group(1).strip() if match else None
+            # 근처에서 채권자 찾기 (여러 패턴 시도, 우선순위 순서)
+            creditor = None
+            creditor_patterns = [
+                # 1. 명시적 "채권자", "권리자" 패턴
+                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]?\s*([가-힣]+(?:국세청|세무서|시청|구청|군청|은행|캐피탈|금융|신협|저축|증권|보험|공사|공단)?)',
+                # 2. 기관명 직접 매칭 (XX국세청, XX세무서 등)
+                r'([가-힣]{2,8}(?:지방국세청|국세청|세무서))',
+                r'([가-힣]{2,8}(?:시청|구청|군청|도청))',
+                # 3. 금융기관 매칭
+                r'([가-힣]{2,10}(?:은행|캐피탈|금융|신협|저축은행|증권|보험|공사|공단))',
+                # 4. 지자체 패턴 (XX시, XX구, XX군) - 뒤에 "장" 붙은 경우
+                r'([가-힣]{2,6}(?:특별시|광역시|시|구|군))\s*(?:장)?(?:\s|$)',
+            ]
+
+            for creditor_pattern in creditor_patterns:
+                match = re.search(creditor_pattern, context)
+                if match:
+                    candidate = match.group(1).strip()
+                    # 유효한 채권자인지 확인
+                    if candidate and len(candidate) >= 2 and candidate not in invalid_creditors:
+                        creditor = candidate
+                        break
 
             # 금액 찾기 (있을 경우)
             amount = None
-            amount_pattern = rf'{re.escape(keyword)}[^0-9]{{0,100}}금?\s*([\d,]+)\s*원'
+            amount_pattern = r'(?:청구금액|채권금액|금)\s*([\d,]+)\s*원'
             amount_match = re.search(amount_pattern, context)
             if amount_match:
                 amount_str = amount_match.group(1).replace(',', '')

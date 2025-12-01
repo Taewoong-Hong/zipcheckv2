@@ -127,7 +127,16 @@ export async function POST(req: Request) {
     // 디버깅: 첫 번째 아이템의 키 확인
     if (list.length > 0) {
       console.log('[APT-TRADE] Raw item keys:', Object.keys(list[0]))
-      console.log('[APT-TRADE] First item sample:', JSON.stringify(list[0]).slice(0, 300))
+      console.log('[APT-TRADE] First item sample:', JSON.stringify(list[0]).slice(0, 500))
+      // dealingGbn 관련 필드 디버깅
+      const firstItem = list[0]
+      console.log('[APT-TRADE] dealingGbn fields:', {
+        dealingGbn: firstItem.dealingGbn,
+        '거래유형': firstItem.거래유형,
+        '거래구분': firstItem.거래구분,
+        '중개구분': firstItem.중개구분,
+        dealType: firstItem.dealType,
+      })
     }
 
     // 6) (선택) 정규화: 한/영 키 혼재 대비
@@ -177,7 +186,7 @@ export async function POST(req: Request) {
       cancelDealDate: S(r.해제사유발생일 ?? r.cancelDealDate ?? r.cdealDay),
       // 기타 정보
       sggCd: S(r.지역코드 ?? r.sggCd),
-      dealingGbn: S(r.거래유형 ?? r.dealingGbn),
+      dealingGbn: S(r.dealingGbn ?? r.거래유형 ?? r.거래구분 ?? r.중개구분 ?? r.dealType),
       slerGbn: S(r.중개사소재지 ?? r.slerGbn),
       buyerGbn: S(r.buyerGbn),
       estateAgentSggNm: S(r.중개사소재지 ?? r.estateAgentSggNm),

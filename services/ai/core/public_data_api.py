@@ -475,7 +475,7 @@ class AptTradeAPIClient(BasePublicDataAPI):
                 # 거래 상세 정보
                 "cdealType": safe_str(item.get("해제여부") or item.get("cancelDealType") or item.get("cdealType")),  # 해제여부 (1자)
                 "cdealDay": safe_str(item.get("해제사유발생일") or item.get("cancelDealDate") or item.get("cdealDay")),  # 해제사유발생일 (8자)
-                "dealingGbn": safe_str(item.get("dealingGbn")),  # 거래유형 중개 및 직거래여부 (10자)
+                "dealingGbn": safe_str(item.get("dealingGbn") or item.get("거래유형") or item.get("거래구분") or item.get("중개구분")),  # 거래유형 중개 및 직거래여부 (10자)
                 "estateAgentSggNm": safe_str(item.get("estateAgentSggNm")),  # 중개사소재지 시군구단위 (3000자)
                 "rgstDate": safe_str(item.get("rgstDate")),  # 등기일자 (8자)
 

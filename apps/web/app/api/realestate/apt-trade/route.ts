@@ -137,13 +137,21 @@ export async function POST(req: NextRequest) {
     const rows = xml?.response?.body?.items?.item ?? []
     const list = Array.isArray(rows) ? rows : (rows ? [rows] : [])
 
-    // DEBUG: 전용면적 필드 확인
+    // DEBUG: 필드 확인
     if (list.length > 0) {
       const first = list[0]
       console.log('[apt-trade] DEBUG 원본 아이템 키:', Object.keys(first))
-      console.log('[apt-trade] DEBUG excluUseAr:', first.excluUseAr)
-      console.log('[apt-trade] DEBUG 전용면적:', first.전용면적)
-      console.log('[apt-trade] DEBUG exclusiveArea:', first.exclusiveArea)
+      console.log('[apt-trade] DEBUG 전용면적 필드:', {
+        excluUseAr: first.excluUseAr,
+        전용면적: first.전용면적,
+        exclusiveArea: first.exclusiveArea
+      })
+      console.log('[apt-trade] DEBUG dealingGbn 필드:', {
+        dealingGbn: first.dealingGbn,
+        거래유형: first.거래유형,
+        거래구분: first.거래구분,
+        중개구분: first.중개구분
+      })
     }
 
     // 데이터 정규화
@@ -167,6 +175,12 @@ export async function POST(req: NextRequest) {
       cancelDealType: S(r.해제여부 ?? r.cancelDealType ?? r.cdealType),
       cancelDealDate: S(r.해제사유발생일 ?? r.cancelDealDate ?? r.cdealDay),
       sggCd: S(r.지역코드 ?? r.sggCd),
+      // 거래유형 (중개/직거래)
+      dealingGbn: S(r.dealingGbn ?? r.거래유형 ?? r.거래구분 ?? r.중개구분),
+      // 중개사소재지
+      estateAgentSggNm: S(r.estateAgentSggNm ?? r.중개사소재지),
+      // 등기일자
+      rgstDate: S(r.rgstDate ?? r.등기일자),
     }))
 
     // FastAPI 형식 응답

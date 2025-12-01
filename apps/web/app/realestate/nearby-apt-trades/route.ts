@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 // API URLs
 const LEGAL_DONG_API_URL = 'http://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList'
-const APT_TRADE_API_URL = 'https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade'
+const APT_TRADE_API_URL = 'https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade'
 
 // 법정동코드 조회
 async function fetchLegalDongCode(address: string, serviceKey: string) {
@@ -143,7 +143,7 @@ async function fetchAptTrades(lawdCd: string, dealYmd: string, serviceKey: strin
         dong: getValue('umdNm'),
         jibun: getValue('jibun'),
         sggCd: getValue('sggCd'),
-        dealingGbn: getValue('dealingGbn'),
+        dealingGbn: getValue('dealingGbn') || getValue('거래유형') || getValue('거래구분') || getValue('중개구분'),
         aptDong: getValue('aptDong'),
         cancelDealType: getValue('cdealType'),
         cancelDealDate: getValue('cdealDay')
