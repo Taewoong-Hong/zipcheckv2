@@ -1585,6 +1585,9 @@ export default function DevCaseDetailPage({
                       <span className="font-medium text-yellow-800">🎯 필터 조건:</span>
                       <span className="ml-2 text-yellow-700">
                         동 = &quot;{parsedAddress.dong}&quot; AND 지번 = &quot;{parsedAddress.jibun}&quot;
+                        {parsedAddress.area_m2 && (
+                          <> AND 전용면적 ≈ {parsedAddress.area_m2.toFixed(2)}㎡ (±0.5㎡)</>
+                        )}
                       </span>
                     </div>
 
