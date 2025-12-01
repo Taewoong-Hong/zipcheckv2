@@ -137,6 +137,15 @@ export async function POST(req: NextRequest) {
     const rows = xml?.response?.body?.items?.item ?? []
     const list = Array.isArray(rows) ? rows : (rows ? [rows] : [])
 
+    // DEBUG: 전용면적 필드 확인
+    if (list.length > 0) {
+      const first = list[0]
+      console.log('[apt-trade] DEBUG 원본 아이템 키:', Object.keys(first))
+      console.log('[apt-trade] DEBUG excluUseAr:', first.excluUseAr)
+      console.log('[apt-trade] DEBUG 전용면적:', first.전용면적)
+      console.log('[apt-trade] DEBUG exclusiveArea:', first.exclusiveArea)
+    }
+
     // 데이터 정규화
     const getAptName = (r: any): string =>
       S(r.aptNm ?? r.aptName ?? r.아파트 ?? r.아파트명 ?? r.단지명 ?? '')
@@ -152,7 +161,7 @@ export async function POST(req: NextRequest) {
       aptName: getAptName(r),
       dong: getDong(r),
       jibun: S(r.지번 ?? r.jibun),
-      exclusiveArea: N(r.전용면적 ?? r.exclusiveArea),
+      exclusiveArea: N(r.excluUseAr ?? r.전용면적 ?? r.exclusiveArea),
       floor: N(r.층 ?? r.floor),
       buildYear: N(r.건축년도 ?? r.buildYear),
       cancelDealType: S(r.해제여부 ?? r.cancelDealType ?? r.cdealType),
