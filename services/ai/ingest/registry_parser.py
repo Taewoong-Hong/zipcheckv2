@@ -435,60 +435,86 @@ def extract_exclusive_area(text: str) -> Optional[float]:
 
     패턴:
     - "68.04㎡" 또는 "68.04m²" 또는 "68.04m2"
-    - 표제부의 전유부분 건물 내역에서 추출
+    - 표제부의 "전유부분의 건물의 표시" > "건물 내역"에서 추출
     - "철근콘크리트조 68.04㎡" 형태
     """
-    # 1. 표제부 전유부분 섹션 찾기
-    # 패턴: "【 표 제 부 】" 또는 "표제부" 섹션 내에서 면적 추출
-    pyoje_patterns = [
-        r'표\s*제\s*부[^\n]*전유부분',
-        r'\[\s*표\s*제\s*부\s*\]',
-        r'【\s*표\s*제\s*부\s*】',
-        r'표제부',
+    # 1. "전유부분의 건물의 표시" 섹션 찾기 (가장 정확한 위치)
+    jeonyu_patterns = [
+        r'전유부분의?\s*건물의?\s*표시',
+        r'전유부분',
     ]
 
-    pyoje_start = 0
-    for pattern in pyoje_patterns:
+    jeonyu_start = -1
+    for pattern in jeonyu_patterns:
         match = re.search(pattern, text)
         if match:
-            pyoje_start = match.start()
+            jeonyu_start = match.start()
+            logger.info(f"   └─ 전유부분 섹션 발견 (위치: {jeonyu_start})")
             break
 
-    # 표제부 섹션 (표제부부터 갑구 전까지)
-    kapgu_match = re.search(r'【\s*갑\s*구\s*】|갑\s*구|\[\s*갑\s*구\s*\]', text[pyoje_start:])
-    pyoje_end = pyoje_start + kapgu_match.start() if kapgu_match else len(text)
-    pyoje_section = text[pyoje_start:pyoje_end]
+    if jeonyu_start == -1:
+        logger.info("   └─ 전유부분 섹션 없음, 표제부 전체에서 검색")
+        jeonyu_start = 0
 
-    # 2. 전용면적 패턴 매칭
-    # 우선순위: 전유부분 건물 내역의 면적 > 일반 면적
-    area_patterns = [
-        # 전유부분 건물 내역: "철근콘크리트조 68.04㎡" 또는 "68.04㎡"
-        r'(?:철근콘크리트조|철골조|조적조|목조|철골철근콘크리트조)?\s*([\d.]+)\s*[㎡m²m2]',
-        # 전용면적 명시: "전용면적 84.99㎡"
-        r'전용면적\s*([\d.]+)\s*[㎡m²m2]',
-        # 일반 면적 패턴
-        r'([\d.]+)\s*[㎡m²m2]',
+    # 전유부분 섹션 범위 (전유부분부터 대지권 또는 갑구 전까지)
+    section_end_patterns = [
+        r'대지권의\s*표시',
+        r'【\s*갑\s*구\s*】',
+        r'\[\s*갑\s*구\s*\]',
+        r'갑\s*구',
     ]
 
-    # 표제부 섹션에서 가장 작은 면적 찾기 (전용면적은 보통 가장 작음)
-    all_areas = []
+    jeonyu_end = len(text)
+    for pattern in section_end_patterns:
+        match = re.search(pattern, text[jeonyu_start:])
+        if match:
+            jeonyu_end = jeonyu_start + match.start()
+            break
 
-    for pattern in area_patterns:
-        matches = re.findall(pattern, pyoje_section)
-        for match in matches:
+    jeonyu_section = text[jeonyu_start:jeonyu_end]
+    logger.info(f"   └─ 전유부분 섹션 길이: {len(jeonyu_section)}자")
+
+    # 2. "건물 내역" 컬럼에서 면적 추출
+    # 패턴: "철근콘크리트조 68.04㎡" 또는 "철근콘크리트조\n68.04㎡"
+    building_detail_patterns = [
+        # 구조 + 면적 (같은 줄 또는 다음 줄)
+        r'(?:철근콘크리트조|철골조|조적조|목조|철골철근콘크리트조|철근콘크리트구조)[^\d]*([\d.]+)\s*[㎡m²m2]',
+        # "건물내역" 키워드 근처의 면적
+        r'건물\s*내\s*역[^\d]*([\d.]+)\s*[㎡m²m2]',
+    ]
+
+    for pattern in building_detail_patterns:
+        match = re.search(pattern, jeonyu_section)
+        if match:
             try:
-                area = float(match)
-                # 유효한 전용면적 범위 (10㎡ ~ 500㎡)
-                if 10 <= area <= 500:
-                    all_areas.append(area)
+                area = float(match.group(1))
+                # 유효한 전용면적 범위 (10㎡ ~ 300㎡)
+                if 10 <= area <= 300:
+                    logger.info(f"   └─ 전용면적 (건물내역): {area}㎡")
+                    return area
             except ValueError:
                 continue
 
-    if all_areas:
-        # 전용면적은 보통 가장 작은 면적 (공용면적 제외)
-        # 하지만 너무 작은 값(10㎡ 미만)은 제외
-        exclusive_area = min(all_areas)
-        logger.info(f"   └─ 전용면적: {exclusive_area}㎡ (후보: {all_areas})")
+    # 3. Fallback: 전유부분 섹션에서 가장 작은 합리적인 면적 찾기
+    # 단, 대지권 비율 등의 숫자는 제외
+    area_pattern = r'([\d.]+)\s*[㎡m²m2]'
+    matches = re.findall(area_pattern, jeonyu_section)
+
+    valid_areas = []
+    for match in matches:
+        try:
+            area = float(match)
+            # 전용면적 합리적 범위 (20㎡ ~ 200㎡)
+            # 너무 작거나 큰 값은 대지 면적이거나 공용면적
+            if 20 <= area <= 200:
+                valid_areas.append(area)
+        except ValueError:
+            continue
+
+    if valid_areas:
+        # 전유부분에서 찾은 면적 중 가장 작은 값 (전용면적)
+        exclusive_area = min(valid_areas)
+        logger.info(f"   └─ 전용면적 (fallback): {exclusive_area}㎡ (후보: {valid_areas})")
         return exclusive_area
 
     logger.info("   └─ 전용면적: 추출 실패 (N/A)")
