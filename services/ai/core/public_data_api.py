@@ -497,6 +497,589 @@ class AptTradeAPIClient(BasePublicDataAPI):
         return normalized
 
 
+class OffiTradeAPIClient(BasePublicDataAPI):
+    """국토교통부 오피스텔 매매 실거래가 조회 API 클라이언트."""
+
+    API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcOffiTrade/getRTMSDataSvcOffiTrade"
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
+
+    async def get_offi_trades(
+        self,
+        lawd_cd: str,
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
+    ) -> Dict[str, Any]:
+        """오피스텔 매매 실거래가 조회."""
+        logger.info(f"오피스텔 매매 실거래가 조회: lawd_cd={lawd_cd}, deal_ymd={deal_ymd}")
+
+        if len(lawd_cd) != 5 or not lawd_cd.isdigit():
+            raise PublicDataAPIError(f"Invalid lawd_cd: {lawd_cd}")
+        if len(deal_ymd) != 6 or not deal_ymd.isdigit():
+            raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd}")
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized")
+
+        try:
+            params = {
+                "serviceKey": self.api_key,
+                "LAWD_CD": lawd_cd,
+                "DEAL_YMD": deal_ymd,
+                "pageNo": str(page_no),
+                "numOfRows": str(num_of_rows)
+            }
+            response = await self.client.get(self.API_URL, params=params)
+
+            if not response.is_success:
+                raise PublicDataAPIError(f"HTTP {response.status_code}")
+
+            text = response.text.replace("\ufeff", "")
+            data = xmltodict.parse(text)
+
+            result_code = data.get("response", {}).get("header", {}).get("resultCode")
+            result_msg = data.get("response", {}).get("header", {}).get("resultMsg")
+
+            success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
+            is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
+
+            if result_code and result_code not in success_codes and not is_no_data:
+                raise PublicDataAPIError(f"API Error: {result_msg}")
+
+            if is_no_data:
+                return {"header": {"resultCode": result_code, "resultMsg": result_msg or "NO_DATA"},
+                        "body": {"items": [], "totalCount": 0}}
+
+            rows = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            items = rows if isinstance(rows, list) else ([rows] if rows else [])
+
+            logger.info(f"오피스텔 매매 실거래가 조회 성공: {len(items)}개 결과")
+
+            return {"header": {"resultCode": result_code or "000", "resultMsg": result_msg or "OK"},
+                    "body": {"items": self._normalize_items(items, "trade"), "totalCount": len(items)}}
+
+        except httpx.HTTPError as e:
+            raise PublicDataAPIError(f"HTTP Error: {e}") from e
+
+    def _normalize_items(self, items: List[Dict], trade_type: str) -> List[Dict[str, Any]]:
+        """오피스텔 거래 데이터 정규화."""
+        normalized = []
+        for item in items:
+            def safe_str(v) -> str:
+                return str(v).strip() if v is not None else ""
+            def safe_int(v) -> Optional[int]:
+                s = safe_str(v).replace(" ", "").replace(",", "")
+                try:
+                    return int(s) if s else None
+                except ValueError:
+                    return None
+
+            normalized_item = {
+                "sggCd": safe_str(item.get("sggCd")),
+                "umdNm": safe_str(item.get("umdNm")),
+                "offiNm": safe_str(item.get("offiNm")),  # 오피스텔명
+                "jibun": safe_str(item.get("jibun")),
+                "excluUseAr": safe_str(item.get("excluUseAr")),
+                "dealYear": safe_int(item.get("dealYear")),
+                "dealMonth": safe_int(item.get("dealMonth")),
+                "dealDay": safe_int(item.get("dealDay")),
+                "dealAmount": safe_int(item.get("dealAmount")),  # 거래금액(만원)
+                "floor": safe_str(item.get("floor")),
+                "buildYear": safe_int(item.get("buildYear")),
+                "cdealType": safe_str(item.get("cdealType")),
+                "cdealDay": safe_str(item.get("cdealDay")),
+            }
+            normalized.append(normalized_item)
+        return normalized
+
+
+class OffiRentAPIClient(BasePublicDataAPI):
+    """국토교통부 오피스텔 전월세 실거래가 조회 API 클라이언트."""
+
+    API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcOffiRent/getRTMSDataSvcOffiRent"
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
+
+    async def get_offi_rent_transactions(
+        self,
+        lawd_cd: str,
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
+    ) -> Dict[str, Any]:
+        """오피스텔 전월세 실거래가 조회."""
+        logger.info(f"오피스텔 전월세 실거래가 조회: lawd_cd={lawd_cd}, deal_ymd={deal_ymd}")
+
+        if len(lawd_cd) != 5 or not lawd_cd.isdigit():
+            raise PublicDataAPIError(f"Invalid lawd_cd: {lawd_cd}")
+        if len(deal_ymd) != 6 or not deal_ymd.isdigit():
+            raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd}")
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized")
+
+        try:
+            params = {
+                "serviceKey": self.api_key,
+                "LAWD_CD": lawd_cd,
+                "DEAL_YMD": deal_ymd,
+                "pageNo": str(page_no),
+                "numOfRows": str(num_of_rows)
+            }
+            response = await self.client.get(self.API_URL, params=params)
+
+            if not response.is_success:
+                raise PublicDataAPIError(f"HTTP {response.status_code}")
+
+            text = response.text.replace("\ufeff", "")
+            data = xmltodict.parse(text)
+
+            result_code = data.get("response", {}).get("header", {}).get("resultCode")
+            result_msg = data.get("response", {}).get("header", {}).get("resultMsg")
+
+            success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
+            is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
+
+            if result_code and result_code not in success_codes and not is_no_data:
+                raise PublicDataAPIError(f"API Error: {result_msg}")
+
+            if is_no_data:
+                return {"header": {"resultCode": result_code, "resultMsg": result_msg or "NO_DATA"},
+                        "body": {"items": [], "totalCount": 0}}
+
+            rows = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            items = rows if isinstance(rows, list) else ([rows] if rows else [])
+
+            logger.info(f"오피스텔 전월세 실거래가 조회 성공: {len(items)}개 결과")
+
+            return {"header": {"resultCode": result_code or "000", "resultMsg": result_msg or "OK"},
+                    "body": {"items": self._normalize_items(items), "totalCount": len(items)}}
+
+        except httpx.HTTPError as e:
+            raise PublicDataAPIError(f"HTTP Error: {e}") from e
+
+    def _normalize_items(self, items: List[Dict]) -> List[Dict[str, Any]]:
+        """오피스텔 전월세 거래 데이터 정규화."""
+        normalized = []
+        for item in items:
+            def safe_str(v) -> str:
+                return str(v).strip() if v is not None else ""
+            def safe_int(v) -> Optional[int]:
+                s = safe_str(v).replace(" ", "").replace(",", "")
+                try:
+                    return int(s) if s else None
+                except ValueError:
+                    return None
+
+            normalized_item = {
+                "sggCd": safe_str(item.get("sggCd")),
+                "umdNm": safe_str(item.get("umdNm")),
+                "offiNm": safe_str(item.get("offiNm")),
+                "jibun": safe_str(item.get("jibun")),
+                "excluUseAr": safe_str(item.get("excluUseAr")),
+                "dealYear": safe_int(item.get("dealYear")),
+                "dealMonth": safe_int(item.get("dealMonth")),
+                "dealDay": safe_int(item.get("dealDay")),
+                "deposit": safe_int(item.get("deposit")),
+                "monthlyRent": safe_int(item.get("monthlyRent")),
+                "floor": safe_str(item.get("floor")),
+                "buildYear": safe_int(item.get("buildYear")),
+                "contractTerm": safe_str(item.get("contractTerm")),
+                "contractType": safe_str(item.get("contractType")),
+            }
+            normalized.append(normalized_item)
+        return normalized
+
+
+class RHTradeAPIClient(BasePublicDataAPI):
+    """국토교통부 연립다세대 매매 실거래가 조회 API 클라이언트."""
+
+    API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade"
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
+
+    async def get_rh_trades(
+        self,
+        lawd_cd: str,
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
+    ) -> Dict[str, Any]:
+        """연립다세대 매매 실거래가 조회."""
+        logger.info(f"연립다세대 매매 실거래가 조회: lawd_cd={lawd_cd}, deal_ymd={deal_ymd}")
+
+        if len(lawd_cd) != 5 or not lawd_cd.isdigit():
+            raise PublicDataAPIError(f"Invalid lawd_cd: {lawd_cd}")
+        if len(deal_ymd) != 6 or not deal_ymd.isdigit():
+            raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd}")
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized")
+
+        try:
+            params = {
+                "serviceKey": self.api_key,
+                "LAWD_CD": lawd_cd,
+                "DEAL_YMD": deal_ymd,
+                "pageNo": str(page_no),
+                "numOfRows": str(num_of_rows)
+            }
+            response = await self.client.get(self.API_URL, params=params)
+
+            if not response.is_success:
+                raise PublicDataAPIError(f"HTTP {response.status_code}")
+
+            text = response.text.replace("\ufeff", "")
+            data = xmltodict.parse(text)
+
+            result_code = data.get("response", {}).get("header", {}).get("resultCode")
+            result_msg = data.get("response", {}).get("header", {}).get("resultMsg")
+
+            success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
+            is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
+
+            if result_code and result_code not in success_codes and not is_no_data:
+                raise PublicDataAPIError(f"API Error: {result_msg}")
+
+            if is_no_data:
+                return {"header": {"resultCode": result_code, "resultMsg": result_msg or "NO_DATA"},
+                        "body": {"items": [], "totalCount": 0}}
+
+            rows = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            items = rows if isinstance(rows, list) else ([rows] if rows else [])
+
+            logger.info(f"연립다세대 매매 실거래가 조회 성공: {len(items)}개 결과")
+
+            return {"header": {"resultCode": result_code or "000", "resultMsg": result_msg or "OK"},
+                    "body": {"items": self._normalize_items(items), "totalCount": len(items)}}
+
+        except httpx.HTTPError as e:
+            raise PublicDataAPIError(f"HTTP Error: {e}") from e
+
+    def _normalize_items(self, items: List[Dict]) -> List[Dict[str, Any]]:
+        """연립다세대 매매 거래 데이터 정규화."""
+        normalized = []
+        for item in items:
+            def safe_str(v) -> str:
+                return str(v).strip() if v is not None else ""
+            def safe_int(v) -> Optional[int]:
+                s = safe_str(v).replace(" ", "").replace(",", "")
+                try:
+                    return int(s) if s else None
+                except ValueError:
+                    return None
+
+            normalized_item = {
+                "sggCd": safe_str(item.get("sggCd")),
+                "umdNm": safe_str(item.get("umdNm")),
+                "mhouseNm": safe_str(item.get("mhouseNm")),  # 연립다세대명
+                "jibun": safe_str(item.get("jibun")),
+                "excluUseAr": safe_str(item.get("excluUseAr")),
+                "dealYear": safe_int(item.get("dealYear")),
+                "dealMonth": safe_int(item.get("dealMonth")),
+                "dealDay": safe_int(item.get("dealDay")),
+                "dealAmount": safe_int(item.get("dealAmount")),
+                "floor": safe_str(item.get("floor")),
+                "buildYear": safe_int(item.get("buildYear")),
+                "cdealType": safe_str(item.get("cdealType")),
+                "cdealDay": safe_str(item.get("cdealDay")),
+            }
+            normalized.append(normalized_item)
+        return normalized
+
+
+class RHRentAPIClient(BasePublicDataAPI):
+    """국토교통부 연립다세대 전월세 실거래가 조회 API 클라이언트."""
+
+    API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcRHRent/getRTMSDataSvcRHRent"
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
+
+    async def get_rh_rent_transactions(
+        self,
+        lawd_cd: str,
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
+    ) -> Dict[str, Any]:
+        """연립다세대 전월세 실거래가 조회."""
+        logger.info(f"연립다세대 전월세 실거래가 조회: lawd_cd={lawd_cd}, deal_ymd={deal_ymd}")
+
+        if len(lawd_cd) != 5 or not lawd_cd.isdigit():
+            raise PublicDataAPIError(f"Invalid lawd_cd: {lawd_cd}")
+        if len(deal_ymd) != 6 or not deal_ymd.isdigit():
+            raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd}")
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized")
+
+        try:
+            params = {
+                "serviceKey": self.api_key,
+                "LAWD_CD": lawd_cd,
+                "DEAL_YMD": deal_ymd,
+                "pageNo": str(page_no),
+                "numOfRows": str(num_of_rows)
+            }
+            response = await self.client.get(self.API_URL, params=params)
+
+            if not response.is_success:
+                raise PublicDataAPIError(f"HTTP {response.status_code}")
+
+            text = response.text.replace("\ufeff", "")
+            data = xmltodict.parse(text)
+
+            result_code = data.get("response", {}).get("header", {}).get("resultCode")
+            result_msg = data.get("response", {}).get("header", {}).get("resultMsg")
+
+            success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
+            is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
+
+            if result_code and result_code not in success_codes and not is_no_data:
+                raise PublicDataAPIError(f"API Error: {result_msg}")
+
+            if is_no_data:
+                return {"header": {"resultCode": result_code, "resultMsg": result_msg or "NO_DATA"},
+                        "body": {"items": [], "totalCount": 0}}
+
+            rows = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            items = rows if isinstance(rows, list) else ([rows] if rows else [])
+
+            logger.info(f"연립다세대 전월세 실거래가 조회 성공: {len(items)}개 결과")
+
+            return {"header": {"resultCode": result_code or "000", "resultMsg": result_msg or "OK"},
+                    "body": {"items": self._normalize_items(items), "totalCount": len(items)}}
+
+        except httpx.HTTPError as e:
+            raise PublicDataAPIError(f"HTTP Error: {e}") from e
+
+    def _normalize_items(self, items: List[Dict]) -> List[Dict[str, Any]]:
+        """연립다세대 전월세 거래 데이터 정규화."""
+        normalized = []
+        for item in items:
+            def safe_str(v) -> str:
+                return str(v).strip() if v is not None else ""
+            def safe_int(v) -> Optional[int]:
+                s = safe_str(v).replace(" ", "").replace(",", "")
+                try:
+                    return int(s) if s else None
+                except ValueError:
+                    return None
+
+            normalized_item = {
+                "sggCd": safe_str(item.get("sggCd")),
+                "umdNm": safe_str(item.get("umdNm")),
+                "mhouseNm": safe_str(item.get("mhouseNm")),
+                "jibun": safe_str(item.get("jibun")),
+                "excluUseAr": safe_str(item.get("excluUseAr")),
+                "dealYear": safe_int(item.get("dealYear")),
+                "dealMonth": safe_int(item.get("dealMonth")),
+                "dealDay": safe_int(item.get("dealDay")),
+                "deposit": safe_int(item.get("deposit")),
+                "monthlyRent": safe_int(item.get("monthlyRent")),
+                "floor": safe_str(item.get("floor")),
+                "buildYear": safe_int(item.get("buildYear")),
+                "contractTerm": safe_str(item.get("contractTerm")),
+                "contractType": safe_str(item.get("contractType")),
+            }
+            normalized.append(normalized_item)
+        return normalized
+
+
+class SHTradeAPIClient(BasePublicDataAPI):
+    """국토교통부 단독/다가구 매매 실거래가 조회 API 클라이언트."""
+
+    API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcSHTrade/getRTMSDataSvcSHTrade"
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
+
+    async def get_sh_trades(
+        self,
+        lawd_cd: str,
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
+    ) -> Dict[str, Any]:
+        """단독/다가구 매매 실거래가 조회."""
+        logger.info(f"단독/다가구 매매 실거래가 조회: lawd_cd={lawd_cd}, deal_ymd={deal_ymd}")
+
+        if len(lawd_cd) != 5 or not lawd_cd.isdigit():
+            raise PublicDataAPIError(f"Invalid lawd_cd: {lawd_cd}")
+        if len(deal_ymd) != 6 or not deal_ymd.isdigit():
+            raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd}")
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized")
+
+        try:
+            params = {
+                "serviceKey": self.api_key,
+                "LAWD_CD": lawd_cd,
+                "DEAL_YMD": deal_ymd,
+                "pageNo": str(page_no),
+                "numOfRows": str(num_of_rows)
+            }
+            response = await self.client.get(self.API_URL, params=params)
+
+            if not response.is_success:
+                raise PublicDataAPIError(f"HTTP {response.status_code}")
+
+            text = response.text.replace("\ufeff", "")
+            data = xmltodict.parse(text)
+
+            result_code = data.get("response", {}).get("header", {}).get("resultCode")
+            result_msg = data.get("response", {}).get("header", {}).get("resultMsg")
+
+            success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
+            is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
+
+            if result_code and result_code not in success_codes and not is_no_data:
+                raise PublicDataAPIError(f"API Error: {result_msg}")
+
+            if is_no_data:
+                return {"header": {"resultCode": result_code, "resultMsg": result_msg or "NO_DATA"},
+                        "body": {"items": [], "totalCount": 0}}
+
+            rows = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            items = rows if isinstance(rows, list) else ([rows] if rows else [])
+
+            logger.info(f"단독/다가구 매매 실거래가 조회 성공: {len(items)}개 결과")
+
+            return {"header": {"resultCode": result_code or "000", "resultMsg": result_msg or "OK"},
+                    "body": {"items": self._normalize_items(items), "totalCount": len(items)}}
+
+        except httpx.HTTPError as e:
+            raise PublicDataAPIError(f"HTTP Error: {e}") from e
+
+    def _normalize_items(self, items: List[Dict]) -> List[Dict[str, Any]]:
+        """단독/다가구 매매 거래 데이터 정규화."""
+        normalized = []
+        for item in items:
+            def safe_str(v) -> str:
+                return str(v).strip() if v is not None else ""
+            def safe_int(v) -> Optional[int]:
+                s = safe_str(v).replace(" ", "").replace(",", "")
+                try:
+                    return int(s) if s else None
+                except ValueError:
+                    return None
+
+            normalized_item = {
+                "sggCd": safe_str(item.get("sggCd")),
+                "umdNm": safe_str(item.get("umdNm")),
+                "houseType": safe_str(item.get("houseType")),  # 주택유형
+                "jibun": safe_str(item.get("jibun")),
+                "totalFloorAr": safe_str(item.get("totalFloorAr")),  # 연면적
+                "plottageAr": safe_str(item.get("plottageAr")),  # 대지면적
+                "dealYear": safe_int(item.get("dealYear")),
+                "dealMonth": safe_int(item.get("dealMonth")),
+                "dealDay": safe_int(item.get("dealDay")),
+                "dealAmount": safe_int(item.get("dealAmount")),
+                "buildYear": safe_int(item.get("buildYear")),
+                "cdealType": safe_str(item.get("cdealType")),
+                "cdealDay": safe_str(item.get("cdealDay")),
+            }
+            normalized.append(normalized_item)
+        return normalized
+
+
+class SHRentAPIClient(BasePublicDataAPI):
+    """국토교통부 단독/다가구 전월세 실거래가 조회 API 클라이언트."""
+
+    API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcSHRent/getRTMSDataSvcSHRent"
+
+    def __init__(self, api_key: str, client: Optional[httpx.AsyncClient] = None, timeout: float = 30.0):
+        super().__init__(api_key, client, timeout)
+
+    async def get_sh_rent_transactions(
+        self,
+        lawd_cd: str,
+        deal_ymd: str,
+        page_no: int = 1,
+        num_of_rows: int = 100
+    ) -> Dict[str, Any]:
+        """단독/다가구 전월세 실거래가 조회."""
+        logger.info(f"단독/다가구 전월세 실거래가 조회: lawd_cd={lawd_cd}, deal_ymd={deal_ymd}")
+
+        if len(lawd_cd) != 5 or not lawd_cd.isdigit():
+            raise PublicDataAPIError(f"Invalid lawd_cd: {lawd_cd}")
+        if len(deal_ymd) != 6 or not deal_ymd.isdigit():
+            raise PublicDataAPIError(f"Invalid deal_ymd: {deal_ymd}")
+        if self.client is None:
+            raise PublicDataAPIError("HTTP client not initialized")
+
+        try:
+            params = {
+                "serviceKey": self.api_key,
+                "LAWD_CD": lawd_cd,
+                "DEAL_YMD": deal_ymd,
+                "pageNo": str(page_no),
+                "numOfRows": str(num_of_rows)
+            }
+            response = await self.client.get(self.API_URL, params=params)
+
+            if not response.is_success:
+                raise PublicDataAPIError(f"HTTP {response.status_code}")
+
+            text = response.text.replace("\ufeff", "")
+            data = xmltodict.parse(text)
+
+            result_code = data.get("response", {}).get("header", {}).get("resultCode")
+            result_msg = data.get("response", {}).get("header", {}).get("resultMsg")
+
+            success_codes = ["00", "000", "0000", "INFO-000", "03", "INFO-003"]
+            is_no_data = result_code in ["03", "INFO-003"] or "NO_DATA" in str(result_msg)
+
+            if result_code and result_code not in success_codes and not is_no_data:
+                raise PublicDataAPIError(f"API Error: {result_msg}")
+
+            if is_no_data:
+                return {"header": {"resultCode": result_code, "resultMsg": result_msg or "NO_DATA"},
+                        "body": {"items": [], "totalCount": 0}}
+
+            rows = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            items = rows if isinstance(rows, list) else ([rows] if rows else [])
+
+            logger.info(f"단독/다가구 전월세 실거래가 조회 성공: {len(items)}개 결과")
+
+            return {"header": {"resultCode": result_code or "000", "resultMsg": result_msg or "OK"},
+                    "body": {"items": self._normalize_items(items), "totalCount": len(items)}}
+
+        except httpx.HTTPError as e:
+            raise PublicDataAPIError(f"HTTP Error: {e}") from e
+
+    def _normalize_items(self, items: List[Dict]) -> List[Dict[str, Any]]:
+        """단독/다가구 전월세 거래 데이터 정규화."""
+        normalized = []
+        for item in items:
+            def safe_str(v) -> str:
+                return str(v).strip() if v is not None else ""
+            def safe_int(v) -> Optional[int]:
+                s = safe_str(v).replace(" ", "").replace(",", "")
+                try:
+                    return int(s) if s else None
+                except ValueError:
+                    return None
+
+            normalized_item = {
+                "sggCd": safe_str(item.get("sggCd")),
+                "umdNm": safe_str(item.get("umdNm")),
+                "jibun": safe_str(item.get("jibun")),
+                "contractArea": safe_str(item.get("contractArea")),  # 계약면적
+                "dealYear": safe_int(item.get("dealYear")),
+                "dealMonth": safe_int(item.get("dealMonth")),
+                "dealDay": safe_int(item.get("dealDay")),
+                "deposit": safe_int(item.get("deposit")),
+                "monthlyRent": safe_int(item.get("monthlyRent")),
+                "buildYear": safe_int(item.get("buildYear")),
+                "contractTerm": safe_str(item.get("contractTerm")),
+                "contractType": safe_str(item.get("contractType")),
+            }
+            normalized.append(normalized_item)
+        return normalized
+
+
 class AptRentAPIClient(BasePublicDataAPI):
     """국토교통부 아파트 전월세 실거래가 조회 API 클라이언트."""
 
