@@ -168,6 +168,20 @@ export default function DevCaseDetailPage({
   const [priceAmount, setPriceAmount] = useState<string>(''); // 매매가 (만원)
   const [monthlyRentAmount, setMonthlyRentAmount] = useState<string>(''); // 월세 (만원)
 
+  // 건물 유형 state (Step 1 파싱 결과에서 자동 감지)
+  const [buildingType, setBuildingType] = useState<'apt' | 'offi' | 'rh' | 'sh'>('apt');
+
+  // Step 3 실거래가 조회 state
+  const [step3TradeResult, setStep3TradeResult] = useState<{
+    loading: boolean;
+    error: string | null;
+    items: any[];
+    totalCount: number;
+    buildingTypeKr: string;
+    contractTypeKr: string;
+    executionTimeMs: number;
+  } | null>(null);
+
   // 주소에서 지번 추출하는 함수
   const parseAddressComponents = (address: string) => {
     if (!address) return null;
@@ -352,7 +366,154 @@ export default function DevCaseDetailPage({
     }
   };
 
-  const runStep3 = async () => {
+  // Step 3: 건물유형별 실거래가 조회 (매매 + 전세 모두 조회하여 전세가율 계산)
+  const runStep3Trade = async () => {
+    if (!selectedLegalDong?.lawd5) {
+      alert('먼저 법정동코드를 선택해주세요.');
+      return;
+    }
+
+    setStep3TradeResult({
+      loading: true,
+      error: null,
+      items: [],
+      totalCount: 0,
+      buildingTypeKr: '',
+      contractTypeKr: '',
+      executionTimeMs: 0,
+    });
+
+    const startTime = Date.now();
+    const lawdCd = selectedLegalDong.lawd5;
+    const now = new Date();
+
+    // 최근 3개월 조회 (YYYYMM 형식)
+    const months = [];
+    for (let i = 0; i < 3; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(`${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`);
+    }
+
+    try {
+      // 매매 데이터와 전세 데이터 병렬 조회
+      const [tradeResults, rentResults] = await Promise.all([
+        // 매매 데이터 (3개월)
+        Promise.all(months.map(async (dealYmd) => {
+          const response = await fetch('/api/realestate/trade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lawdCd,
+              dealYmd,
+              buildingType,
+              contractType: 'trade',
+            }),
+          });
+          return response.json();
+        })),
+        // 전세 데이터 (3개월)
+        Promise.all(months.map(async (dealYmd) => {
+          const response = await fetch('/api/realestate/trade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lawdCd,
+              dealYmd,
+              buildingType,
+              contractType: 'rent',
+            }),
+          });
+          return response.json();
+        })),
+      ]);
+
+      // 매매 데이터 취합
+      const allTradeItems: any[] = [];
+      for (const result of tradeResults) {
+        if (result?.body?.items) {
+          allTradeItems.push(...result.body.items);
+        }
+      }
+
+      // 전세 데이터 취합
+      const allRentItems: any[] = [];
+      for (const result of rentResults) {
+        if (result?.body?.items) {
+          allRentItems.push(...result.body.items);
+        }
+      }
+
+      // 평균 매매가 계산
+      const tradeAmounts = allTradeItems
+        .filter((item) => item.dealAmount)
+        .map((item) => item.dealAmount);
+      const avgTradePrice = tradeAmounts.length > 0
+        ? Math.round(tradeAmounts.reduce((a, b) => a + b, 0) / tradeAmounts.length)
+        : null;
+
+      // 평균 전세가 계산 (전세 = deposit만 있고 monthlyRent가 없거나 0인 경우)
+      const rentDeposits = allRentItems
+        .filter((item) => item.deposit && (!item.monthlyRent || item.monthlyRent === 0))
+        .map((item) => item.deposit);
+      const avgRentDeposit = rentDeposits.length > 0
+        ? Math.round(rentDeposits.reduce((a, b) => a + b, 0) / rentDeposits.length)
+        : null;
+
+      // 전세가율 계산
+      const jeonseRatio = (avgTradePrice && avgRentDeposit)
+        ? Math.round((avgRentDeposit / avgTradePrice) * 1000) / 10
+        : null;
+
+      const buildingTypeNames: Record<string, string> = {
+        apt: '아파트',
+        offi: '오피스텔',
+        rh: '연립다세대',
+        sh: '단독다가구',
+      };
+
+      setStep3TradeResult({
+        loading: false,
+        error: null,
+        items: [
+          ...allTradeItems.map((item) => ({ ...item, _dataType: 'trade' })),
+          ...allRentItems.map((item) => ({ ...item, _dataType: 'rent' })),
+        ],
+        totalCount: allTradeItems.length + allRentItems.length,
+        buildingTypeKr: buildingTypeNames[buildingType] || buildingType,
+        contractTypeKr: '매매+전세',
+        executionTimeMs: Date.now() - startTime,
+        // 추가 통계
+        tradeCount: allTradeItems.length,
+        rentCount: allRentItems.length,
+        avgTradePrice,
+        avgRentDeposit,
+        jeonseRatio,
+      } as any);
+
+      console.log('[Step 3 실거래가 조회 완료]', {
+        buildingType,
+        tradeCount: allTradeItems.length,
+        rentCount: allRentItems.length,
+        avgTradePrice,
+        avgRentDeposit,
+        jeonseRatio,
+      });
+    } catch (err: any) {
+      console.error('Step 3 실거래가 조회 실패:', err);
+      setStep3TradeResult({
+        loading: false,
+        error: err.message,
+        items: [],
+        totalCount: 0,
+        buildingTypeKr: '',
+        contractTypeKr: '',
+        executionTimeMs: Date.now() - startTime,
+      });
+    }
+  };
+
+  // Step 4: 종합 분석 리포트 생성 (기존 Step 3)
+  const runStep4 = async () => {
     try {
       setStep3Loading(true);
       setStep3Result(null);
@@ -503,7 +664,25 @@ export default function DevCaseDetailPage({
     }
   }, [case_data]);
 
-  // PDF 파싱 결과 주소로 법정동 검색 업데이트 + 지번 추출 + 전용면적 추출
+  // 건물유형 한글 → API 코드 변환
+  const detectBuildingTypeCode = (buildingTypeKr: string | undefined): 'apt' | 'offi' | 'rh' | 'sh' => {
+    if (!buildingTypeKr) return 'apt';
+    const normalized = buildingTypeKr.trim().toLowerCase();
+
+    // 아파트
+    if (normalized.includes('아파트') || normalized.includes('apt')) return 'apt';
+    // 오피스텔
+    if (normalized.includes('오피스텔') || normalized.includes('offi')) return 'offi';
+    // 연립다세대 (연립, 다세대, 빌라)
+    if (normalized.includes('연립') || normalized.includes('다세대') || normalized.includes('빌라')) return 'rh';
+    // 단독다가구 (단독, 다가구)
+    if (normalized.includes('단독') || normalized.includes('다가구')) return 'sh';
+
+    // 기본값: 아파트
+    return 'apt';
+  };
+
+  // PDF 파싱 결과 주소로 법정동 검색 업데이트 + 지번 추출 + 전용면적 추출 + 건물유형 감지
   useEffect(() => {
     if (step1Result?.success && step1Result.registry_doc_masked?.property_address) {
       const address = step1Result.registry_doc_masked.property_address;
@@ -515,6 +694,11 @@ export default function DevCaseDetailPage({
 
       // 동까지만 잘라서 검색란에 입력
       setLegalDongKeyword(parsed?.addressUntilDong || address);
+
+      // 건물유형 자동 감지 (Step 1 파싱 결과에서)
+      const detectedType = detectBuildingTypeCode(step1Result.registry_doc_masked?.building_type);
+      setBuildingType(detectedType);
+      console.log('[건물유형 자동 감지]', step1Result.registry_doc_masked?.building_type, '→', detectedType);
 
       if (parsed?.jibun || area_m2) {
         console.log('[파싱 정보 추출]', { ...parsed, area_m2 });
@@ -984,29 +1168,148 @@ export default function DevCaseDetailPage({
             )}
           </div>
 
-          {/* Step 2: Collect Public Data */}
+          {/* Step 3: 공공 데이터 조회 (건물유형별 매매+전세 실거래가) */}
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Step 2: 공공 데이터 수집</h2>
+                <h2 className="text-lg font-semibold">Step 3: 공공 데이터 조회</h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  법정동코드 + 실거래가 조회 (전세/월세: 듀얼 API)
+                  건물유형별 매매+전세 실거래가 3개월 평균 + 전세가율 계산
+                </p>
+              </div>
+              <div className="flex items-center gap-4">
+                {/* 건물 유형 선택 */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">건물유형:</label>
+                  <select
+                    value={buildingType}
+                    onChange={(e) => setBuildingType(e.target.value as 'apt' | 'offi' | 'rh' | 'sh')}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="apt">아파트</option>
+                    <option value="offi">오피스텔</option>
+                    <option value="rh">연립다세대</option>
+                    <option value="sh">단독다가구</option>
+                  </select>
+                </div>
+                <button
+                  onClick={runStep3Trade}
+                  disabled={step3TradeResult?.loading || !selectedLegalDong?.lawd5}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {step3TradeResult?.loading ? '조회 중...' : '실거래가 조회'}
+                </button>
+              </div>
+            </div>
+
+            {/* Step 3 실거래가 결과 표시 */}
+            {step3TradeResult && !step3TradeResult.loading && !step3TradeResult.error && (
+              <div className="px-6 py-4 border-b border-gray-200 bg-green-50">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="text-green-600 font-medium">✓ 조회 완료</span>
+                  <span className="text-gray-500 text-sm">
+                    ({step3TradeResult.executionTimeMs}ms, {step3TradeResult.buildingTypeKr})
+                  </span>
+                </div>
+
+                {/* 핵심 지표 카드 */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-lg border border-green-200 text-center">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {(step3TradeResult as any).avgTradePrice
+                        ? `${((step3TradeResult as any).avgTradePrice / 10000).toFixed(2)}억`
+                        : 'N/A'}
+                    </div>
+                    <div className="text-sm text-gray-600">매매 평균가 (3개월)</div>
+                    <div className="text-xs text-gray-400">
+                      {(step3TradeResult as any).tradeCount || 0}건 분석
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-lg border border-green-200 text-center">
+                    <div className="text-2xl font-bold text-purple-600">
+                      {(step3TradeResult as any).avgRentDeposit
+                        ? `${((step3TradeResult as any).avgRentDeposit / 10000).toFixed(2)}억`
+                        : 'N/A'}
+                    </div>
+                    <div className="text-sm text-gray-600">전세 평균가 (3개월)</div>
+                    <div className="text-xs text-gray-400">
+                      {(step3TradeResult as any).rentCount || 0}건 분석
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-lg border border-green-200 text-center">
+                    <div className={`text-2xl font-bold ${
+                      (step3TradeResult as any).jeonseRatio >= 80 ? 'text-red-600' :
+                      (step3TradeResult as any).jeonseRatio >= 70 ? 'text-orange-600' :
+                      'text-green-600'
+                    }`}>
+                      {(step3TradeResult as any).jeonseRatio
+                        ? `${(step3TradeResult as any).jeonseRatio}%`
+                        : 'N/A'}
+                    </div>
+                    <div className="text-sm text-gray-600">전세가율</div>
+                    <div className="text-xs text-gray-400">
+                      {(step3TradeResult as any).jeonseRatio >= 80 ? '⚠️ 위험' :
+                       (step3TradeResult as any).jeonseRatio >= 70 ? '⚡ 주의' :
+                       '✅ 안전'}
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-lg border border-green-200 text-center">
+                    <div className="text-2xl font-bold text-gray-600">
+                      {step3TradeResult.totalCount}건
+                    </div>
+                    <div className="text-sm text-gray-600">총 거래 건수</div>
+                    <div className="text-xs text-gray-400">
+                      매매 {(step3TradeResult as any).tradeCount || 0} + 전세 {(step3TradeResult as any).rentCount || 0}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 에러 표시 */}
+            {step3TradeResult?.error && (
+              <div className="px-6 py-4 border-b border-gray-200 bg-red-50">
+                <div className="text-red-600">
+                  <p className="font-medium">✗ 조회 실패</p>
+                  <p className="text-sm mt-1">{step3TradeResult.error}</p>
+                </div>
+              </div>
+            )}
+
+            {/* 법정동코드 미선택 안내 */}
+            {!selectedLegalDong?.lawd5 && (
+              <div className="px-6 py-4 border-b border-gray-200 bg-yellow-50">
+                <p className="text-sm text-yellow-700">
+                  ⚠️ 실거래가 조회를 위해 아래에서 법정동코드를 먼저 검색/선택해주세요.
+                </p>
+              </div>
+            )}
+
+            {/* 기존 공공데이터 수집 UI (법정동 검색 등) */}
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+              <div>
+                <h3 className="text-md font-semibold text-gray-700">법정동코드 + 상세 실거래가</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  법정동코드 검색 및 15개 API 테스트
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={runAPITest}
                   disabled={apiTestLoading}
-                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
                 >
-                  {apiTestLoading ? 'Testing 15 APIs...' : 'Test All 15 APIs'}
+                  {apiTestLoading ? 'Testing...' : 'Test 15 APIs'}
                 </button>
                 <button
                   onClick={runStep2}
                   disabled={step2Loading}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
                 >
-                  {step2Loading ? 'Running...' : 'Run'}
+                  {step2Loading ? 'Running...' : 'Run (Legacy)'}
                 </button>
               </div>
             </div>
@@ -1746,13 +2049,15 @@ export default function DevCaseDetailPage({
             )}
           </div>
 
-          {/* Contract Info Input: 계약 정보 입력 */}
-          <div className="bg-white rounded-lg shadow border-2 border-blue-200">
+          {/* Step 2: 계약 정보 입력 */}
+          <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold">📋 계약 정보 입력</h2>
-              <p className="text-sm text-gray-600 mt-1">
-                리스크 분석을 위한 계약 유형과 금액을 입력하세요
-              </p>
+              <div>
+                <h2 className="text-lg font-semibold">Step 2: 계약 정보 입력</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  리스크 분석을 위한 계약 유형과 금액을 입력하세요
+                </p>
+              </div>
             </div>
             <div className="px-6 py-4 space-y-4">
               {/* 계약 유형 선택 */}
@@ -1863,13 +2168,13 @@ export default function DevCaseDetailPage({
             </div>
           </div>
 
-          {/* Step 3: Prepare Summary */}
+          {/* Step 4: 종합 분석 */}
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Step 3: 요약 리포트 생성</h2>
+                <h2 className="text-lg font-semibold">Step 4: 종합 분석</h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  리스크 점수 계산 + LLM/규칙 기반 요약
+                  계약정보 + 시장데이터 기반 리스크 점수 계산 및 요약
                 </p>
               </div>
               <div className="flex items-center gap-4">
@@ -1883,7 +2188,7 @@ export default function DevCaseDetailPage({
                   <span>LLM 사용</span>
                 </label>
                 <button
-                  onClick={runStep3}
+                  onClick={runStep4}
                   disabled={step3Loading}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
