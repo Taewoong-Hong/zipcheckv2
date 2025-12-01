@@ -120,6 +120,27 @@ export default function DevCaseDetailPage({
   const [dongFilter, setDongFilter] = useState(false); // 동 필터 (파싱된 주소의 동과 일치하는 것만)
   const [areaFilter, setAreaFilter] = useState<'none' | 'exact' | 'range3' | 'range5' | 'range10'>('none'); // 전용면적 필터 모드
 
+  // 오피스텔 실거래가 조회 state
+  const [offiTradeResults, setOffiTradeResults] = useState<any[]>([]);
+  const [offiRentResults, setOffiRentResults] = useState<any[]>([]);
+  const [offiTradeLoading, setOffiTradeLoading] = useState(false);
+  const [offiRentLoading, setOffiRentLoading] = useState(false);
+  const [offiTradeRentTab, setOffiTradeRentTab] = useState<'trade' | 'rent'>('trade');
+
+  // 연립다세대 실거래가 조회 state
+  const [rhTradeResults, setRhTradeResults] = useState<any[]>([]);
+  const [rhRentResults, setRhRentResults] = useState<any[]>([]);
+  const [rhTradeLoading, setRhTradeLoading] = useState(false);
+  const [rhRentLoading, setRhRentLoading] = useState(false);
+  const [rhTradeRentTab, setRhTradeRentTab] = useState<'trade' | 'rent'>('trade');
+
+  // 단독다가구 실거래가 조회 state
+  const [shTradeResults, setShTradeResults] = useState<any[]>([]);
+  const [shRentResults, setShRentResults] = useState<any[]>([]);
+  const [shTradeLoading, setShTradeLoading] = useState(false);
+  const [shRentLoading, setShRentLoading] = useState(false);
+  const [shTradeRentTab, setShTradeRentTab] = useState<'trade' | 'rent'>('trade');
+
   // 자동 실거래가 조회 결과 (파싱된 주소 기반)
   const [autoTradeResult, setAutoTradeResult] = useState<{
     loading: boolean;
@@ -689,6 +710,195 @@ export default function DevCaseDetailPage({
     } finally {
       setAptTradeLoading(false);
       setAptRentLoading(false);
+    }
+  };
+
+  // 오피스텔 실거래가 조회 (매매 + 전세/월세 동시 조회)
+  const searchOffiTrade = async () => {
+    if (!selectedLegalDong) {
+      alert('먼저 법정동코드를 선택하세요.');
+      return;
+    }
+
+    const lawdCd = selectedLegalDong.lawd5 || selectedLegalDong.regionCd?.slice(0, 5);
+    if (!lawdCd || lawdCd.length !== 5) {
+      alert('유효한 LAWD 코드가 없습니다.');
+      return;
+    }
+
+    const dealYmd = `${aptTradeYear}${String(aptTradeMonth).padStart(2, '0')}`;
+
+    try {
+      setOffiTradeLoading(true);
+      setOffiRentLoading(true);
+      setOffiTradeResults([]);
+      setOffiRentResults([]);
+
+      // 병렬 조회: 오피스텔 매매 + 전세/월세
+      const [tradeResponse, rentResponse] = await Promise.all([
+        fetch('/api/realestate/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd, buildingType: 'offi', contractType: 'trade' }),
+        }),
+        fetch('/api/realestate/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd, buildingType: 'offi', contractType: 'rent' }),
+        }),
+      ]);
+
+      // 매매 결과 처리
+      if (tradeResponse.ok) {
+        const tradeData = await tradeResponse.json();
+        if (tradeData.header?.resultCode === '000' && tradeData.body?.items) {
+          setOffiTradeResults(tradeData.body.items);
+        } else {
+          setOffiTradeResults([]);
+        }
+      }
+
+      // 전세/월세 결과 처리
+      if (rentResponse.ok) {
+        const rentData = await rentResponse.json();
+        if (rentData.header?.resultCode === '000' && rentData.body?.items) {
+          setOffiRentResults(rentData.body.items);
+        } else {
+          setOffiRentResults([]);
+        }
+      }
+    } catch (err: any) {
+      console.error('Offi trade/rent search failed:', err);
+      alert(`오피스텔 조회 실패: ${err.message}`);
+    } finally {
+      setOffiTradeLoading(false);
+      setOffiRentLoading(false);
+    }
+  };
+
+  // 연립다세대 실거래가 조회 (매매 + 전세/월세 동시 조회)
+  const searchRhTrade = async () => {
+    if (!selectedLegalDong) {
+      alert('먼저 법정동코드를 선택하세요.');
+      return;
+    }
+
+    const lawdCd = selectedLegalDong.lawd5 || selectedLegalDong.regionCd?.slice(0, 5);
+    if (!lawdCd || lawdCd.length !== 5) {
+      alert('유효한 LAWD 코드가 없습니다.');
+      return;
+    }
+
+    const dealYmd = `${aptTradeYear}${String(aptTradeMonth).padStart(2, '0')}`;
+
+    try {
+      setRhTradeLoading(true);
+      setRhRentLoading(true);
+      setRhTradeResults([]);
+      setRhRentResults([]);
+
+      // 병렬 조회: 연립다세대 매매 + 전세/월세
+      const [tradeResponse, rentResponse] = await Promise.all([
+        fetch('/api/realestate/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd, buildingType: 'rh', contractType: 'trade' }),
+        }),
+        fetch('/api/realestate/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd, buildingType: 'rh', contractType: 'rent' }),
+        }),
+      ]);
+
+      // 매매 결과 처리
+      if (tradeResponse.ok) {
+        const tradeData = await tradeResponse.json();
+        if (tradeData.header?.resultCode === '000' && tradeData.body?.items) {
+          setRhTradeResults(tradeData.body.items);
+        } else {
+          setRhTradeResults([]);
+        }
+      }
+
+      // 전세/월세 결과 처리
+      if (rentResponse.ok) {
+        const rentData = await rentResponse.json();
+        if (rentData.header?.resultCode === '000' && rentData.body?.items) {
+          setRhRentResults(rentData.body.items);
+        } else {
+          setRhRentResults([]);
+        }
+      }
+    } catch (err: any) {
+      console.error('RH trade/rent search failed:', err);
+      alert(`연립다세대 조회 실패: ${err.message}`);
+    } finally {
+      setRhTradeLoading(false);
+      setRhRentLoading(false);
+    }
+  };
+
+  // 단독다가구 실거래가 조회 (매매 + 전세/월세 동시 조회)
+  const searchShTrade = async () => {
+    if (!selectedLegalDong) {
+      alert('먼저 법정동코드를 선택하세요.');
+      return;
+    }
+
+    const lawdCd = selectedLegalDong.lawd5 || selectedLegalDong.regionCd?.slice(0, 5);
+    if (!lawdCd || lawdCd.length !== 5) {
+      alert('유효한 LAWD 코드가 없습니다.');
+      return;
+    }
+
+    const dealYmd = `${aptTradeYear}${String(aptTradeMonth).padStart(2, '0')}`;
+
+    try {
+      setShTradeLoading(true);
+      setShRentLoading(true);
+      setShTradeResults([]);
+      setShRentResults([]);
+
+      // 병렬 조회: 단독다가구 매매 + 전세/월세
+      const [tradeResponse, rentResponse] = await Promise.all([
+        fetch('/api/realestate/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd, buildingType: 'sh', contractType: 'trade' }),
+        }),
+        fetch('/api/realestate/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd, buildingType: 'sh', contractType: 'rent' }),
+        }),
+      ]);
+
+      // 매매 결과 처리
+      if (tradeResponse.ok) {
+        const tradeData = await tradeResponse.json();
+        if (tradeData.header?.resultCode === '000' && tradeData.body?.items) {
+          setShTradeResults(tradeData.body.items);
+        } else {
+          setShTradeResults([]);
+        }
+      }
+
+      // 전세/월세 결과 처리
+      if (rentResponse.ok) {
+        const rentData = await rentResponse.json();
+        if (rentData.header?.resultCode === '000' && rentData.body?.items) {
+          setShRentResults(rentData.body.items);
+        } else {
+          setShRentResults([]);
+        }
+      }
+    } catch (err: any) {
+      console.error('SH trade/rent search failed:', err);
+      alert(`단독다가구 조회 실패: ${err.message}`);
+    } finally {
+      setShTradeLoading(false);
+      setShRentLoading(false);
     }
   };
 
@@ -2098,6 +2308,463 @@ export default function DevCaseDetailPage({
               {tradeRentTab === 'rent' && aptRentResults.length === 0 && !aptRentLoading && aptTradeResults.length > 0 && (
                 <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center text-gray-600">
                   전세/월세 실거래가 데이터가 없습니다.
+                </div>
+              )}
+            </div>
+
+            {/* ===== 3. 오피스텔 실거래가 조회 UI ===== */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-800 mb-3">3. 오피스텔 매매/전세 실거래가 조회</h3>
+
+              <div className="flex items-center gap-4 mb-4">
+                <button
+                  onClick={searchOffiTrade}
+                  disabled={offiTradeLoading || !selectedLegalDong}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {offiTradeLoading ? '조회 중...' : '오피스텔 실거래가 조회'}
+                </button>
+                {!selectedLegalDong && (
+                  <span className="text-sm text-orange-600">
+                    * 먼저 법정동코드를 선택하세요
+                  </span>
+                )}
+              </div>
+
+              {/* 매매/전세 탭 선택 */}
+              {(offiTradeResults.length > 0 || offiRentResults.length > 0) && (
+                <div className="flex mb-4 border-b border-gray-200">
+                  <button
+                    onClick={() => setOffiTradeRentTab('trade')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      offiTradeRentTab === 'trade'
+                        ? 'border-purple-500 text-purple-600 bg-purple-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    📊 매매 실거래가 ({offiTradeResults.length}건)
+                  </button>
+                  <button
+                    onClick={() => setOffiTradeRentTab('rent')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      offiTradeRentTab === 'rent'
+                        ? 'border-indigo-500 text-indigo-600 bg-indigo-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    🏠 전세/월세 실거래가 ({offiRentResults.length}건)
+                  </button>
+                  {offiRentLoading && (
+                    <span className="ml-2 text-sm text-gray-500 flex items-center">
+                      <span className="animate-spin mr-1">⏳</span> 전세/월세 조회 중...
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* 오피스텔 매매 실거래가 테이블 */}
+              {offiTradeRentTab === 'trade' && offiTradeResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-purple-50 px-3 py-2 text-sm text-purple-800 font-medium">
+                    {offiTradeResults.length}개의 오피스텔 매매 거래
+                  </div>
+                  <div className="max-h-80 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">거래일</th>
+                          <th className="px-3 py-2 text-left">오피스텔명</th>
+                          <th className="px-3 py-2 text-right">전용면적</th>
+                          <th className="px-3 py-2 text-center">층</th>
+                          <th className="px-3 py-2 text-right">거래금액</th>
+                          <th className="px-3 py-2 text-left">법정동</th>
+                          <th className="px-3 py-2 text-center">건축년도</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {offiTradeResults.map((item, idx) => (
+                          <tr key={idx} className="border-t hover:bg-gray-50">
+                            <td className="px-3 py-2">
+                              {item.dealYear && item.dealMonth && item.dealDay
+                                ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2 font-medium">{item.buildingName || item.offiNm || 'N/A'}</td>
+                            <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                            <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-purple-600">
+                              {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                            <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 오피스텔 전세/월세 실거래가 테이블 */}
+              {offiTradeRentTab === 'rent' && offiRentResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-indigo-50 px-3 py-2 text-sm text-indigo-800 font-medium">
+                    {offiRentResults.length}개의 오피스텔 전세/월세 거래
+                  </div>
+                  <div className="max-h-80 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">거래일</th>
+                          <th className="px-3 py-2 text-left">오피스텔명</th>
+                          <th className="px-3 py-2 text-right">전용면적</th>
+                          <th className="px-3 py-2 text-center">층</th>
+                          <th className="px-3 py-2 text-right">보증금</th>
+                          <th className="px-3 py-2 text-right">월세</th>
+                          <th className="px-3 py-2 text-left">법정동</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {offiRentResults.map((item, idx) => {
+                          const isJeonse = !item.monthlyRent || item.monthlyRent === 0;
+                          return (
+                            <tr key={idx} className="border-t hover:bg-gray-50">
+                              <td className="px-3 py-2">
+                                {item.dealYear && item.dealMonth && item.dealDay
+                                  ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                  : 'N/A'}
+                              </td>
+                              <td className="px-3 py-2 font-medium">{item.buildingName || item.offiNm || 'N/A'}</td>
+                              <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                              <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-indigo-600">
+                                {item.deposit ? `${item.deposit.toLocaleString()}만원` : 'N/A'}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {isJeonse ? (
+                                  <span className="text-green-600 font-medium">전세</span>
+                                ) : (
+                                  <span className="text-orange-600">{item.monthlyRent?.toLocaleString()}만원</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 결과 없음 안내 */}
+              {offiTradeRentTab === 'rent' && offiRentResults.length === 0 && !offiRentLoading && offiTradeResults.length > 0 && (
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center text-gray-600">
+                  오피스텔 전세/월세 실거래가 데이터가 없습니다.
+                </div>
+              )}
+            </div>
+
+            {/* ===== 4. 연립다세대 실거래가 조회 UI ===== */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-800 mb-3">4. 연립다세대 매매/전세 실거래가 조회</h3>
+
+              <div className="flex items-center gap-4 mb-4">
+                <button
+                  onClick={searchRhTrade}
+                  disabled={rhTradeLoading || !selectedLegalDong}
+                  className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {rhTradeLoading ? '조회 중...' : '연립다세대 실거래가 조회'}
+                </button>
+                {!selectedLegalDong && (
+                  <span className="text-sm text-orange-600">
+                    * 먼저 법정동코드를 선택하세요
+                  </span>
+                )}
+              </div>
+
+              {/* 매매/전세 탭 선택 */}
+              {(rhTradeResults.length > 0 || rhRentResults.length > 0) && (
+                <div className="flex mb-4 border-b border-gray-200">
+                  <button
+                    onClick={() => setRhTradeRentTab('trade')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      rhTradeRentTab === 'trade'
+                        ? 'border-teal-500 text-teal-600 bg-teal-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    📊 매매 실거래가 ({rhTradeResults.length}건)
+                  </button>
+                  <button
+                    onClick={() => setRhTradeRentTab('rent')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      rhTradeRentTab === 'rent'
+                        ? 'border-cyan-500 text-cyan-600 bg-cyan-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    🏠 전세/월세 실거래가 ({rhRentResults.length}건)
+                  </button>
+                  {rhRentLoading && (
+                    <span className="ml-2 text-sm text-gray-500 flex items-center">
+                      <span className="animate-spin mr-1">⏳</span> 전세/월세 조회 중...
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* 연립다세대 매매 실거래가 테이블 */}
+              {rhTradeRentTab === 'trade' && rhTradeResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-teal-50 px-3 py-2 text-sm text-teal-800 font-medium">
+                    {rhTradeResults.length}개의 연립다세대 매매 거래
+                  </div>
+                  <div className="max-h-80 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">거래일</th>
+                          <th className="px-3 py-2 text-left">건물명</th>
+                          <th className="px-3 py-2 text-right">전용면적</th>
+                          <th className="px-3 py-2 text-center">층</th>
+                          <th className="px-3 py-2 text-right">거래금액</th>
+                          <th className="px-3 py-2 text-left">법정동</th>
+                          <th className="px-3 py-2 text-center">건축년도</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rhTradeResults.map((item, idx) => (
+                          <tr key={idx} className="border-t hover:bg-gray-50">
+                            <td className="px-3 py-2">
+                              {item.dealYear && item.dealMonth && item.dealDay
+                                ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2 font-medium">{item.buildingName || item.mhouseNm || 'N/A'}</td>
+                            <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                            <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-teal-600">
+                              {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                            <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 연립다세대 전세/월세 실거래가 테이블 */}
+              {rhTradeRentTab === 'rent' && rhRentResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-cyan-50 px-3 py-2 text-sm text-cyan-800 font-medium">
+                    {rhRentResults.length}개의 연립다세대 전세/월세 거래
+                  </div>
+                  <div className="max-h-80 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">거래일</th>
+                          <th className="px-3 py-2 text-left">건물명</th>
+                          <th className="px-3 py-2 text-right">전용면적</th>
+                          <th className="px-3 py-2 text-center">층</th>
+                          <th className="px-3 py-2 text-right">보증금</th>
+                          <th className="px-3 py-2 text-right">월세</th>
+                          <th className="px-3 py-2 text-left">법정동</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rhRentResults.map((item, idx) => {
+                          const isJeonse = !item.monthlyRent || item.monthlyRent === 0;
+                          return (
+                            <tr key={idx} className="border-t hover:bg-gray-50">
+                              <td className="px-3 py-2">
+                                {item.dealYear && item.dealMonth && item.dealDay
+                                  ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                  : 'N/A'}
+                              </td>
+                              <td className="px-3 py-2 font-medium">{item.buildingName || item.mhouseNm || 'N/A'}</td>
+                              <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                              <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-cyan-600">
+                                {item.deposit ? `${item.deposit.toLocaleString()}만원` : 'N/A'}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {isJeonse ? (
+                                  <span className="text-green-600 font-medium">전세</span>
+                                ) : (
+                                  <span className="text-orange-600">{item.monthlyRent?.toLocaleString()}만원</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 결과 없음 안내 */}
+              {rhTradeRentTab === 'rent' && rhRentResults.length === 0 && !rhRentLoading && rhTradeResults.length > 0 && (
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center text-gray-600">
+                  연립다세대 전세/월세 실거래가 데이터가 없습니다.
+                </div>
+              )}
+            </div>
+
+            {/* ===== 5. 단독다가구 실거래가 조회 UI ===== */}
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-800 mb-3">5. 단독/다가구 매매/전세 실거래가 조회</h3>
+
+              <div className="flex items-center gap-4 mb-4">
+                <button
+                  onClick={searchShTrade}
+                  disabled={shTradeLoading || !selectedLegalDong}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {shTradeLoading ? '조회 중...' : '단독다가구 실거래가 조회'}
+                </button>
+                {!selectedLegalDong && (
+                  <span className="text-sm text-orange-600">
+                    * 먼저 법정동코드를 선택하세요
+                  </span>
+                )}
+              </div>
+
+              {/* 매매/전세 탭 선택 */}
+              {(shTradeResults.length > 0 || shRentResults.length > 0) && (
+                <div className="flex mb-4 border-b border-gray-200">
+                  <button
+                    onClick={() => setShTradeRentTab('trade')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      shTradeRentTab === 'trade'
+                        ? 'border-amber-500 text-amber-600 bg-amber-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    📊 매매 실거래가 ({shTradeResults.length}건)
+                  </button>
+                  <button
+                    onClick={() => setShTradeRentTab('rent')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      shTradeRentTab === 'rent'
+                        ? 'border-yellow-500 text-yellow-600 bg-yellow-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    🏠 전세/월세 실거래가 ({shRentResults.length}건)
+                  </button>
+                  {shRentLoading && (
+                    <span className="ml-2 text-sm text-gray-500 flex items-center">
+                      <span className="animate-spin mr-1">⏳</span> 전세/월세 조회 중...
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* 단독다가구 매매 실거래가 테이블 */}
+              {shTradeRentTab === 'trade' && shTradeResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-amber-50 px-3 py-2 text-sm text-amber-800 font-medium">
+                    {shTradeResults.length}개의 단독/다가구 매매 거래
+                  </div>
+                  <div className="max-h-80 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">거래일</th>
+                          <th className="px-3 py-2 text-left">주택유형</th>
+                          <th className="px-3 py-2 text-right">연면적</th>
+                          <th className="px-3 py-2 text-right">대지면적</th>
+                          <th className="px-3 py-2 text-right">거래금액</th>
+                          <th className="px-3 py-2 text-left">법정동</th>
+                          <th className="px-3 py-2 text-center">건축년도</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shTradeResults.map((item, idx) => (
+                          <tr key={idx} className="border-t hover:bg-gray-50">
+                            <td className="px-3 py-2">
+                              {item.dealYear && item.dealMonth && item.dealDay
+                                ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2 font-medium">{item.buildingName || item.houseType || 'N/A'}</td>
+                            <td className="px-3 py-2 text-right">{item.totalFloorAr || 'N/A'}㎡</td>
+                            <td className="px-3 py-2 text-right">{item.plottageAr || 'N/A'}㎡</td>
+                            <td className="px-3 py-2 text-right font-semibold text-amber-600">
+                              {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
+                            </td>
+                            <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                            <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 단독다가구 전세/월세 실거래가 테이블 */}
+              {shTradeRentTab === 'rent' && shRentResults.length > 0 && (
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="bg-yellow-50 px-3 py-2 text-sm text-yellow-800 font-medium">
+                    {shRentResults.length}개의 단독/다가구 전세/월세 거래
+                  </div>
+                  <div className="max-h-80 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 text-left">거래일</th>
+                          <th className="px-3 py-2 text-right">계약면적</th>
+                          <th className="px-3 py-2 text-right">보증금</th>
+                          <th className="px-3 py-2 text-right">월세</th>
+                          <th className="px-3 py-2 text-left">법정동</th>
+                          <th className="px-3 py-2 text-center">건축년도</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shRentResults.map((item, idx) => {
+                          const isJeonse = !item.monthlyRent || item.monthlyRent === 0;
+                          return (
+                            <tr key={idx} className="border-t hover:bg-gray-50">
+                              <td className="px-3 py-2">
+                                {item.dealYear && item.dealMonth && item.dealDay
+                                  ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                  : 'N/A'}
+                              </td>
+                              <td className="px-3 py-2 text-right">{item.contractArea || 'N/A'}㎡</td>
+                              <td className="px-3 py-2 text-right font-semibold text-yellow-600">
+                                {item.deposit ? `${item.deposit.toLocaleString()}만원` : 'N/A'}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {isJeonse ? (
+                                  <span className="text-green-600 font-medium">전세</span>
+                                ) : (
+                                  <span className="text-orange-600">{item.monthlyRent?.toLocaleString()}만원</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">{item.dong || item.umdNm || 'N/A'}</td>
+                              <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 결과 없음 안내 */}
+              {shTradeRentTab === 'rent' && shRentResults.length === 0 && !shRentLoading && shTradeResults.length > 0 && (
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center text-gray-600">
+                  단독/다가구 전세/월세 실거래가 데이터가 없습니다.
                 </div>
               )}
             </div>
