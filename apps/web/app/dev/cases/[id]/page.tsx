@@ -96,6 +96,7 @@ export default function DevCaseDetailPage({
   const [aptTradeLoading, setAptTradeLoading] = useState(false);
   const [jibunFilter, setJibunFilter] = useState<'none' | 'exact' | 'range100' | 'range200' | 'range300' | 'range400' | 'range500'>('none'); // 지번 필터 모드
   const [dongFilter, setDongFilter] = useState(false); // 동 필터 (파싱된 주소의 동과 일치하는 것만)
+  const [areaFilter, setAreaFilter] = useState<'none' | 'exact' | 'range3' | 'range5' | 'range10'>('none'); // 전용면적 필터 모드
 
   // 자동 실거래가 조회 결과 (파싱된 주소 기반)
   const [autoTradeResult, setAutoTradeResult] = useState<{
@@ -104,9 +105,11 @@ export default function DevCaseDetailPage({
     lawdCd: string | null;           // 법정동코드 5자리
     lawdName: string | null;         // 법정동 이름
     totalCount: number;              // 전체 거래 수
-    filteredCount: number;           // 필터링된 거래 수 (동+지번)
+    filteredCount: number;           // 필터링된 거래 수 (동+지번+면적)
     dongMatchCount: number;          // 동 일치 거래 수
     jibunMatchCount: number;         // 지번 일치 거래 수
+    areaMatchCount: number;          // 면적 일치 거래 수
+    dongJibunCount: number;          // 동+지번 일치 거래 수
     averagePrice: number | null;     // 필터링된 평균 거래가 (만원)
     minPrice: number | null;         // 최소 거래가
     maxPrice: number | null;         // 최대 거래가
@@ -120,6 +123,8 @@ export default function DevCaseDetailPage({
     filteredCount: 0,
     dongMatchCount: 0,
     jibunMatchCount: 0,
+    areaMatchCount: 0,
+    dongJibunCount: 0,
     averagePrice: null,
     minPrice: null,
     maxPrice: null,
@@ -133,6 +138,7 @@ export default function DevCaseDetailPage({
     dong: string;           // 동/읍/면/리
     jibun: string;          // 지번 (예: 123-45)
     building: string;       // 건물명/호수
+    area_m2: number | null; // 전용면적 (㎡)
   } | null>(null);
 
   const [useLLM, setUseLLM] = useState(false);
@@ -462,20 +468,21 @@ export default function DevCaseDetailPage({
     }
   }, [case_data]);
 
-  // PDF 파싱 결과 주소로 법정동 검색 업데이트 + 지번 추출
+  // PDF 파싱 결과 주소로 법정동 검색 업데이트 + 지번 추출 + 전용면적 추출
   useEffect(() => {
     if (step1Result?.success && step1Result.registry_doc_masked?.property_address) {
       const address = step1Result.registry_doc_masked.property_address;
+      const area_m2 = step1Result.registry_doc_masked.area_m2 || null;
 
       // 주소에서 지번 추출
       const parsed = parseAddressComponents(address);
-      setParsedAddress(parsed);
+      setParsedAddress(parsed ? { ...parsed, area_m2 } : null);
 
       // 동까지만 잘라서 검색란에 입력
       setLegalDongKeyword(parsed?.addressUntilDong || address);
 
-      if (parsed?.jibun) {
-        console.log('[지번 추출]', parsed);
+      if (parsed?.jibun || area_m2) {
+        console.log('[파싱 정보 추출]', { ...parsed, area_m2 });
       }
     }
   }, [step1Result]);
@@ -530,9 +537,10 @@ export default function DevCaseDetailPage({
 
         console.log(`[자동 조회] 최근 3개월 총: ${allTransactions.length}건`);
 
-        // 3. 필터링 (동 + 지번 정확히 일치)
+        // 3. 필터링 (동 + 지번 + 전용면적 정확히 일치)
         const targetDong = parsedAddress.dong.replace(/[동읍면리가]$/, '');
         const targetBonbun = parseInt(parsedAddress.jibun.split('-')[0], 10);
+        const targetArea = parsedAddress.area_m2;
 
         const isDongMatch = (item: any) => {
           const itemDong = (item.umdNm || item.dong || '').toString().trim().replace(/[동읍면리가]$/, '');
@@ -546,9 +554,27 @@ export default function DevCaseDetailPage({
           return !isNaN(itemBonbun) && itemBonbun === targetBonbun;
         };
 
+        const isAreaMatch = (item: any) => {
+          if (!targetArea) return true; // 면적 정보가 없으면 필터링하지 않음
+          const itemAreaStr = item.exclusiveArea || item.excluUseAr;
+          if (!itemAreaStr) return false;
+          const itemArea = parseFloat(itemAreaStr.toString().trim());
+          if (isNaN(itemArea)) return false;
+          // 전용면적 ±0.5㎡ 오차 허용
+          return Math.abs(itemArea - targetArea) <= 0.5;
+        };
+
         const dongMatchedItems = allTransactions.filter(isDongMatch);
         const jibunMatchedItems = allTransactions.filter(isJibunMatch);
-        const filteredItems = allTransactions.filter((item: any) => isDongMatch(item) && isJibunMatch(item));
+        const areaMatchedItems = targetArea ? allTransactions.filter(isAreaMatch) : [];
+
+        // 동 + 지번 일치 (기존 필터)
+        const dongJibunFiltered = allTransactions.filter((item: any) => isDongMatch(item) && isJibunMatch(item));
+
+        // 동 + 지번 + 전용면적 일치 (새 필터)
+        const filteredItems = targetArea
+          ? dongJibunFiltered.filter(isAreaMatch)
+          : dongJibunFiltered;
 
         // 4. 평균/최소/최대 계산
         const prices = filteredItems
@@ -574,6 +600,8 @@ export default function DevCaseDetailPage({
           filteredCount: filteredItems.length,
           dongMatchCount: dongMatchedItems.length,
           jibunMatchCount: jibunMatchedItems.length,
+          areaMatchCount: areaMatchedItems.length,
+          dongJibunCount: dongJibunFiltered.length,
           averagePrice,
           minPrice,
           maxPrice,
@@ -586,7 +614,10 @@ export default function DevCaseDetailPage({
           total: allTransactions.length,
           dongMatch: dongMatchedItems.length,
           jibunMatch: jibunMatchedItems.length,
+          areaMatch: areaMatchedItems.length,
+          dongJibun: dongJibunFiltered.length,
           filtered: filteredItems.length,
+          targetArea,
           averagePrice,
         });
 
@@ -1227,6 +1258,25 @@ export default function DevCaseDetailPage({
                     </select>
                   </div>
                 )}
+                {/* 전용면적 필터 드롭다운 */}
+                {parsedAddress?.area_m2 && aptTradeResults.length > 0 && (
+                  <div className="flex items-center gap-2 ml-4">
+                    <span className="text-sm text-purple-700 font-medium">
+                      전용면적 필터 ({parsedAddress.area_m2.toFixed(2)}㎡):
+                    </span>
+                    <select
+                      value={areaFilter}
+                      onChange={(e) => setAreaFilter(e.target.value as typeof areaFilter)}
+                      className="px-2 py-1 text-sm border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    >
+                      <option value="none">필터 없음</option>
+                      <option value="exact">정확히 일치</option>
+                      <option value="range3">±3㎡ 범위</option>
+                      <option value="range5">±5㎡ 범위</option>
+                      <option value="range10">±10㎡ 범위</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               {aptTradeResults.length > 0 && (() => {
@@ -1238,17 +1288,35 @@ export default function DevCaseDetailPage({
                   return isNaN(num) ? null : num;
                 };
 
-                // 필터 범위 추출 (예: 'range100' → 100, 'exact' → 0, 'none' → null)
-                const getFilterRange = (): number | null => {
+                // 전용면적 추출 (문자열 또는 숫자를 숫자로 변환)
+                const getArea = (item: any): number | null => {
+                  const areaStr = item.exclusiveArea || item.excluUseAr;
+                  if (!areaStr) return null;
+                  const num = parseFloat(areaStr.toString().trim());
+                  return isNaN(num) ? null : num;
+                };
+
+                // 지번 필터 범위 추출 (예: 'range100' → 100, 'exact' → 0, 'none' → null)
+                const getJibunFilterRange = (): number | null => {
                   if (jibunFilter === 'none') return null;
                   if (jibunFilter === 'exact') return 0;
                   const match = jibunFilter.match(/range(\d+)/);
                   return match ? parseInt(match[1], 10) : null;
                 };
 
-                const filterRange = getFilterRange();
+                // 전용면적 필터 범위 추출 (예: 'range3' → 3, 'exact' → 0, 'none' → null)
+                const getAreaFilterRange = (): number | null => {
+                  if (areaFilter === 'none') return null;
+                  if (areaFilter === 'exact') return 0;
+                  const match = areaFilter.match(/range(\d+)/);
+                  return match ? parseInt(match[1], 10) : null;
+                };
+
+                const jibunFilterRange = getJibunFilterRange();
+                const areaFilterRange = getAreaFilterRange();
                 const targetBonbun = getBonbun(parsedAddress?.jibun);
                 const targetDong = parsedAddress?.dong?.replace(/[동읍면리가]$/, ''); // "신갈동" → "신갈"
+                const targetArea = parsedAddress?.area_m2;
 
                 // 동 일치 여부 확인 함수
                 const isDongMatch = (item: any) => {
@@ -1257,24 +1325,46 @@ export default function DevCaseDetailPage({
                   return itemDong === targetDong;
                 };
 
+                // 전용면적 일치 여부 확인 함수 (하이라이팅용 - 정확히 일치 ±0.5㎡)
+                const isAreaMatch = (item: any) => {
+                  if (!targetArea) return false;
+                  const itemArea = getArea(item);
+                  if (itemArea === null) return false;
+                  return Math.abs(itemArea - targetArea) <= 0.5;
+                };
+
                 // 1단계: 동 필터 적용
                 const dongFilteredResults = dongFilter && targetDong
                   ? aptTradeResults.filter(isDongMatch)
                   : aptTradeResults;
 
                 // 2단계: 지번 필터 적용
-                const filteredResults = filterRange !== null && targetBonbun !== null
+                const jibunFilteredResults = jibunFilterRange !== null && targetBonbun !== null
                   ? dongFilteredResults.filter(item => {
                       const itemBonbun = getBonbun(item.jibun);
                       if (itemBonbun === null) return false;
-                      if (filterRange === 0) {
+                      if (jibunFilterRange === 0) {
                         // 정확히 일치
                         return itemBonbun === targetBonbun;
                       }
                       // 범위 필터 (±range)
-                      return Math.abs(itemBonbun - targetBonbun) <= filterRange;
+                      return Math.abs(itemBonbun - targetBonbun) <= jibunFilterRange;
                     })
                   : dongFilteredResults;
+
+                // 3단계: 전용면적 필터 적용
+                const filteredResults = areaFilterRange !== null && targetArea !== null
+                  ? jibunFilteredResults.filter(item => {
+                      const itemArea = getArea(item);
+                      if (itemArea === null) return false;
+                      if (areaFilterRange === 0) {
+                        // 정확히 일치 (±0.5㎡ 오차 허용)
+                        return Math.abs(itemArea - targetArea) <= 0.5;
+                      }
+                      // 범위 필터 (±range㎡)
+                      return Math.abs(itemArea - targetArea) <= areaFilterRange;
+                    })
+                  : jibunFilteredResults;
 
                 // 지번 일치 여부 확인 함수 (하이라이팅용 - 정확히 일치만)
                 const isJibunMatch = (item: any) => {
@@ -1291,32 +1381,44 @@ export default function DevCaseDetailPage({
                   }
                   if (jibunFilter === 'exact') {
                     parts.push(`지번 "${parsedAddress?.jibun}" 정확히 일치`);
-                  } else if (jibunFilter !== 'none' && filterRange) {
-                    parts.push(`지번 ${targetBonbun}±${filterRange} 범위`);
+                  } else if (jibunFilter !== 'none' && jibunFilterRange) {
+                    parts.push(`지번 ${targetBonbun}±${jibunFilterRange} 범위`);
+                  }
+                  if (areaFilter === 'exact') {
+                    parts.push(`면적 ${targetArea?.toFixed(2)}㎡ 정확히 일치`);
+                  } else if (areaFilter !== 'none' && areaFilterRange) {
+                    parts.push(`면적 ${targetArea?.toFixed(2)}±${areaFilterRange}㎡ 범위`);
                   }
                   return parts.join(' + ');
                 };
 
-                const hasAnyFilter = dongFilter || jibunFilter !== 'none';
+                const hasAnyFilter = dongFilter || jibunFilter !== 'none' || areaFilter !== 'none';
 
                 return (
                   <div className="border rounded-lg overflow-hidden">
-                    <div className="bg-green-50 px-3 py-2 text-sm text-green-800 font-medium flex items-center justify-between">
+                    <div className="bg-green-50 px-3 py-2 text-sm text-green-800 font-medium flex items-center justify-between flex-wrap gap-1">
                       <span>
                         {hasAnyFilter
                           ? `${filteredResults.length}개의 거래 (전체 ${aptTradeResults.length}개 중 ${getFilterDescription()})`
                           : `${aptTradeResults.length}개의 거래를 찾았습니다.`}
                       </span>
-                      {!hasAnyFilter && parsedAddress?.dong && (
-                        <span className="text-blue-600 text-xs mr-2">
-                          💡 동 일치: {aptTradeResults.filter(isDongMatch).length}개
-                        </span>
-                      )}
-                      {!hasAnyFilter && parsedAddress?.jibun && (
-                        <span className="text-orange-600 text-xs">
-                          💡 지번 일치: {aptTradeResults.filter(isJibunMatch).length}개
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {!hasAnyFilter && parsedAddress?.dong && (
+                          <span className="text-blue-600 text-xs">
+                            💡 동 일치: {aptTradeResults.filter(isDongMatch).length}개
+                          </span>
+                        )}
+                        {!hasAnyFilter && parsedAddress?.jibun && (
+                          <span className="text-orange-600 text-xs">
+                            💡 지번 일치: {aptTradeResults.filter(isJibunMatch).length}개
+                          </span>
+                        )}
+                        {!hasAnyFilter && parsedAddress?.area_m2 && (
+                          <span className="text-purple-600 text-xs">
+                            💡 면적 일치: {aptTradeResults.filter(isAreaMatch).length}개
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="max-h-96 overflow-auto">
                       <table className="w-full text-sm">
@@ -1338,11 +1440,13 @@ export default function DevCaseDetailPage({
                           {filteredResults.map((item, idx) => {
                             const jibunMatched = isJibunMatch(item);
                             const dongMatched = isDongMatch(item);
-                            const bothMatched = jibunMatched && dongMatched;
+                            const areaMatched = isAreaMatch(item);
+                            const allMatched = jibunMatched && dongMatched && areaMatched;
+                            const twoMatched = (jibunMatched && dongMatched) || (dongMatched && areaMatched) || (jibunMatched && areaMatched);
                             return (
                               <tr
                                 key={idx}
-                                className={`border-t ${bothMatched ? 'bg-green-50 hover:bg-green-100' : jibunMatched ? 'bg-orange-50 hover:bg-orange-100' : dongMatched ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
+                                className={`border-t ${allMatched ? 'bg-emerald-100 hover:bg-emerald-200' : twoMatched ? 'bg-green-50 hover:bg-green-100' : areaMatched ? 'bg-purple-50 hover:bg-purple-100' : jibunMatched ? 'bg-orange-50 hover:bg-orange-100' : dongMatched ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
                               >
                                 <td className="px-3 py-2">
                                   {item.dealYear && item.dealMonth && item.dealDay
@@ -1350,7 +1454,10 @@ export default function DevCaseDetailPage({
                                     : 'N/A'}
                                 </td>
                                 <td className="px-3 py-2 font-medium">{item.aptName || item.aptNm || 'N/A'}</td>
-                                <td className="px-3 py-2 text-right">{item.exclusiveArea || item.excluUseAr || 'N/A'}㎡</td>
+                                <td className={`px-3 py-2 text-right ${areaMatched ? 'font-semibold text-purple-700' : ''}`}>
+                                  {item.exclusiveArea || item.excluUseAr || 'N/A'}㎡
+                                  {areaMatched && <span className="ml-1 text-xs">✓</span>}
+                                </td>
                                 <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
                                 <td className="px-3 py-2 text-right font-semibold text-blue-600">
                                   {item.dealAmount ? `${item.dealAmount.toLocaleString()}만원` : 'N/A'}
