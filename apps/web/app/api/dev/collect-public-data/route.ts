@@ -23,13 +23,20 @@ export async function POST(request: NextRequest) {
       throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
     }
 
+    // 공공 데이터 수집은 여러 API를 호출하므로 90초 타임아웃 설정
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90000); // 90초
+
     const response = await fetch(`${AI_API_URL}/dev/collect-public-data`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ case_id, force }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();

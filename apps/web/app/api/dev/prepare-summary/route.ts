@@ -43,6 +43,11 @@ export async function POST(request: NextRequest) {
       throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
     }
 
+    // LLM 사용 시 더 긴 타임아웃 필요 (LLM: 120초, 규칙기반: 60초)
+    const timeoutMs = use_llm ? 120000 : 60000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     const response = await fetch(`${AI_API_URL}/dev/prepare-summary`, {
       method: 'POST',
       headers: {
@@ -60,7 +65,10 @@ export async function POST(request: NextRequest) {
         price,
         monthly_rent,
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
