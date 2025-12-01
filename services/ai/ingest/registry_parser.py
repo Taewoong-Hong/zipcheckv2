@@ -375,6 +375,126 @@ def extract_property_address(text: str) -> Optional[str]:
     return None
 
 
+def extract_building_type(text: str) -> Optional[str]:
+    """
+    건물 유형 추출 (표제부)
+
+    판별 기준:
+    1. 표제부 용도가 '공동주택(아파트)' → 아파트
+    2. 층수가 6층 이상 존재 → 아파트
+    3. 기타 키워드 기반 판별
+    """
+    # 1. 용도 표시에서 직접 확인
+    usage_patterns = [
+        (r'공동주택\s*\(\s*아파트\s*\)', '아파트'),
+        (r'아파트', '아파트'),
+        (r'오피스텔', '오피스텔'),
+        (r'근린생활시설', '근린생활주택'),
+        (r'다가구주택', '다가구'),
+        (r'다세대주택', '다세대'),
+        (r'다세대', '다세대'),
+        (r'다가구', '다가구'),
+        (r'연립주택', '연립'),
+        (r'단독주택', '단독주택'),
+    ]
+
+    for pattern, building_type in usage_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            logger.info(f"   └─ 건물유형 (용도 키워드): {building_type}")
+            return building_type
+
+    # 2. 층수 확인 (6층 이상이면 아파트)
+    # 패턴: "7층", "10층", "15층" 등
+    floor_pattern = r'(\d{1,2})층\s*[\d,.]+'
+    floor_matches = re.findall(floor_pattern, text)
+
+    if floor_matches:
+        max_floor = max(int(f) for f in floor_matches)
+        if max_floor >= 6:
+            logger.info(f"   └─ 건물유형 (층수 {max_floor}층 ≥ 6층): 아파트")
+            return '아파트'
+
+    # 3. 건물 내역에서 층수 확인 (예: "제4층 제406호")
+    unit_floor_pattern = r'제\s*(\d{1,2})\s*층'
+    unit_floor_matches = re.findall(unit_floor_pattern, text)
+
+    if unit_floor_matches:
+        max_unit_floor = max(int(f) for f in unit_floor_matches)
+        # 호수가 있는 건물이면서 높은 층이면 아파트/오피스텔
+        if max_unit_floor >= 6:
+            logger.info(f"   └─ 건물유형 (호수 층 {max_unit_floor}층 ≥ 6층): 아파트")
+            return '아파트'
+
+    logger.info("   └─ 건물유형: 판별 불가 (N/A)")
+    return None
+
+
+def extract_exclusive_area(text: str) -> Optional[float]:
+    """
+    전용면적 추출 (표제부)
+
+    패턴:
+    - "68.04㎡" 또는 "68.04m²" 또는 "68.04m2"
+    - 표제부의 전유부분 건물 내역에서 추출
+    - "철근콘크리트조 68.04㎡" 형태
+    """
+    # 1. 표제부 전유부분 섹션 찾기
+    # 패턴: "【 표 제 부 】" 또는 "표제부" 섹션 내에서 면적 추출
+    pyoje_patterns = [
+        r'표\s*제\s*부[^\n]*전유부분',
+        r'\[\s*표\s*제\s*부\s*\]',
+        r'【\s*표\s*제\s*부\s*】',
+        r'표제부',
+    ]
+
+    pyoje_start = 0
+    for pattern in pyoje_patterns:
+        match = re.search(pattern, text)
+        if match:
+            pyoje_start = match.start()
+            break
+
+    # 표제부 섹션 (표제부부터 갑구 전까지)
+    kapgu_match = re.search(r'【\s*갑\s*구\s*】|갑\s*구|\[\s*갑\s*구\s*\]', text[pyoje_start:])
+    pyoje_end = pyoje_start + kapgu_match.start() if kapgu_match else len(text)
+    pyoje_section = text[pyoje_start:pyoje_end]
+
+    # 2. 전용면적 패턴 매칭
+    # 우선순위: 전유부분 건물 내역의 면적 > 일반 면적
+    area_patterns = [
+        # 전유부분 건물 내역: "철근콘크리트조 68.04㎡" 또는 "68.04㎡"
+        r'(?:철근콘크리트조|철골조|조적조|목조|철골철근콘크리트조)?\s*([\d.]+)\s*[㎡m²m2]',
+        # 전용면적 명시: "전용면적 84.99㎡"
+        r'전용면적\s*([\d.]+)\s*[㎡m²m2]',
+        # 일반 면적 패턴
+        r'([\d.]+)\s*[㎡m²m2]',
+    ]
+
+    # 표제부 섹션에서 가장 작은 면적 찾기 (전용면적은 보통 가장 작음)
+    all_areas = []
+
+    for pattern in area_patterns:
+        matches = re.findall(pattern, pyoje_section)
+        for match in matches:
+            try:
+                area = float(match)
+                # 유효한 전용면적 범위 (10㎡ ~ 500㎡)
+                if 10 <= area <= 500:
+                    all_areas.append(area)
+            except ValueError:
+                continue
+
+    if all_areas:
+        # 전용면적은 보통 가장 작은 면적 (공용면적 제외)
+        # 하지만 너무 작은 값(10㎡ 미만)은 제외
+        exclusive_area = min(all_areas)
+        logger.info(f"   └─ 전용면적: {exclusive_area}㎡ (후보: {all_areas})")
+        return exclusive_area
+
+    logger.info("   └─ 전용면적: 추출 실패 (N/A)")
+    return None
+
+
 def extract_owner_name(text: str) -> Optional[str]:
     """소유자 이름 추출 (갑구)"""
     # 패턴: "소유자" 다음에 나오는 이름
@@ -647,6 +767,8 @@ def parse_with_regex(raw_text: str) -> RegistryDocument:
     # Step 3: 각 항목 추출 (요약 정보 전달)
     return RegistryDocument(
         property_address=extract_property_address(raw_text),
+        building_type=extract_building_type(raw_text),
+        area_m2=extract_exclusive_area(raw_text),
         owner=OwnerInfo(name=owner_name),
         # 갑구 (요약 기반 말소 판별)
         seizures=extract_seizures(raw_text, summary),
