@@ -112,7 +112,10 @@ export default function DevCaseDetailPage({
   const [aptTradeYear, setAptTradeYear] = useState(new Date().getFullYear());
   const [aptTradeMonth, setAptTradeMonth] = useState(new Date().getMonth() + 1);
   const [aptTradeResults, setAptTradeResults] = useState<any[]>([]);
+  const [aptRentResults, setAptRentResults] = useState<any[]>([]); // 전세/월세 결과
   const [aptTradeLoading, setAptTradeLoading] = useState(false);
+  const [aptRentLoading, setAptRentLoading] = useState(false); // 전세/월세 로딩 상태
+  const [tradeRentTab, setTradeRentTab] = useState<'trade' | 'rent'>('trade'); // 탭 선택 상태
   const [jibunFilter, setJibunFilter] = useState<'none' | 'exact' | 'range100' | 'range200' | 'range300' | 'range400' | 'range500'>('none'); // 지번 필터 모드
   const [dongFilter, setDongFilter] = useState(false); // 동 필터 (파싱된 주소의 동과 일치하는 것만)
   const [areaFilter, setAreaFilter] = useState<'none' | 'exact' | 'range3' | 'range5' | 'range10'>('none'); // 전용면적 필터 모드
@@ -608,7 +611,7 @@ export default function DevCaseDetailPage({
     }
   };
 
-  // 아파트 실거래가 조회
+  // 아파트 실거래가 조회 (매매 + 전세/월세 동시 조회)
   const searchAptTrade = async () => {
     if (!selectedLegalDong) {
       alert('먼저 법정동코드를 선택하세요.');
@@ -624,34 +627,68 @@ export default function DevCaseDetailPage({
     const dealYmd = `${aptTradeYear}${String(aptTradeMonth).padStart(2, '0')}`;
 
     try {
+      // 매매와 전세 동시 조회 시작
       setAptTradeLoading(true);
+      setAptRentLoading(true);
       setAptTradeResults([]);
+      setAptRentResults([]);
 
-      const response = await fetch('/api/realestate/apt-trade', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lawdCd, dealYmd }),
-      });
+      // 병렬 조회: 매매 + 전세/월세
+      const [tradeResponse, rentResponse] = await Promise.all([
+        // 매매 실거래가 조회
+        fetch('/api/realestate/apt-trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd }),
+        }),
+        // 전세/월세 실거래가 조회 (통합 API 사용)
+        fetch('/api/realestate/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lawdCd, dealYmd, buildingType: 'apt', contractType: 'rent' }),
+        }),
+      ]);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      // 매매 결과 처리
+      if (tradeResponse.ok) {
+        const tradeData = await tradeResponse.json();
+        if (tradeData.header?.resultCode === '000' && tradeData.body?.items) {
+          setAptTradeResults(tradeData.body.items);
+        } else {
+          setAptTradeResults([]);
+          if (tradeData.body?.error || tradeData.body?.message) {
+            console.warn('Apt trade:', tradeData.body.message || tradeData.body.error);
+          }
+        }
+      } else {
+        console.error('Apt trade fetch failed:', tradeResponse.status);
+        setAptTradeResults([]);
       }
 
-      const data = await response.json();
-      // FastAPI 형식: { header: { resultCode, resultMsg }, body: { items, totalCount } }
-      if (data.header?.resultCode === '000' && data.body?.items) {
-        setAptTradeResults(data.body.items);
-      } else {
-        setAptTradeResults([]);
-        if (data.body?.error || data.body?.message) {
-          console.warn('Apt trade:', data.body.message || data.body.error);
+      // 전세/월세 결과 처리
+      if (rentResponse.ok) {
+        const rentData = await rentResponse.json();
+        if (rentData.success && rentData.items) {
+          setAptRentResults(rentData.items);
+        } else if (rentData.header?.resultCode === '000' && rentData.body?.items) {
+          // FastAPI 형식 응답인 경우
+          setAptRentResults(rentData.body.items);
+        } else {
+          setAptRentResults([]);
+          if (rentData.error || rentData.message) {
+            console.warn('Apt rent:', rentData.message || rentData.error);
+          }
         }
+      } else {
+        console.error('Apt rent fetch failed:', rentResponse.status);
+        setAptRentResults([]);
       }
     } catch (err: any) {
-      console.error('Apt trade search failed:', err);
+      console.error('Apt trade/rent search failed:', err);
       alert(`조회 실패: ${err.message}`);
     } finally {
       setAptTradeLoading(false);
+      setAptRentLoading(false);
     }
   };
 
@@ -1168,125 +1205,6 @@ export default function DevCaseDetailPage({
             )}
           </div>
 
-          {/* Step 2: 계약 정보 입력 */}
-          <div className="bg-white rounded-lg shadow">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <div>
-                <h2 className="text-lg font-semibold">Step 2: 계약 정보 입력</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  리스크 분석을 위한 계약 유형과 금액을 입력하세요
-                </p>
-              </div>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              {/* 계약 유형 선택 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  계약 유형
-                </label>
-                <div className="flex gap-4">
-                  {(['전세', '월세', '매매'] as const).map((type) => (
-                    <label key={type} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="contractType"
-                        value={type}
-                        checked={contractType === type}
-                        onChange={(e) => setContractType(e.target.value as '전세' | '월세' | '매매')}
-                        className="w-4 h-4 text-blue-600"
-                      />
-                      <span className={`text-sm ${contractType === type ? 'font-semibold text-blue-600' : 'text-gray-700'}`}>
-                        {type}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* 금액 입력 - 계약 유형별 */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* 전세/월세: 보증금 */}
-                {(contractType === '전세' || contractType === '월세') && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      보증금 (만원)
-                    </label>
-                    <input
-                      type="number"
-                      value={depositAmount}
-                      onChange={(e) => setDepositAmount(e.target.value)}
-                      placeholder="예: 30000"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    {depositAmount && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        = {(parseInt(depositAmount, 10) / 10000).toLocaleString()}억원
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* 월세: 월세액 */}
-                {contractType === '월세' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      월세 (만원)
-                    </label>
-                    <input
-                      type="number"
-                      value={monthlyRentAmount}
-                      onChange={(e) => setMonthlyRentAmount(e.target.value)}
-                      placeholder="예: 100"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                )}
-
-                {/* 매매: 매매가 */}
-                {contractType === '매매' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      매매가 (만원)
-                    </label>
-                    <input
-                      type="number"
-                      value={priceAmount}
-                      onChange={(e) => setPriceAmount(e.target.value)}
-                      placeholder="예: 80000"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    {priceAmount && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        = {(parseInt(priceAmount, 10) / 10000).toLocaleString()}억원
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* 입력 요약 */}
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                <p className="text-sm font-medium text-blue-800">
-                  📊 입력된 계약 정보:
-                </p>
-                <p className="text-sm text-blue-700 mt-1">
-                  {contractType === '전세' && depositAmount && (
-                    <>전세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원</>
-                  )}
-                  {contractType === '월세' && depositAmount && (
-                    <>월세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원 / 월세 {monthlyRentAmount ? parseInt(monthlyRentAmount, 10).toLocaleString() : 0}만원</>
-                  )}
-                  {contractType === '매매' && priceAmount && (
-                    <>매매 계약 - 매매가 {parseInt(priceAmount, 10).toLocaleString()}만원</>
-                  )}
-                  {!depositAmount && !priceAmount && (
-                    <span className="text-gray-500">금액을 입력해주세요</span>
-                  )}
-                </p>
-              </div>
-            </div>
-          </div>
-
           {/* Step 3: 공공 데이터 조회 (건물유형별 매매+전세 실거래가) */}
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
@@ -1629,9 +1547,9 @@ export default function DevCaseDetailPage({
               )}
             </div>
 
-            {/* 아파트 실거래가 조회 UI */}
+            {/* 아파트 실거래가 조회 UI (매매 + 전세/월세) */}
             <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-800 mb-3">2. 아파트 실거래가 조회</h3>
+              <h3 className="font-semibold text-gray-800 mb-3">2. 아파트 매매/전세 실거래가 조회</h3>
 
               {/* 파싱된 주소 정보 (지번 포함) */}
               {parsedAddress && (
@@ -1736,7 +1654,39 @@ export default function DevCaseDetailPage({
                 )}
               </div>
 
-              {aptTradeResults.length > 0 && (() => {
+              {/* 매매/전세 탭 선택 */}
+              {(aptTradeResults.length > 0 || aptRentResults.length > 0) && (
+                <div className="flex mb-4 border-b border-gray-200">
+                  <button
+                    onClick={() => setTradeRentTab('trade')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      tradeRentTab === 'trade'
+                        ? 'border-green-500 text-green-600 bg-green-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    📊 매매 실거래가 ({aptTradeResults.length}건)
+                  </button>
+                  <button
+                    onClick={() => setTradeRentTab('rent')}
+                    className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+                      tradeRentTab === 'rent'
+                        ? 'border-blue-500 text-blue-600 bg-blue-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    🏠 전세/월세 실거래가 ({aptRentResults.length}건)
+                  </button>
+                  {aptRentLoading && (
+                    <span className="ml-2 text-sm text-gray-500 flex items-center">
+                      <span className="animate-spin mr-1">⏳</span> 전세/월세 조회 중...
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* 매매 실거래가 테이블 */}
+              {tradeRentTab === 'trade' && aptTradeResults.length > 0 && (() => {
                 // 지번에서 본번 추출 (예: 123-45 → 123)
                 const getBonbun = (jibun: string | undefined): number | null => {
                   if (!jibun) return null;
@@ -1816,10 +1766,10 @@ export default function DevCaseDetailPage({
                       if (itemArea === null) return false;
                       if (areaFilterRange === 0) {
                         // 정확히 일치 (±0.5㎡ 오차 허용)
-                        return Math.abs(itemArea - targetArea) <= 0.5;
+                        return Math.abs(itemArea - targetArea!) <= 0.5;
                       }
                       // 범위 필터 (±range㎡)
-                      return Math.abs(itemArea - targetArea) <= areaFilterRange;
+                      return Math.abs(itemArea - targetArea!) <= areaFilterRange;
                     })
                   : jibunFilteredResults;
 
@@ -1945,6 +1895,211 @@ export default function DevCaseDetailPage({
                   </div>
                 );
               })()}
+
+              {/* 전세/월세 실거래가 테이블 */}
+              {tradeRentTab === 'rent' && aptRentResults.length > 0 && (() => {
+                // 지번에서 본번 추출 (예: 123-45 → 123)
+                const getBonbun = (jibun: string | undefined): number | null => {
+                  if (!jibun) return null;
+                  const bonbun = jibun.toString().trim().split('-')[0];
+                  const num = parseInt(bonbun, 10);
+                  return isNaN(num) ? null : num;
+                };
+
+                // 전용면적 추출
+                const getArea = (item: any): number | null => {
+                  const areaStr = item.exclusiveArea || item.excluUseAr;
+                  if (!areaStr) return null;
+                  const num = parseFloat(areaStr.toString().trim());
+                  return isNaN(num) ? null : num;
+                };
+
+                // 지번 필터 범위 추출
+                const getJibunFilterRange = (): number | null => {
+                  if (jibunFilter === 'none') return null;
+                  if (jibunFilter === 'exact') return 0;
+                  const match = jibunFilter.match(/range(\d+)/);
+                  return match ? parseInt(match[1], 10) : null;
+                };
+
+                // 전용면적 필터 범위 추출
+                const getAreaFilterRange = (): number | null => {
+                  if (areaFilter === 'none') return null;
+                  if (areaFilter === 'exact') return 0;
+                  const match = areaFilter.match(/range(\d+)/);
+                  return match ? parseInt(match[1], 10) : null;
+                };
+
+                const jibunFilterRange = getJibunFilterRange();
+                const areaFilterRange = getAreaFilterRange();
+                const targetBonbun = getBonbun(parsedAddress?.jibun);
+                const targetDong = parsedAddress?.dong?.replace(/[동읍면리가]$/, '');
+                const targetArea = parsedAddress?.area_m2;
+
+                // 동 일치 여부 확인
+                const isDongMatch = (item: any) => {
+                  if (!targetDong) return true;
+                  const itemDong = (item.umdNm || item.dong || '').toString().trim().replace(/[동읍면리가]$/, '');
+                  return itemDong === targetDong;
+                };
+
+                // 전용면적 일치 여부 확인
+                const isAreaMatch = (item: any) => {
+                  if (!targetArea) return false;
+                  const itemArea = getArea(item);
+                  if (itemArea === null) return false;
+                  return Math.abs(itemArea - targetArea) <= 0.5;
+                };
+
+                // 지번 일치 여부 확인
+                const isJibunMatch = (item: any) => {
+                  if (!parsedAddress?.jibun) return false;
+                  const itemBonbun = getBonbun(item.jibun);
+                  return itemBonbun === targetBonbun;
+                };
+
+                // 1단계: 동 필터 적용
+                const dongFilteredResults = dongFilter && targetDong
+                  ? aptRentResults.filter(isDongMatch)
+                  : aptRentResults;
+
+                // 2단계: 지번 필터 적용
+                const jibunFilteredResults = jibunFilterRange !== null && targetBonbun !== null
+                  ? dongFilteredResults.filter(item => {
+                      const itemBonbun = getBonbun(item.jibun);
+                      if (itemBonbun === null) return false;
+                      if (jibunFilterRange === 0) return itemBonbun === targetBonbun;
+                      return Math.abs(itemBonbun - targetBonbun) <= jibunFilterRange;
+                    })
+                  : dongFilteredResults;
+
+                // 3단계: 전용면적 필터 적용
+                const filteredResults = areaFilterRange !== null && targetArea !== null
+                  ? jibunFilteredResults.filter(item => {
+                      const itemArea = getArea(item);
+                      if (itemArea === null) return false;
+                      if (areaFilterRange === 0) return Math.abs(itemArea - targetArea!) <= 0.5;
+                      return Math.abs(itemArea - targetArea!) <= areaFilterRange;
+                    })
+                  : jibunFilteredResults;
+
+                // 필터 설명 텍스트
+                const getFilterDescription = () => {
+                  const parts = [];
+                  if (dongFilter && targetDong) parts.push(`동 "${parsedAddress?.dong}"`);
+                  if (jibunFilter === 'exact') parts.push(`지번 "${parsedAddress?.jibun}" 정확히 일치`);
+                  else if (jibunFilter !== 'none' && jibunFilterRange) parts.push(`지번 ${targetBonbun}±${jibunFilterRange} 범위`);
+                  if (areaFilter === 'exact') parts.push(`면적 ${targetArea?.toFixed(2)}㎡ 정확히 일치`);
+                  else if (areaFilter !== 'none' && areaFilterRange) parts.push(`면적 ${targetArea?.toFixed(2)}±${areaFilterRange}㎡ 범위`);
+                  return parts.join(' + ');
+                };
+
+                const hasAnyFilter = dongFilter || jibunFilter !== 'none' || areaFilter !== 'none';
+
+                return (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-blue-50 px-3 py-2 text-sm text-blue-800 font-medium flex items-center justify-between flex-wrap gap-1">
+                      <span>
+                        {hasAnyFilter
+                          ? `${filteredResults.length}개의 거래 (전체 ${aptRentResults.length}개 중 ${getFilterDescription()})`
+                          : `${aptRentResults.length}개의 전세/월세 거래를 찾았습니다.`}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {!hasAnyFilter && parsedAddress?.dong && (
+                          <span className="text-blue-600 text-xs">
+                            💡 동 일치: {aptRentResults.filter(isDongMatch).length}개
+                          </span>
+                        )}
+                        {!hasAnyFilter && parsedAddress?.jibun && (
+                          <span className="text-orange-600 text-xs">
+                            💡 지번 일치: {aptRentResults.filter(isJibunMatch).length}개
+                          </span>
+                        )}
+                        {!hasAnyFilter && parsedAddress?.area_m2 && (
+                          <span className="text-purple-600 text-xs">
+                            💡 면적 일치: {aptRentResults.filter(isAreaMatch).length}개
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="max-h-96 overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 text-left">거래일</th>
+                            <th className="px-3 py-2 text-left">아파트명</th>
+                            <th className="px-3 py-2 text-right">전용면적</th>
+                            <th className="px-3 py-2 text-center">층</th>
+                            <th className="px-3 py-2 text-right">보증금</th>
+                            <th className="px-3 py-2 text-right">월세</th>
+                            <th className="px-3 py-2 text-left">법정동</th>
+                            <th className="px-3 py-2 text-left">지번</th>
+                            <th className="px-3 py-2 text-center">건축년도</th>
+                            <th className="px-3 py-2 text-center">계약구분</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredResults.map((item, idx) => {
+                            const jibunMatched = isJibunMatch(item);
+                            const dongMatched = isDongMatch(item);
+                            const areaMatched = isAreaMatch(item);
+                            const allMatched = jibunMatched && dongMatched && areaMatched;
+                            const twoMatched = (jibunMatched && dongMatched) || (dongMatched && areaMatched) || (jibunMatched && areaMatched);
+                            const isJeonse = !item.monthlyRent || item.monthlyRent === 0;
+                            return (
+                              <tr
+                                key={idx}
+                                className={`border-t ${allMatched ? 'bg-emerald-100 hover:bg-emerald-200' : twoMatched ? 'bg-green-50 hover:bg-green-100' : areaMatched ? 'bg-purple-50 hover:bg-purple-100' : jibunMatched ? 'bg-orange-50 hover:bg-orange-100' : dongMatched ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
+                              >
+                                <td className="px-3 py-2">
+                                  {item.dealYear && item.dealMonth && item.dealDay
+                                    ? `${item.dealYear}.${String(item.dealMonth).padStart(2, '0')}.${String(item.dealDay).padStart(2, '0')}`
+                                    : 'N/A'}
+                                </td>
+                                <td className="px-3 py-2 font-medium">{item.aptName || item.aptNm || 'N/A'}</td>
+                                <td className={`px-3 py-2 text-right ${areaMatched ? 'font-semibold text-purple-700' : ''}`}>
+                                  {item.exclusiveArea || item.excluUseAr || 'N/A'}㎡
+                                  {areaMatched && <span className="ml-1 text-xs">✓</span>}
+                                </td>
+                                <td className="px-3 py-2 text-center">{item.floor || 'N/A'}</td>
+                                <td className="px-3 py-2 text-right font-semibold text-blue-600">
+                                  {item.deposit ? `${item.deposit.toLocaleString()}만원` : 'N/A'}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  {isJeonse ? (
+                                    <span className="text-green-600 font-medium">전세</span>
+                                  ) : (
+                                    <span className="text-orange-600">{item.monthlyRent?.toLocaleString()}만원</span>
+                                  )}
+                                </td>
+                                <td className={`px-3 py-2 ${dongMatched ? 'font-semibold text-blue-700' : ''}`}>
+                                  {item.dong || item.umdNm || 'N/A'}
+                                  {dongMatched && <span className="ml-1 text-xs">✓</span>}
+                                </td>
+                                <td className={`px-3 py-2 ${jibunMatched ? 'font-semibold text-orange-700' : ''}`}>
+                                  {item.jibun || 'N/A'}
+                                  {jibunMatched && <span className="ml-1 text-xs">✓</span>}
+                                </td>
+                                <td className="px-3 py-2 text-center">{item.buildYear || 'N/A'}</td>
+                                <td className="px-3 py-2 text-center">
+                                  {item.contractType || item.contractTerm || '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 결과 없음 안내 */}
+              {tradeRentTab === 'rent' && aptRentResults.length === 0 && !aptRentLoading && aptTradeResults.length > 0 && (
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center text-gray-600">
+                  전세/월세 실거래가 데이터가 없습니다.
+                </div>
+              )}
             </div>
 
             {/* ===== 자동 분석 결과 섹션 ===== */}
@@ -2166,6 +2321,125 @@ export default function DevCaseDetailPage({
                 )}
               </div>
             )}
+          </div>
+
+          {/* Step 2: 계약 정보 입력 */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-lg font-semibold">Step 2: 계약 정보 입력</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  리스크 분석을 위한 계약 유형과 금액을 입력하세요
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              {/* 계약 유형 선택 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  계약 유형
+                </label>
+                <div className="flex gap-4">
+                  {(['전세', '월세', '매매'] as const).map((type) => (
+                    <label key={type} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="contractType"
+                        value={type}
+                        checked={contractType === type}
+                        onChange={(e) => setContractType(e.target.value as '전세' | '월세' | '매매')}
+                        className="w-4 h-4 text-blue-600"
+                      />
+                      <span className={`text-sm ${contractType === type ? 'font-semibold text-blue-600' : 'text-gray-700'}`}>
+                        {type}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 금액 입력 - 계약 유형별 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 전세/월세: 보증금 */}
+                {(contractType === '전세' || contractType === '월세') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      보증금 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="예: 30000"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {depositAmount && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        = {(parseInt(depositAmount, 10) / 10000).toLocaleString()}억원
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* 월세: 월세액 */}
+                {contractType === '월세' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      월세 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={monthlyRentAmount}
+                      onChange={(e) => setMonthlyRentAmount(e.target.value)}
+                      placeholder="예: 100"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                )}
+
+                {/* 매매: 매매가 */}
+                {contractType === '매매' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      매매가 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={priceAmount}
+                      onChange={(e) => setPriceAmount(e.target.value)}
+                      placeholder="예: 80000"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {priceAmount && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        = {(parseInt(priceAmount, 10) / 10000).toLocaleString()}억원
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 입력 요약 */}
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                <p className="text-sm font-medium text-blue-800">
+                  📊 입력된 계약 정보:
+                </p>
+                <p className="text-sm text-blue-700 mt-1">
+                  {contractType === '전세' && depositAmount && (
+                    <>전세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원</>
+                  )}
+                  {contractType === '월세' && depositAmount && (
+                    <>월세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원 / 월세 {monthlyRentAmount ? parseInt(monthlyRentAmount, 10).toLocaleString() : 0}만원</>
+                  )}
+                  {contractType === '매매' && priceAmount && (
+                    <>매매 계약 - 매매가 {parseInt(priceAmount, 10).toLocaleString()}만원</>
+                  )}
+                  {!depositAmount && !priceAmount && (
+                    <span className="text-gray-500">금액을 입력해주세요</span>
+                  )}
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Step 4: 종합 분석 */}
