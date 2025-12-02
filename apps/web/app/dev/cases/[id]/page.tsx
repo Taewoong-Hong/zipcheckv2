@@ -1415,6 +1415,125 @@ export default function DevCaseDetailPage({
             )}
           </div>
 
+          {/* Step 2: 계약 정보 입력 */}
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-lg font-semibold">Step 2: 계약 정보 입력</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  리스크 분석을 위한 계약 유형과 금액을 입력하세요
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              {/* 계약 유형 선택 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  계약 유형
+                </label>
+                <div className="flex gap-4">
+                  {(['전세', '월세', '매매'] as const).map((type) => (
+                    <label key={type} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="contractType"
+                        value={type}
+                        checked={contractType === type}
+                        onChange={(e) => setContractType(e.target.value as '전세' | '월세' | '매매')}
+                        className="w-4 h-4 text-blue-600"
+                      />
+                      <span className={`text-sm ${contractType === type ? 'font-semibold text-blue-600' : 'text-gray-700'}`}>
+                        {type}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* 금액 입력 - 계약 유형별 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 전세/월세: 보증금 */}
+                {(contractType === '전세' || contractType === '월세') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      보증금 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="예: 30000"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {depositAmount && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        = {(parseInt(depositAmount, 10) / 10000).toLocaleString()}억원
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* 월세: 월세액 */}
+                {contractType === '월세' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      월세 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={monthlyRentAmount}
+                      onChange={(e) => setMonthlyRentAmount(e.target.value)}
+                      placeholder="예: 100"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                )}
+
+                {/* 매매: 매매가 */}
+                {contractType === '매매' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      매매가 (만원)
+                    </label>
+                    <input
+                      type="number"
+                      value={priceAmount}
+                      onChange={(e) => setPriceAmount(e.target.value)}
+                      placeholder="예: 80000"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    {priceAmount && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        = {(parseInt(priceAmount, 10) / 10000).toLocaleString()}억원
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 입력 요약 */}
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                <p className="text-sm font-medium text-blue-800">
+                  📊 입력된 계약 정보:
+                </p>
+                <p className="text-sm text-blue-700 mt-1">
+                  {contractType === '전세' && depositAmount && (
+                    <>전세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원</>
+                  )}
+                  {contractType === '월세' && depositAmount && (
+                    <>월세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원 / 월세 {monthlyRentAmount ? parseInt(monthlyRentAmount, 10).toLocaleString() : 0}만원</>
+                  )}
+                  {contractType === '매매' && priceAmount && (
+                    <>매매 계약 - 매매가 {parseInt(priceAmount, 10).toLocaleString()}만원</>
+                  )}
+                  {!depositAmount && !priceAmount && (
+                    <span className="text-gray-500">금액을 입력해주세요</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Step 3: 공공 데이터 조회 (건물유형별 매매+전세 실거래가) */}
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
@@ -2988,125 +3107,6 @@ export default function DevCaseDetailPage({
                 )}
               </div>
             )}
-          </div>
-
-          {/* Step 2: 계약 정보 입력 */}
-          <div className="bg-white rounded-lg shadow">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <div>
-                <h2 className="text-lg font-semibold">Step 2: 계약 정보 입력</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  리스크 분석을 위한 계약 유형과 금액을 입력하세요
-                </p>
-              </div>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              {/* 계약 유형 선택 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  계약 유형
-                </label>
-                <div className="flex gap-4">
-                  {(['전세', '월세', '매매'] as const).map((type) => (
-                    <label key={type} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="contractType"
-                        value={type}
-                        checked={contractType === type}
-                        onChange={(e) => setContractType(e.target.value as '전세' | '월세' | '매매')}
-                        className="w-4 h-4 text-blue-600"
-                      />
-                      <span className={`text-sm ${contractType === type ? 'font-semibold text-blue-600' : 'text-gray-700'}`}>
-                        {type}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* 금액 입력 - 계약 유형별 */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* 전세/월세: 보증금 */}
-                {(contractType === '전세' || contractType === '월세') && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      보증금 (만원)
-                    </label>
-                    <input
-                      type="number"
-                      value={depositAmount}
-                      onChange={(e) => setDepositAmount(e.target.value)}
-                      placeholder="예: 30000"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    {depositAmount && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        = {(parseInt(depositAmount, 10) / 10000).toLocaleString()}억원
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* 월세: 월세액 */}
-                {contractType === '월세' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      월세 (만원)
-                    </label>
-                    <input
-                      type="number"
-                      value={monthlyRentAmount}
-                      onChange={(e) => setMonthlyRentAmount(e.target.value)}
-                      placeholder="예: 100"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                )}
-
-                {/* 매매: 매매가 */}
-                {contractType === '매매' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      매매가 (만원)
-                    </label>
-                    <input
-                      type="number"
-                      value={priceAmount}
-                      onChange={(e) => setPriceAmount(e.target.value)}
-                      placeholder="예: 80000"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    {priceAmount && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        = {(parseInt(priceAmount, 10) / 10000).toLocaleString()}억원
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* 입력 요약 */}
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                <p className="text-sm font-medium text-blue-800">
-                  📊 입력된 계약 정보:
-                </p>
-                <p className="text-sm text-blue-700 mt-1">
-                  {contractType === '전세' && depositAmount && (
-                    <>전세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원</>
-                  )}
-                  {contractType === '월세' && depositAmount && (
-                    <>월세 계약 - 보증금 {parseInt(depositAmount, 10).toLocaleString()}만원 / 월세 {monthlyRentAmount ? parseInt(monthlyRentAmount, 10).toLocaleString() : 0}만원</>
-                  )}
-                  {contractType === '매매' && priceAmount && (
-                    <>매매 계약 - 매매가 {parseInt(priceAmount, 10).toLocaleString()}만원</>
-                  )}
-                  {!depositAmount && !priceAmount && (
-                    <span className="text-gray-500">금액을 입력해주세요</span>
-                  )}
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* Step 4: 종합 분석 */}
