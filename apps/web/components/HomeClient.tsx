@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/sidebar/Sidebar";
 import ChatInterface from "@/components/chat/ChatInterface";
 import LoginModal from "@/components/auth/LoginModal";
+import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function HomeClient() {
@@ -85,9 +86,11 @@ export default function HomeClient() {
           <div className="flex items-center justify-between h-14 md:h-16 px-4 md:px-6">
             {/* 좌측 로고 */}
             <div className="flex items-center gap-1.5 md:gap-2">
-              <img
+              <Image
                 src="/logo-black.png"
                 alt="집체크"
+                width={120}
+                height={32}
                 className="h-6 md:h-8 w-auto"
               />
               <span className="text-base md:text-lg font-bold text-gray-900">집체크</span>

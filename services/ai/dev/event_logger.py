@@ -132,7 +132,9 @@ class DevEventLogger:
         self._log_to_console(event)
 
         # Optionally persist to database
-        self._persist_event(event)
+        # NOTE: v2_dev_events 테이블이 없어서 비활성화 (2025-12-01)
+        # 테이블 생성 후 다시 활성화 가능
+        # self._persist_event(event)
 
         return event
 

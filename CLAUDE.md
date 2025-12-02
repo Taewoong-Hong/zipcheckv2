@@ -206,6 +206,123 @@ async def analyze(body: AskBody):
 ## 📝 작업 현황
 
 
+### ✅ 2025-12-01: Dev API 프록시 응답 문제 해결 및 Lab 페이지 기능 확장
+
+**핵심 성과**:
+- ✅ Dev API 프록시 응답 실패 문제 **근본 원인 발견 및 해결**
+- ✅ Lab 페이지에 오피스텔/연립다세대/단독다가구 실거래가 조회 기능 추가
+- ✅ 공공데이터 API 클라이언트 6종 추가 구현
+- ✅ 등기부 파서 개선 (복합건물, 압류/가압류 채권자 추출)
+
+---
+
+#### 🔧 Dev API 프록시 응답 문제 해결
+
+**문제 현상**:
+- Next.js 프록시가 FastAPI 백엔드 응답을 받지 못함
+- 백엔드는 정상 동작 (파싱 완료 로그 확인됨)
+- 공공데이터 API 연결 이후 발생
+
+**근본 원인 발견**:
+```
+event_logger.py의 _persist_event()가 존재하지 않는
+v2_dev_events 테이블에 INSERT 시도
+→ collect_public_data에서 20-30회의 로깅 호출마다 동기 DB 예외 발생
+→ 동기 Supabase 호출이 async 컨텍스트에서 응답 지연/실패 유발
+```
+
+**해결 방법** (`services/ai/dev/event_logger.py:134-137`):
+```python
+# Before:
+self._persist_event(event)
+
+# After:
+# NOTE: v2_dev_events 테이블이 없어서 비활성화 (2025-12-01)
+# 테이블 생성 후 다시 활성화 가능
+# self._persist_event(event)
+```
+
+**커밋**: `f5842dd`
+
+---
+
+#### 🏢 Lab 페이지 기능 확장
+
+**추가된 실거래가 조회 기능**:
+
+| 부동산 유형 | 매매 API | 전월세 API |
+|------------|---------|-----------|
+| 오피스텔 | `OffiTradeAPIClient` | `OffiRentAPIClient` |
+| 연립다세대 | `RHTradeAPIClient` | `RHRentAPIClient` |
+| 단독다가구 | `SHTradeAPIClient` | `SHRentAPIClient` |
+
+**수정 파일**:
+- `services/ai/core/public_data_api.py`: 6개 API 클라이언트 추가 (+585 lines)
+- `apps/web/app/api/realestate/trade/route.ts`: 통합 실거래가 API 라우트 (+306 lines)
+- `apps/web/app/dev/cases/[id]/page.tsx`: Lab UI 확장 (+1871 lines)
+
+**커밋**: `516814a`
+
+---
+
+#### ⏱️ Dev API 타임아웃 설정
+
+**문제**: `UND_ERR_HEADERS_TIMEOUT` 에러 (이미지 PDF OCR 시 발생)
+
+**해결**:
+- `parse-registry/route.ts`: AbortController 180초 타임아웃 추가
+- `prepare-summary/route.ts`: 120초 타임아웃 추가
+- `collect-public-data/route.ts`: 60초 타임아웃 추가
+
+**커밋**: `e95d640`, `758124e`
+
+---
+
+#### 🔍 등기부 파서 개선
+
+**개선 사항**:
+1. **복합건물 건물유형 파싱** (`d6aa49a`)
+   - 근린생활시설+주택 혼합 건물 대응
+   - 층수 패턴 기반 유형 판별 개선
+
+2. **압류/가압류 채권자 추출** (`31d724a`, `968407f`)
+   - 채권자명 전체 캡처 (국세청, 시청, 구청 등)
+   - 제외 목록 정리 (잘못된 추출 방지)
+
+3. **전용면적 필터** (`9f05dbf`)
+   - 조건 표시 개선
+   - 소수점 4자리까지 대응
+
+---
+
+#### 📊 오늘 커밋 목록
+
+| 커밋 | 내용 |
+|------|------|
+| `f5842dd` | Dev API 프록시 응답 문제 해결 (v2_dev_events 비활성화) |
+| `758124e` | parse-registry 타임아웃 180초로 증가 |
+| `e95d640` | Dev API 라우트 타임아웃 설정 |
+| `516814a` | Lab 페이지 오피스텔/연립다세대/단독다가구 UI 추가 |
+| `74b1c91` | PDF 기술문서 추가 |
+| `d0d355c` | 아파트 실거래가 전세/월세 동시 조회 |
+| `a9c110f` | Lab 페이지 Step 구조 재편성 |
+| `1bbcc05` | Step 4 종합 분석 UI 구현 |
+| `968407f` | 압류/가압류 채권자명 전체 캡처 개선 |
+| `9f05dbf` | 전용면적 필터 조건 + 파서 패턴 개선 |
+| `31d724a` | 압류/가압류 채권자 추출 로직 개선 |
+| `d6aa49a` | 복합건물 건물유형 파싱 개선 |
+| `a9b5a99` | dealingGbn (중개/직거래) 필드 추출 수정 |
+
+---
+
+#### 🔜 향후 작업
+
+- [ ] `v2_dev_events` 테이블 마이그레이션 생성 (로그 영속성 필요 시)
+- [ ] Lab 페이지 Step 5-6 구현 (LLM 분석, 리포트 생성)
+- [ ] 공공데이터 API 에러 핸들링 강화
+
+---
+
 ### ✅ 2025-11-25: Phase 4 routes/analysis.py 리팩토링 완료
 
 **핵심 성과**:

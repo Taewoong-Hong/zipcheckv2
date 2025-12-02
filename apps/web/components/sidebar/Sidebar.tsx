@@ -43,7 +43,7 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
     if (recentExpanded) {
       loadRecentSessions();
     }
-  }, [recentExpanded]);
+  }, [recentExpanded, loadRecentSessions]);
 
   // ✅ 폴링 제거: 무한 루프 원인 해결
   // 이전에는 2초마다 API를 호출하여 무한 루프 발생
@@ -98,14 +98,14 @@ export default function Sidebar({ isExpanded, setIsExpanded }: SidebarProps) {
         authListener.unsubscribe();
       }
     };
-  }, [recentExpanded, myKnowledgeExpanded]);
+  }, [recentExpanded, myKnowledgeExpanded, loadRecentSessions, loadMyReports]);
 
   // Load my reports when My Knowledge section is expanded
   useEffect(() => {
     if (myKnowledgeExpanded) {
       loadMyReports();
     }
-  }, [myKnowledgeExpanded]);
+  }, [myKnowledgeExpanded, loadMyReports]);
 
   // Load reports from backend (단순화 - 새 /api/sidebar 사용)
   const loadMyReports = useCallback(async () => {
