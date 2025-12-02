@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { use } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -1129,12 +1130,12 @@ export default function DevCaseDetailPage({
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <a
+            <Link
               href="/dev/cases"
               className="text-blue-600 hover:text-blue-800 text-sm font-medium"
             >
               ← 목록으로
-            </a>
+            </Link>
             <button
               onClick={handleDelete}
               disabled={deleting}
