@@ -60,20 +60,45 @@ async def parse_registry_endpoint(request: ParseRegistryRequest):
     - 개인정보 마스킹 적용
     - 실행 시간 측정
     """
-    logger.info(f"[Dev] 등기부 파싱 요청: case_id={request.case_id}")
+    from time import time
+    start_time = time()
+    logger.info(f"[Dev] ========== 등기부 파싱 시작 ==========")
+    logger.info(f"[Dev] case_id={request.case_id}")
 
     try:
         result = await parse_registry(request.case_id)
+        elapsed = time() - start_time
 
         if result.success:
-            logger.info(f"[Dev] 등기부 파싱 성공: {result.execution_time_ms}ms")
+            logger.info(f"[Dev] 등기부 파싱 성공: {result.execution_time_ms}ms (총 소요시간: {elapsed:.2f}s)")
         else:
-            logger.error(f"[Dev] 등기부 파싱 실패: {result.error}")
+            logger.error(f"[Dev] 등기부 파싱 실패: {result.error} (소요시간: {elapsed:.2f}s)")
 
+        # 직렬화 검증 (디버깅용)
+        try:
+            import json
+            # Pydantic v2: model_dump() 사용
+            result_dict = result.model_dump()
+            json_str = json.dumps(result_dict, ensure_ascii=False, default=str)
+            logger.info(f"[Dev] 응답 직렬화 성공: {len(json_str)} bytes")
+        except Exception as ser_err:
+            logger.error(f"[Dev] 응답 직렬화 실패: {ser_err}", exc_info=True)
+            # 문제 필드 찾기
+            for field_name in ['registry_doc_masked', 'registry_data', 'metadata']:
+                try:
+                    field_val = getattr(result, field_name, None)
+                    if field_val:
+                        json.dumps(field_val, ensure_ascii=False, default=str)
+                except Exception as field_err:
+                    logger.error(f"[Dev] 필드 '{field_name}' 직렬화 오류: {field_err}")
+            raise
+
+        logger.info(f"[Dev] ========== 등기부 파싱 완료 (총 {elapsed:.2f}s) ==========")
         return result
 
     except Exception as e:
-        logger.error(f"[Dev] 등기부 파싱 오류: {e}", exc_info=True)
+        elapsed = time() - start_time
+        logger.error(f"[Dev] 등기부 파싱 오류 (소요시간: {elapsed:.2f}s): {e}", exc_info=True)
         raise HTTPException(500, f"등기부 파싱 중 오류 발생: {str(e)}")
 
 

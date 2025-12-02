@@ -508,20 +508,32 @@ def extract_exclusive_area(text: str) -> Optional[float]:
 
     jeonyu_section = text[jeonyu_start:jeonyu_end]
     logger.info(f"   └─ 전유부분 섹션 길이: {len(jeonyu_section)}자")
+    logger.info(f"   └─ 전유부분 섹션 끝 위치: {jeonyu_end}, 전체 텍스트 길이: {len(text)}")
+
+    # 디버깅: 면적 패턴이 전체 텍스트에서 어디에 있는지 확인
+    area_debug_pattern = r'(\d{2,3}\.\d{1,5})\s*[㎡m²m2]'
+    all_areas = re.findall(area_debug_pattern, text)
+    if all_areas:
+        logger.info(f"   └─ [DEBUG] 전체 텍스트에서 발견된 면적 후보: {all_areas}")
 
     # 2. "건물 내역" 컬럼에서 면적 추출
     # 패턴: "철근콘크리트구조 59.9818㎡" 또는 "철근콘크리트조 68.04㎡"
     # 소수점 자릿수: 1~5자리 (68.0, 68.04, 59.9818 등)
+    # 단위 패턴: ㎡ (단일문자), m² (두 문자), m2, 제곱미터, 평 등
+    area_unit_pattern = r'(?:㎡|m²|m2|제곱미터|㎡)'
+
     building_detail_patterns = [
         # 구조 + 면적 (공백/줄바꿈 허용, 소수점 1~5자리)
-        r'(?:철근콘크리트구조|철근콘크리트조|철골철근콘크리트조|철골조|조적조|목조|벽돌조|블록조)[\s\n]*([\d]+\.[\d]{1,5})\s*[㎡m²m2]?',
+        rf'(?:철근콘크리트구조|철근콘크리트조|철골철근콘크리트조|철골조|조적조|목조|벽돌조|블록조)[\s\n]*([\d]+\.[\d]{{1,5}})\s*{area_unit_pattern}?',
         # 구조 + 면적 (㎡ 바로 붙은 경우)
-        r'(?:철근콘크리트구조|철근콘크리트조|철골철근콘크리트조|철골조|조적조|목조|벽돌조|블록조)[\s\n]*([\d]+\.[\d]{1,5})[㎡m²m2]',
-        # 숫자.소수점 + ㎡ (구조 키워드 없이, 소수점 1~5자리)
-        r'([\d]+\.[\d]{1,5})\s*[㎡m²m2]',
+        rf'(?:철근콘크리트구조|철근콘크리트조|철골철근콘크리트조|철골조|조적조|목조|벽돌조|블록조)[\s\n]*([\d]+\.[\d]{{1,5}}){area_unit_pattern}',
+        # 숫자.소수점 + 단위 (구조 키워드 없이, 소수점 1~5자리)
+        rf'([\d]+\.[\d]{{1,5}})\s*{area_unit_pattern}',
+        # 숫자.소수점만 (단위 없이, 소수점 4자리 이상이면 면적일 가능성 높음)
+        r'([\d]+\.[\d]{4,5})',
     ]
 
-    logger.info(f"   └─ 전유부분 섹션 내용 미리보기: {jeonyu_section[:200]}...")
+    logger.info(f"   └─ 전유부분 섹션 내용 미리보기: {jeonyu_section[:300]}...")
 
     for pattern in building_detail_patterns:
         match = re.search(pattern, jeonyu_section)
@@ -537,8 +549,8 @@ def extract_exclusive_area(text: str) -> Optional[float]:
 
     # 3. Fallback: 전유부분 섹션에서 가장 작은 합리적인 면적 찾기
     # 단, 대지권 비율 등의 숫자는 제외
-    area_pattern = r'([\d.]+)\s*[㎡m²m2]'
-    matches = re.findall(area_pattern, jeonyu_section)
+    fallback_area_pattern = rf'([\d.]+)\s*{area_unit_pattern}'
+    matches = re.findall(fallback_area_pattern, jeonyu_section)
 
     valid_areas = []
     for match in matches:
@@ -555,6 +567,25 @@ def extract_exclusive_area(text: str) -> Optional[float]:
         # 전유부분에서 찾은 면적 중 가장 작은 값 (전용면적)
         exclusive_area = min(valid_areas)
         logger.info(f"   └─ 전용면적 (fallback): {exclusive_area}㎡ (후보: {valid_areas})")
+        return exclusive_area
+
+    # 4. 최종 Fallback: 전체 텍스트에서 소수점 4자리 이상인 숫자 찾기 (면적일 가능성 높음)
+    logger.info("   └─ 전유부분 섹션에서 면적 없음, 전체 텍스트에서 재검색...")
+    final_fallback_pattern = r'([\d]+\.[\d]{4,5})'
+    final_matches = re.findall(final_fallback_pattern, text)
+
+    final_valid_areas = []
+    for match in final_matches:
+        try:
+            area = float(match)
+            if 20 <= area <= 200:
+                final_valid_areas.append(area)
+        except ValueError:
+            continue
+
+    if final_valid_areas:
+        exclusive_area = min(final_valid_areas)
+        logger.info(f"   └─ 전용면적 (전체 텍스트 fallback): {exclusive_area}㎡ (후보: {final_valid_areas})")
         return exclusive_area
 
     logger.info("   └─ 전용면적: 추출 실패 (N/A)")

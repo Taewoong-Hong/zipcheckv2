@@ -26,14 +26,22 @@ export async function POST(request: NextRequest) {
       throw new Error('AI_API_URL 환경변수가 설정되어 있지 않습니다');
     }
 
-    // PDF 파싱은 시간이 오래 걸릴 수 있으므로 180초 타임아웃 설정 (이미지 PDF OCR 포함)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      console.log(`[parse-registry] 타임아웃 발생: ${Date.now() - startTime}ms`);
-      controller.abort();
-    }, 180000); // 180초 (3분)
+    // PDF 파싱은 시간이 오래 걸릴 수 있으므로 타임아웃 설정
+    // DEV_DISABLE_TIMEOUT=true 환경변수로 타임아웃 비활성화 가능 (디버깅용)
+    const disableTimeout = process.env.DEV_DISABLE_TIMEOUT === 'true';
+    const timeoutMs = disableTimeout ? 0 : 180000; // 180초 (3분)
 
-    console.log(`[parse-registry] FastAPI 요청 시작: ${AI_API_URL}/dev/parse-registry`);
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    if (!disableTimeout) {
+      timeoutId = setTimeout(() => {
+        console.log(`[parse-registry] 타임아웃 발생: ${Date.now() - startTime}ms`);
+        controller.abort();
+      }, timeoutMs);
+    }
+
+    console.log(`[parse-registry] FastAPI 요청 시작: ${AI_API_URL}/dev/parse-registry (타임아웃: ${disableTimeout ? '비활성화' : `${timeoutMs}ms`})`);
     const fetchStartTime = Date.now();
 
     const response = await fetch(`${AI_API_URL}/dev/parse-registry`, {
@@ -42,10 +50,10 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ case_id }),
-      signal: controller.signal,
+      signal: disableTimeout ? undefined : controller.signal,
     });
 
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
 
     const fetchTime = Date.now() - fetchStartTime;
     console.log(`[parse-registry] 응답 헤더 수신: status=${response.status}, time=${fetchTime}ms`);

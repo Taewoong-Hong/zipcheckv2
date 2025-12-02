@@ -174,7 +174,7 @@ async def parse_registry(case_id: str) -> ParsedRegistryResult:
             return ParsedRegistryResult(
                 success=True,
                 registry_doc_masked=registry_doc_masked,
-                registry_data=registry_data.dict(),
+                registry_data=registry_data.model_dump(),
                 execution_time_ms=execution_time,
                 metadata={
                     "address": registry_doc.property_address,
@@ -263,7 +263,7 @@ async def collect_public_data(
                     converter = AddressConverter()
                     converter.client = client  # 기존 httpx client 재사용
                     addr_result = await converter.convert(property_address)
-                    address_convert_result = addr_result.dict()
+                    address_convert_result = addr_result.model_dump()
 
                     api_time = int((datetime.now() - api_start).total_seconds() * 1000)
                     dev_logger.log_api_response(case_id, "collect_public_data", "address_converter",
@@ -868,7 +868,7 @@ async def prepare_summary(
             return SummaryResult(
                 success=True,
                 summary=final_answer,
-                risk_score=context.risk_result.risk_score.dict() if context.risk_result else None,
+                risk_score=context.risk_result.risk_score.model_dump() if context.risk_result else None,
                 execution_time_ms=execution_time,
                 metadata={
                     "use_llm": use_llm,
