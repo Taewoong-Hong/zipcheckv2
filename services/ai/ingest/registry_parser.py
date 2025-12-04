@@ -721,7 +721,128 @@ def extract_owner_name(text: str) -> Optional[str]:
 
 def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[MortgageInfo]:
     """
-    근저당권 추출 (을구)
+    근저당권 추출 (을구) - 블록 기반 파싱
+
+    새로운 전략:
+    1. 을구 텍스트만 분리 (【을구】~주요등기사항요약)
+    2. "순위번호만 있는 줄" 기준으로 블록 분할
+    3. 각 블록에서 채권최고액/채권자/채무자/말소여부 추출
+    4. 순위번호 줄을 찾지 못하면 기존 keyword 방식으로 fallback
+
+    장점:
+    - 한 등기 안에서 "채권최고액" 키워드가 여러 번 등장해도 중복 추출 안 됨
+    - 요약/갑구/을구 혼합 텍스트에서 엉뚱한 데이터 추출 방지
+    - 순위번호 추출 정확도 향상
+    """
+    eulgu = get_eulgu_text(text)
+
+    # 순위번호만 있는 줄 패턴: "1", "10", "8-3" 같은 줄 전체
+    # ^와 $로 줄 전체가 순위번호인 경우만 매칭
+    rank_line_pattern = re.compile(r'(?m)^\s*(\d{1,2})(?:-(\d+))?\s*$')
+    matches = list(rank_line_pattern.finditer(eulgu))
+
+    if not matches:
+        logger.warning("⚠️ 을구에서 순위번호 줄을 찾지 못함, 레거시 방식으로 fallback")
+        return extract_mortgages_legacy(text, summary)
+
+    logger.info(f"블록 기반 근저당 추출: {len(matches)}개 순위번호 줄 발견")
+
+    active_ranks = set(summary.active_mortgage_ranks) if summary and summary.has_summary else set()
+    active_amounts = list(summary.active_mortgage_amounts) if summary and summary.has_summary else []
+
+    mortgages: List[MortgageInfo] = []
+
+    for i, m in enumerate(matches):
+        main_rank = m.group(1)
+        sub = m.group(2)
+
+        # 블록 범위: 현재 순위번호 줄 끝 ~ 다음 순위번호 줄 시작
+        block_start = m.end()
+        block_end = matches[i + 1].start() if i + 1 < len(matches) else len(eulgu)
+        block = eulgu[block_start:block_end]
+
+        # 근저당권 관련 키워드가 있는지 확인 (질권, 전세권 등 제외)
+        if '근저당권' not in block and '채권최고액' not in block:
+            # 근저당권 블록이 아님 (질권, 전세권 등)
+            continue
+
+        # 1) 채권최고액 추출
+        amount = None
+        amount_match = re.search(r'채권최고액\s*금?\s*([\d,]+)\s*원', block)
+        if amount_match:
+            try:
+                amount_won = int(amount_match.group(1).replace(",", ""))
+                amount = amount_won // 10_000
+            except ValueError:
+                pass
+
+        # 금액이 없으면 근저당권 블록이 아님
+        if amount is None:
+            continue
+
+        # 2) 채권자/근저당권자 추출
+        creditor = None
+        creditor_match = re.search(r'(?:근저당권자|채권자)\s*[:：]?\s*([^\n]+)', block)
+        if creditor_match:
+            creditor = creditor_match.group(1).strip()
+
+        # 3) 채무자 추출
+        debtor = None
+        debtor_match = re.search(r'채무자\s*[:：]?\s*([가-힣]+)', block)
+        if debtor_match:
+            debtor = debtor_match.group(1).strip()
+
+        # full rank 생성 (예: "1", "8-3")
+        full_rank = f"{main_rank}-{sub}" if sub else main_rank
+
+        # 4) 말소 여부 판별
+        if summary and summary.has_summary:
+            is_deleted = True  # 기본값: 말소
+
+            if active_ranks:
+                # 순위번호 매칭: 요약에 있으면 유효
+                if full_rank in active_ranks:
+                    is_deleted = False
+                    logger.info(f"   └─ 순위 {full_rank} 근저당 ({amount:,}만원): 유효 (순위번호 매칭)")
+                else:
+                    logger.info(f"   └─ 순위 {full_rank} 근저당 ({amount:,}만원): 말소 (요약에 순위 없음)")
+            else:
+                # 금액 기반 fallback
+                for idx, a in enumerate(active_amounts):
+                    if abs(a - amount) <= 1:
+                        is_deleted = False
+                        active_amounts.pop(idx)
+                        logger.info(f"   └─ 순위 {full_rank} 근저당 ({amount:,}만원): 유효 (금액 매칭)")
+                        break
+        else:
+            # 요약 없으면 키워드 기반 판별
+            deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
+            is_deleted = any(k in block for k in deletion_keywords)
+
+        mortgages.append(MortgageInfo(
+            creditor=creditor,
+            amount=amount,
+            debtor=debtor,
+            registration_date=None,
+            registration_number=None,
+            rank_number=full_rank,
+            sub_rank_number=int(sub) if sub else None,
+            is_deleted=is_deleted,
+        ))
+
+    # 중복 제거: 같은 주순위번호 내에서 가장 높은 부번호만 유지
+    mortgages = deduplicate_mortgages_by_rank(mortgages)
+
+    logger.info(f"근저당 추출 완료 (블록 기반): 총 {len(mortgages)}건 (유효: {sum(1 for m in mortgages if not m.is_deleted)}건, 말소: {sum(1 for m in mortgages if m.is_deleted)}건)")
+
+    return mortgages
+
+
+def extract_mortgages_legacy(text: str, summary: Optional[SummaryData] = None) -> List[MortgageInfo]:
+    """
+    근저당권 추출 (을구) - 레거시 키워드 기반 방식
+
+    [DEPRECATED] 블록 기반 파싱 실패 시 fallback으로만 사용
 
     말소 판별 로직 (우선순위):
     1. 요약 섹션이 있으면: 요약에 있는 금액만 유효, 나머지 말소
@@ -752,9 +873,9 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
     use_rank_matching = bool(active_ranks)
 
     if use_rank_matching:
-        logger.info(f"말소 판별: 순위번호 매칭 사용 (유효 순위: {sorted(active_ranks)})")
+        logger.info(f"말소 판별 (레거시): 순위번호 매칭 사용 (유효 순위: {sorted(active_ranks)})")
     else:
-        logger.info(f"말소 판별: 금액 기반 매칭 사용 (유효 금액: {active_amounts})")
+        logger.info(f"말소 판별 (레거시): 금액 기반 매칭 사용 (유효 금액: {active_amounts})")
 
     # 모든 근저당권 찾기
     for amount_match in re.finditer(amount_pattern, text):
@@ -915,6 +1036,36 @@ def deduplicate_mortgages_by_rank(mortgages: List[MortgageInfo]) -> List[Mortgag
     ))
 
     return result
+
+
+# ===========================
+# 을구 블록 기반 파싱 헬퍼 함수
+# ===========================
+def get_eulgu_text(text: str) -> str:
+    """
+    을구 섹션 텍스트만 추출
+
+    【을구】 ~ (문서 끝 또는 '주요등기사항요약') 사이의 텍스트를 반환합니다.
+    패턴을 찾지 못하면 전체 텍스트를 반환합니다.
+    """
+    start_patterns = [r'【\s*을\s*구\s*】', r'\[\s*을\s*구\s*\]', r'을\s*구']
+    end_patterns = [r'주요\s*등기사항\s*요약', r'\[참고용\]', r'주요등기사항요약']
+
+    start = 0
+    for p in start_patterns:
+        m = re.search(p, text)
+        if m:
+            start = m.start()
+            break
+
+    end = len(text)
+    for p in end_patterns:
+        m = re.search(p, text[start:])
+        if m:
+            end = start + m.start()
+            break
+
+    return text[start:end]
 
 
 # ===========================
