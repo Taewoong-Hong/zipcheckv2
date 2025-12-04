@@ -913,18 +913,26 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
     1. 요약 섹션이 있으면: 순위번호 매칭 (근저당과 동일 방식)
     2. 순위번호 없으면: 키워드 유형 매칭 (fallback)
     3. 요약 섹션이 없으면: 텍스트 키워드 기반 판별 (fallback)
+
+    중복 방지:
+    - 이미 처리한 텍스트 위치 추적 (같은 압류가 여러 키워드에 매칭되는 것 방지)
+    - 순위번호 기반 중복 제거 + 채권자+유형 기반 중복 제거
     """
     seizures = []
 
+    # 이미 처리한 위치 추적 (중복 방지)
+    processed_positions: set = set()
+
     # 패턴: "압류", "가압류", "가처분", "임의경매" 등
+    # 순서 중요: 더 구체적인 키워드를 먼저 처리 (임의경매개시결정 → 압류)
     seizure_keywords = {
-        '가압류': '가압류',
-        '가처분': '가처분',
         '임의경매개시결정': '압류',
-        '임의경매': '압류',
         '강제경매개시결정': '압류',
+        '임의경매': '압류',
         '강제경매': '압류',
         '경매개시': '압류',
+        '가압류': '가압류',
+        '가처분': '가처분',
         '압류': '압류',
     }
 
@@ -973,6 +981,13 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
         # 키워드 위치 찾기 - 모든 발생 위치를 찾음
         for keyword_match in re.finditer(re.escape(keyword), text):
             keyword_pos = keyword_match.start()
+
+            # 위치 기반 중복 방지: 이미 처리한 위치 근처(±100자)면 스킵
+            # 같은 압류 항목이 여러 키워드("압류", "임의경매" 등)에 매칭되는 것을 방지
+            position_key = keyword_pos // 100  # 100자 단위로 그룹화
+            if position_key in processed_positions:
+                continue
+            processed_positions.add(position_key)
 
             # 컨텍스트 추출 (앞뒤 400자로 확대)
             start = max(0, keyword_pos - 300)
@@ -1109,7 +1124,7 @@ def deduplicate_seizures_by_rank(seizures: List[SeizureInfo]) -> List[SeizureInf
 
     규칙:
     - rank_number가 같고 sub_rank_number가 다른 경우, 가장 높은 것만 유지
-    - rank_number가 None인 항목은 그대로 유지
+    - rank_number가 None인 항목은 채권자+유형 조합으로 중복 제거
     - 말소된 항목(is_deleted=True)도 포함하여 처리
     """
     if not seizures:
@@ -1119,8 +1134,22 @@ def deduplicate_seizures_by_rank(seizures: List[SeizureInfo]) -> List[SeizureInf
     no_rank_seizures = [s for s in seizures if s.rank_number is None]
     ranked_seizures = [s for s in seizures if s.rank_number is not None]
 
+    # 순위번호 없는 항목도 채권자+유형 조합으로 중복 제거
+    if no_rank_seizures:
+        seen_keys: set = set()
+        deduplicated_no_rank = []
+        for s in no_rank_seizures:
+            # 채권자 + 유형 조합으로 키 생성 (채권자가 없으면 유형만 사용)
+            key = (s.creditor or "", s.type)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduplicated_no_rank.append(s)
+            else:
+                logger.info(f"   └─ 압류 중복 제거 (순위번호 없음): 채권자={s.creditor}, 유형={s.type}")
+        no_rank_seizures = deduplicated_no_rank
+
     if not ranked_seizures:
-        return seizures
+        return no_rank_seizures
 
     # 같은 rank_number별로 그룹화
     from collections import defaultdict
