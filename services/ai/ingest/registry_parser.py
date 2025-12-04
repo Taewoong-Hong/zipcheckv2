@@ -150,10 +150,12 @@ class MortgageInfo(BaseModel):
 class SeizureInfo(BaseModel):
     """압류/가압류/가처분 정보 (갑구)"""
     type: str  # "압류" | "가압류" | "가처분"
-    creditor: Optional[str] = None  # 채권자
+    creditor: Optional[str] = None  # 채권자 (권리자)
     amount: Optional[int] = None  # 채권액 (만원)
     registration_date: Optional[str] = None  # 접수일
     description: Optional[str] = None  # 추가 설명
+    rank_number: Optional[str] = None  # 순위번호 (예: "1", "2")
+    sub_rank_number: Optional[int] = None  # 부번호 (예: 1-6의 6)
     is_deleted: bool = False  # 말소 여부 (True면 말소됨)
 
 
@@ -302,6 +304,7 @@ class SummaryData:
         self.active_mortgage_amounts: List[int] = []  # 유효 근저당 금액 목록 (만원) - 순위번호 추출 실패 시 fallback용
         self.active_mortgage_ranks: List[str] = []  # 유효 근저당 순위번호 목록 (말소 판별의 핵심)
         self.active_seizure_types: List[str] = []  # 유효 압류 유형 목록 (임의경매개시결정, 압류 등)
+        self.active_seizure_ranks: List[str] = []  # 유효 압류/가압류/가처분 순위번호 목록 (말소 판별의 핵심)
         self.has_summary: bool = False  # 요약 섹션 존재 여부
 
 
@@ -375,6 +378,30 @@ def parse_summary_section(text: str) -> SummaryData:
                 summary.active_seizure_types.append(keyword)
                 logger.info(f"   └─ 유효 압류/경매 (요약): {keyword}")
 
+        # 순위번호 추출 (근저당과 동일한 방식)
+        # 패턴: 줄 시작 또는 공백 뒤에 오는 숫자 (1~2자리)
+        # 뒤에 "-숫자" (부번호) 또는 공백/압류/가압류 등이 올 수 있음
+        seizure_rank_pattern = r'(?:^|\s)(\d{1,2})(?:-\d+)?(?:\s|압류|가압류|가처분|경매|$)'
+
+        found_seizure_ranks = set()
+        for match in re.finditer(seizure_rank_pattern, section2_text, re.MULTILINE):
+            rank = match.group(1)
+            # 순위번호는 보통 1~20 범위
+            if 1 <= int(rank) <= 30:
+                found_seizure_ranks.add(rank)
+
+        # Fallback: 테이블 형식에서 첫 컬럼이 순위번호인 경우
+        if not found_seizure_ranks:
+            row_pattern = r'^(\d{1,2})\s+'
+            for match in re.finditer(row_pattern, section2_text, re.MULTILINE):
+                rank = match.group(1)
+                if 1 <= int(rank) <= 30:
+                    found_seizure_ranks.add(rank)
+
+        # 순위번호 저장
+        summary.active_seizure_ranks = list(found_seizure_ranks)
+        logger.info(f"   └─ 유효 압류/가압류 순위번호 (요약): {sorted(found_seizure_ranks)}")
+
     # 3. 근저당권 추출 (섹션 3)
     # 요약 테이블에 나오는 근저당권은 모두 유효 (말소된 것은 요약에 없음)
     # 단순히 순위번호만 추출하면 됨
@@ -422,7 +449,7 @@ def parse_summary_section(text: str) -> SummaryData:
         logger.info(f"   └─ 유효 근저당 순위번호 (요약): {sorted(found_ranks)}")
         logger.info(f"   └─ 유효 근저당 금액 (요약): {len(summary.active_mortgage_amounts)}건")
 
-    logger.info(f"📋 요약 파싱 완료: 소유자={summary.owner_name}, 유효순위={len(summary.active_mortgage_ranks)}개, 유효압류={len(summary.active_seizure_types)}건")
+    logger.info(f"📋 요약 파싱 완료: 소유자={summary.owner_name}, 근저당순위={len(summary.active_mortgage_ranks)}개, 압류순위={len(summary.active_seizure_ranks)}개, 압류유형={len(summary.active_seizure_types)}건")
 
     return summary
 
@@ -883,8 +910,9 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
     압류/가압류/가처분 추출 (갑구)
 
     말소 판별 로직 (우선순위):
-    1. 요약 섹션이 있으면: 요약에 있는 유형만 유효, 나머지 말소
-    2. 요약 섹션이 없으면: 텍스트 키워드 기반 판별 (fallback)
+    1. 요약 섹션이 있으면: 순위번호 매칭 (근저당과 동일 방식)
+    2. 순위번호 없으면: 키워드 유형 매칭 (fallback)
+    3. 요약 섹션이 없으면: 텍스트 키워드 기반 판별 (fallback)
     """
     seizures = []
 
@@ -900,8 +928,17 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
         '압류': '압류',
     }
 
-    # 요약에서 유효 압류 유형 (복사본 사용)
+    # 요약에서 유효 순위번호 및 유형 (복사본 사용)
+    active_ranks = set(summary.active_seizure_ranks) if summary and summary.has_summary else set()
     active_seizure_types = list(summary.active_seizure_types) if summary and summary.has_summary else []
+
+    # 순위번호 기반 매칭 사용 여부
+    use_rank_matching = bool(active_ranks)
+
+    if use_rank_matching:
+        logger.info(f"압류 말소 판별: 순위번호 매칭 사용 (유효 순위: {sorted(active_ranks)})")
+    else:
+        logger.info(f"압류 말소 판별: 키워드 기반 매칭 사용 (유효 유형: {active_seizure_types})")
 
     # 말소 여부 판별 키워드 (fallback용)
     deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
@@ -926,32 +963,56 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
         for keyword_match in re.finditer(re.escape(keyword), text):
             keyword_pos = keyword_match.start()
 
-            # 컨텍스트 추출 (앞뒤 300자로 확대)
-            start = max(0, keyword_pos - 150)
+            # 컨텍스트 추출 (앞뒤 400자로 확대)
+            start = max(0, keyword_pos - 300)
             end = min(len(text), keyword_pos + 400)
             context = text[start:end]
+            front_context = text[start:keyword_pos]
 
-            # 근처에서 채권자 찾기 (여러 패턴 시도, 우선순위 순서)
-            # ⚠️ 주의: 중첩 수량자(nested quantifiers)는 catastrophic backtracking 유발
-            # 수정: (?:\s*[...]+ )* → [가-힣a-zA-Z0-9\s]{1,30} (길이 제한 + 단순화)
+            # 순위번호 추출 (근저당과 동일한 방식)
+            rank_number = None
+            sub_rank_number = None
+
+            rank_patterns = [
+                r'순위번호\s*[:：]?\s*(\d+)(?:-(\d+))?',  # "순위번호: 1-6"
+                r'(?:^|\s)(\d+)(?:-(\d+))?\s+(?:압류|가압류|가처분|경매)',  # "1-6 압류"
+                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s',  # 줄 시작 "1-6 "
+            ]
+
+            for rp in rank_patterns:
+                rank_matches = list(re.finditer(rp, front_context, re.MULTILINE))
+                if rank_matches:
+                    # 가장 마지막 (가까운) 매치 사용
+                    last_match = rank_matches[-1]
+                    if last_match.group(1):
+                        rank_number = last_match.group(1)
+                        if last_match.lastindex and last_match.lastindex >= 2 and last_match.group(2):
+                            sub_rank_number = int(last_match.group(2))
+                        break
+
+            # 채권자/권리자 추출 (강화된 패턴)
             creditor = None
             creditor_patterns = [
-                # 1. "주식회사 XXX" 또는 "XXX 주식회사" 형태 (전체 회사명 캡처)
-                # 수정: 최대 30자로 제한, 중첩 수량자 제거
+                # 1. 명시적 "채권자:", "권리자:", "신청인:" 패턴 (최우선)
+                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]?\s*([가-힣a-zA-Z0-9\s\(\)㈜]{2,40})(?:\s{2,}|\n|$)',
+                # 2. 국세청/세무서 (공공기관)
+                r'([가-힣]{2,15}(?:지방국세청|국세청|세무서))',
+                # 3. 지자체 (시청, 구청 등)
+                r'([가-힣]{2,15}(?:시청|구청|군청|도청|읍사무소|면사무소|동주민센터))',
+                # 4. 공단/공사 (국민건강보험공단, 근로복지공단 등)
+                r'([가-힣]{4,20}(?:공단|공사))',
+                # 5. 금융기관
+                r'([가-힣]{2,20}(?:은행|캐피탈|금융|신협|저축은행|증권|보험|대부))',
+                # 6. "주식회사 XXX" 또는 "XXX 주식회사"
                 r'주식회사\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
                 r'([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})\s*주식회사',
-                # 2. "(주)XXX" 또는 "㈜XXX" 형태
+                # 7. "(주)XXX" 또는 "㈜XXX"
                 r'[\(（]주[\)）]\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
                 r'㈜\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
-                # 3. 명시적 "채권자:", "권리자:" 패턴 (전체 이름 캡처, 최대 40자)
-                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]\s*([가-힣a-zA-Z0-9\s\(\)㈜]{2,40})(?:\s{2,}|\n|$)',
-                # 4. 기관명 직접 매칭 (XX국세청, XX세무서 등)
-                r'([가-힣]{2,15}(?:지방국세청|국세청|세무서))',
-                r'([가-힣]{2,15}(?:시청|구청|군청|도청))',
-                # 5. 금융기관 매칭 (더 긴 이름 허용)
-                r'([가-힣]{2,20}(?:은행|캐피탈|금융|신협|저축은행|증권|보험|공사|공단|대부))',
-                # 6. 지자체 패턴 (XX시, XX구, XX군) - 뒤에 "장" 붙은 경우
+                # 8. 지자체 패턴 (XX시, XX구, XX군) + "장" (시장, 구청장 등)
                 r'([가-힣]{2,10}(?:특별시|광역시|도|시|구|군))\s*(?:장)?(?:\s|$)',
+                # 9. 개인 이름 (2~4글자 한글, 맨 마지막 fallback)
+                r'(?:채권자|권리자|신청인)\s*[:：]?\s*([가-힣]{2,4})(?:\s|$)',
             ]
 
             for creditor_pattern in creditor_patterns:
@@ -960,8 +1021,11 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                     candidate = match.group(1).strip()
                     # 유효한 채권자인지 확인
                     if candidate and len(candidate) >= 2 and candidate not in invalid_creditors:
-                        creditor = candidate
-                        break
+                        # 불필요한 접미사 제거
+                        candidate = re.sub(r'\s*(귀중|앞|님|의)\s*$', '', candidate).strip()
+                        if candidate and len(candidate) >= 2:
+                            creditor = candidate
+                            break
 
             # 금액 찾기 (있을 경우)
             amount = None
@@ -971,16 +1035,32 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                 amount_str = amount_match.group(1).replace(',', '')
                 amount = int(amount_str) // 10000  # 만원 단위
 
-            # 말소 여부 판별
+            # 말소 여부 판별 (순위번호 기반: 근저당과 동일)
             if summary and summary.has_summary:
-                # 요약 기반 판별: 요약에 해당 키워드가 있으면 유효
-                is_deleted = True
-                for i, active_type in enumerate(active_seizure_types):
-                    # 키워드가 요약의 유효 유형과 매칭되면 유효
-                    if keyword in active_type or active_type in keyword:
+                is_deleted = True  # 기본값: 말소 (요약에서 찾지 못하면 말소)
+
+                if use_rank_matching and rank_number:
+                    # 순위번호 매칭: 요약의 유효 순위번호에 있으면 유효
+                    if rank_number in active_ranks:
                         is_deleted = False
-                        active_seizure_types.pop(i)  # 이미 매칭된 유형은 제거
-                        break
+                        logger.info(f"   └─ 순위 {rank_number} {seizure_type}: 유효 (순위번호 매칭)")
+                    else:
+                        logger.info(f"   └─ 순위 {rank_number} {seizure_type}: 말소 (요약에 순위 없음)")
+                elif use_rank_matching and not rank_number:
+                    # 순위번호 추출 실패 → 키워드로 fallback
+                    for i, active_type in enumerate(active_seizure_types):
+                        if keyword in active_type or active_type in keyword:
+                            is_deleted = False
+                            active_seizure_types.pop(i)
+                            logger.info(f"   └─ {seizure_type} ({keyword}): 유효 (키워드 fallback)")
+                            break
+                else:
+                    # Fallback: 키워드 유형 매칭
+                    for i, active_type in enumerate(active_seizure_types):
+                        if keyword in active_type or active_type in keyword:
+                            is_deleted = False
+                            active_seizure_types.pop(i)
+                            break
             else:
                 # Fallback: 텍스트 키워드 기반 판별
                 is_deleted = any(del_kw in context for del_kw in deletion_keywords)
@@ -990,13 +1070,80 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                 creditor=creditor,
                 amount=amount,
                 description=keyword,  # 원본 키워드 저장
+                rank_number=rank_number,
+                sub_rank_number=sub_rank_number,
                 is_deleted=is_deleted
             ))
 
             # 같은 키워드의 첫 번째 발생만 처리 (중복 방지)
             break
 
+    # 중복 제거: 같은 순위번호 내에서 가장 높은 부번호만 유지
+    seizures = deduplicate_seizures_by_rank(seizures)
+
     return seizures
+
+
+def deduplicate_seizures_by_rank(seizures: List[SeizureInfo]) -> List[SeizureInfo]:
+    """
+    같은 순위번호 내에서 가장 높은 부번호(sub_rank_number)만 유지
+
+    예: 1-1, 1-2, 1-6 → 1-6만 유지 (가장 최신 버전)
+
+    규칙:
+    - rank_number가 같고 sub_rank_number가 다른 경우, 가장 높은 것만 유지
+    - rank_number가 None인 항목은 그대로 유지
+    - 말소된 항목(is_deleted=True)도 포함하여 처리
+    """
+    if not seizures:
+        return seizures
+
+    # rank_number가 None인 항목과 있는 항목 분리
+    no_rank_seizures = [s for s in seizures if s.rank_number is None]
+    ranked_seizures = [s for s in seizures if s.rank_number is not None]
+
+    if not ranked_seizures:
+        return seizures
+
+    # 같은 rank_number별로 그룹화
+    from collections import defaultdict
+    rank_groups: Dict[str, List[SeizureInfo]] = defaultdict(list)
+
+    for s in ranked_seizures:
+        if s.rank_number is not None:  # Type guard for Pylance
+            rank_groups[s.rank_number].append(s)
+
+    # 각 그룹에서 가장 높은 sub_rank_number를 가진 항목만 선택
+    deduplicated = []
+    for rank_num, group in rank_groups.items():
+        if len(group) == 1:
+            deduplicated.append(group[0])
+        else:
+            # 여러 개 있으면 sub_rank_number가 가장 높은 것 선택
+            sorted_group = sorted(
+                group,
+                key=lambda x: x.sub_rank_number if x.sub_rank_number is not None else 0,
+                reverse=True
+            )
+            highest = sorted_group[0]
+
+            logger.info(
+                f"   └─ 압류 순위번호 {rank_num} 중복 제거: "
+                f"{len(group)}개 → 1개 유지 (부번호: {highest.sub_rank_number or '없음'})"
+            )
+
+            deduplicated.append(highest)
+
+    # 순위번호 없는 항목 + 중복 제거된 항목 합치기
+    result = no_rank_seizures + deduplicated
+
+    # 원래 순서 유지를 위해 정렬 (rank_number 기준)
+    result.sort(key=lambda x: (
+        int(x.rank_number) if x.rank_number and x.rank_number.isdigit() else 999,
+        x.sub_rank_number or 0
+    ))
+
+    return result
 
 
 def extract_pledges(text: str) -> List[PledgeInfo]:
