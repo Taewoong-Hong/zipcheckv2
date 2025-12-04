@@ -1268,6 +1268,7 @@ export default function DevCaseDetailPage({
                         <table className="w-full text-sm">
                           <thead className="bg-gray-50">
                             <tr>
+                              <th className="px-4 py-2 text-center w-16">순위</th>
                               <th className="px-4 py-2 text-left">상태</th>
                               <th className="px-4 py-2 text-left">채권자</th>
                               <th className="px-4 py-2 text-right">채권최고액</th>
@@ -1277,6 +1278,9 @@ export default function DevCaseDetailPage({
                           <tbody>
                             {step1Result.registry_doc_masked.mortgages.map((m: any, idx: number) => (
                               <tr key={idx} className={`border-t ${m.is_deleted ? 'bg-gray-100 text-gray-400' : ''}`}>
+                                <td className="px-4 py-2 text-center font-mono text-sm">
+                                  {m.rank_number || '-'}
+                                </td>
                                 <td className="px-4 py-2">
                                   {m.is_deleted ? (
                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
@@ -1298,7 +1302,7 @@ export default function DevCaseDetailPage({
                           </tbody>
                           <tfoot className="bg-gray-50 font-semibold">
                             <tr>
-                              <td colSpan={2} className="px-4 py-2">유효 합계</td>
+                              <td colSpan={3} className="px-4 py-2">유효 합계</td>
                               <td className="px-4 py-2 text-right text-red-600">
                                 {step1Result.registry_doc_masked.mortgages
                                   .filter((m: any) => !m.is_deleted)
