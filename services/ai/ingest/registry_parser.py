@@ -271,7 +271,7 @@ def is_text_extractable_pdf(pdf_path: str, min_chars: int = 500) -> tuple[bool, 
         - extracted_text: 추출된 텍스트 (이미지 PDF면 빈 문자열)
     """
     try:
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(pdf_path)  # type: ignore[attr-defined]
         texts = []
         for page in doc:
             texts.append(page.get_text("text"))
@@ -1042,7 +1042,7 @@ async def ocr_with_gemini_vision(pdf_path: str) -> str:
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     # PDF → 이미지 변환 (첫 페이지만 or 전체)
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(pdf_path)  # type: ignore[attr-defined]
     texts = []
 
     for page_num in range(len(doc)):
@@ -1143,13 +1143,14 @@ def structure_registry_with_llm(raw_text: str) -> RegistryDocument:
 
         # JSON 파싱
         import json
-        data = json.loads(response.content)
+        content = response.content if response.content else "{}"
+        data = json.loads(content)
 
         # Pydantic 모델로 변환
         registry = RegistryDocument(**data)
         registry.raw_text = raw_text  # 원본 보존
 
-        logger.info(f"등기부 구조화 완료: {len(registry.owners)}명 소유자, {len(registry.mortgages)}건 근저당")
+        logger.info(f"등기부 구조화 완료: {'1명' if registry.owner else '0명'} 소유자, {len(registry.mortgages)}건 근저당")
         return registry
 
     except Exception as e:
@@ -1491,6 +1492,6 @@ if __name__ == "__main__":
     # 예시: 로컬 PDF 파싱
     # registry = parse_registry_pdf("/path/to/registry.pdf")
     # print(f"주소: {registry.property_address}")
-    # print(f"소유자: {registry.owners}")
+    # print(f"소유자: {registry.owner}")
     # print(f"근저당: {registry.mortgages}")
     pass

@@ -21,7 +21,7 @@ def _parse_with_pymupdf(path: str) -> str:
         추출된 텍스트 (빈 문자열일 수 있음)
     """
     try:
-        doc = fitz.open(path)
+        doc = fitz.open(path)  # type: ignore[attr-defined]
         texts = []
         for page in doc:
             texts.append(page.get_text("text"))
@@ -86,7 +86,7 @@ def parse_pdf_with_metadata(path: str) -> List[Dict[str, Any]]:
 
     try:
         logger.info(f"PDF 메타데이터 파싱 시작: {path}")
-        doc = fitz.open(str(file_path))
+        doc = fitz.open(str(file_path))  # type: ignore[attr-defined]
 
         pages_data = []
         for page_num in range(len(doc)):
@@ -144,7 +144,7 @@ def pdf_to_images(path: str, output_dir: str | None = None, dpi: int = 200) -> L
     logger.info(f"PDF → 이미지 변환 시작: {path}, DPI={dpi}")
 
     try:
-        doc = fitz.open(str(file_path))
+        doc = fitz.open(str(file_path))  # type: ignore[attr-defined]
         image_paths = []
 
         for page_num in range(len(doc)):
@@ -254,7 +254,7 @@ def validate_pdf(path: str, max_size_mb: int = 50) -> bool:
 
     # PDF 열기 테스트
     try:
-        doc = fitz.open(str(file_path))
+        doc = fitz.open(str(file_path))  # type: ignore[attr-defined]
         page_count = len(doc)
         doc.close()
 
