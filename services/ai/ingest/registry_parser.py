@@ -23,53 +23,48 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 logger = logging.getLogger(__name__)
 
-
-# ===========================
-# 타임아웃 데코레이터 (regex 무한 루프 방지)
-# ===========================
 import signal
-import functools
+import sys
+from functools import wraps
 
-class RegexTimeoutError(Exception):
-    """정규식 처리 타임아웃 예외"""
-    pass
-
-
-def timeout_handler(signum, frame):
-    """시그널 핸들러 - 타임아웃 발생 시 호출"""
-    raise RegexTimeoutError("정규식 처리 타임아웃 (30초 초과)")
-
-
-def with_timeout(seconds: int = 30):
+def timeout(seconds: int = 3, error_message: str = "Timeout"):
     """
-    함수에 타임아웃을 적용하는 데코레이터
-
-    사용법:
-        @with_timeout(30)
-        def slow_function():
-            ...
-
-    주의: Unix/Linux에서만 동작 (signal.SIGALRM 사용)
+    함수 실행 시간을 제한하는 타임아웃 데코레이터.
+    Linux 환경(GCR/Cloud Run)에서만 signal.alarm 사용.
+    Windows(local)에서는 alarm을 스킵하여 Pylance 경고 제거.
     """
+
     def decorator(func):
-        @functools.wraps(func)
+        @wraps(func)
         def wrapper(*args, **kwargs):
-            # Windows에서는 signal.SIGALRM이 없으므로 타임아웃 스킵
-            if not hasattr(signal, 'SIGALRM'):
+
+            # Windows 환경에서는 alarm 자체가 없으므로 스킵
+            if sys.platform == "win32":
+                # Pylance 경고 제거용
+                # type: ignore[attr-defined]
                 return func(*args, **kwargs)
 
-            # 기존 핸들러 저장
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(seconds)  # 타임아웃 설정
+            # Linux 환경에서만 타임아웃 활성화
+            sigalrm = signal.SIGALRM  # type: ignore[attr-defined]
+
+            def timeout_handler(signum, frame):
+                raise TimeoutError(error_message)
+
+            # 기존 핸들러 저장 후 새 핸들러 설정
+            old_handler = signal.signal(sigalrm, timeout_handler)  # type: ignore[attr-defined]
+            signal.alarm(seconds)  # type: ignore[attr-defined]
 
             try:
                 result = func(*args, **kwargs)
             finally:
-                signal.alarm(0)  # 타임아웃 해제
-                signal.signal(signal.SIGALRM, old_handler)  # 핸들러 복원
+                # 항상 알람 해제 + 핸들러 복구
+                signal.alarm(0)  # type: ignore[attr-defined]
+                signal.signal(sigalrm, old_handler)  # type: ignore[attr-defined]
 
             return result
+
         return wrapper
+
     return decorator
 
 
@@ -946,7 +941,6 @@ def extract_lease_rights(text: str) -> List[LeaseRightInfo]:
     return lease_rights
 
 
-@with_timeout(30)  # 30초 타임아웃 - catastrophic backtracking 방지
 def parse_with_regex(raw_text: str) -> RegistryDocument:
     """
     정규식 기반 등기부 파싱 (LLM 없음)
@@ -1077,91 +1071,6 @@ async def ocr_with_gemini_vision(pdf_path: str) -> str:
 
 
 # ===========================
-# 구버전 LLM 구조화 (사용 금지!)
-# ===========================
-def structure_registry_with_llm(raw_text: str) -> RegistryDocument:
-    """
-    LLM으로 등기부 텍스트를 구조화
-
-    - 프롬프트: 등기부 전문 지식 주입
-    - 출력: JSON 스키마 강제 (Pydantic)
-    """
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.0,
-        model_kwargs={"response_format": {"type": "json_object"}}
-    )
-
-    system_prompt = """너는 등기부등본 분석 전문가이다.
-
-주어진 등기부 텍스트에서 다음 정보를 추출하라:
-
-1. **표제부**: 소재지번, 건물 종류, 전용면적
-2. **갑구 (소유권)**: 소유자 이름, 지분 비율, 등기일
-3. **을구 (권리관계)**:
-   - 근저당권: 채권자(은행), 채권최고액, 채무자, 설정일
-   - 압류/가압류: **type** 필수 ("압류" 또는 "가압류"), 채권자, 채권액, 접수일
-4. **발급일**: 등기부 발급일
-
-**중요**:
-- 금액은 "만원" 단위로 변환 (예: 500,000,000원 → 50000)
-- 날짜는 YYYY-MM-DD 형식
-- 정보가 없으면 null 반환
-- **seizures의 type 필드는 반드시 "압류" 또는 "가압류"로 명시**
-
-**출력 형식** (JSON):
-```json
-{
-  "property_address": "서울특별시 강남구 ...",
-  "property_type": "아파트",
-  "area_m2": 84.5,
-  "owners": [
-    {"name": "홍길동", "share_ratio": "1/1", "registration_date": "2020-01-15"}
-  ],
-  "mortgages": [
-    {"creditor": "국민은행", "amount": 50000, "debtor": "홍길동", "registration_date": "2020-01-20"}
-  ],
-  "seizures": [
-    {"type": "압류", "creditor": "국세청", "amount": 10000, "registration_date": "2020-01-25"}
-  ],
-  "issue_date": "2025-01-28"
-}
-```
-"""
-
-    user_prompt = f"""다음 등기부등본을 분석하라:
-
-{raw_text[:4000]}
-
-위 JSON 형식으로 출력하라."""
-
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=user_prompt),
-    ]
-
-    try:
-        response = llm.invoke(messages)
-
-        # JSON 파싱
-        import json
-        content = response.content if response.content else "{}"
-        data = json.loads(content)
-
-        # Pydantic 모델로 변환
-        registry = RegistryDocument(**data)
-        registry.raw_text = raw_text  # 원본 보존
-
-        logger.info(f"등기부 구조화 완료: {'1명' if registry.owner else '0명'} 소유자, {len(registry.mortgages)}건 근저당")
-        return registry
-
-    except Exception as e:
-        logger.error(f"LLM 구조화 실패: {e}")
-        # 실패 시 빈 문서 반환 (raw_text만 포함)
-        return RegistryDocument(raw_text=raw_text)
-
-
-# ===========================
 # 메인 파싱 함수 (리팩토링 완료)
 # ===========================
 async def parse_registry_pdf(
@@ -1173,20 +1082,10 @@ async def parse_registry_pdf(
     등기부 PDF 파싱 및 구조화
 
     전략:
-    1. 텍스트 PDF → 정규식 파서 (LLM 없음, 비용 0, hallucination 없음)
+    1. 텍스트 PDF → 정규식 파서 (LLM 없음)
     2. 이미지 PDF → Gemini Vision OCR → 정규식 파서
-
-    Args:
-        pdf_path: PDF 파일 경로
-        case_id: 케이스 UUID (선택, 감사 로그용)
-        user_id: 사용자 UUID (선택, 감사 로그용)
-
-    Returns:
-        RegistryDocument: 파싱된 등기부 데이터
-
-    Raises:
-        Exception: 파싱 실패 시 (감사 로그 자동 기록)
     """
+
     logger.info(f"📄 [PDF 파싱 시작] 파일: {pdf_path}")
 
     try:
@@ -1196,16 +1095,13 @@ async def parse_registry_pdf(
 
         logger.info(f"✅ [PDF 타입] {'텍스트 PDF' if is_text_pdf else '이미지 PDF'} (추출된 텍스트: {len(raw_text)}자)")
 
-        # Step 2: 이미지 PDF면 Gemini Vision OCR
+        # Step 2: 이미지 PDF → OCR
         if not is_text_pdf:
-            logger.info("🖼️ [Step 2/3] 이미지 PDF 감지 → Gemini Vision OCR 시작")
-
+            logger.info("🖼️ [Step 2/3] 이미지 PDF → Gemini Vision OCR 시작")
             try:
                 raw_text = await ocr_with_gemini_vision(pdf_path)
                 logger.info(f"✅ [OCR 완료] 추출된 텍스트: {len(raw_text)}자")
-
             except Exception as ocr_error:
-                # OCR 실패 감사 로그
                 log_parsing_error(
                     case_id=case_id or "unknown",
                     error_message=f"Gemini Vision OCR 실패: {str(ocr_error)}",
@@ -1215,12 +1111,10 @@ async def parse_registry_pdf(
                 )
                 raise
 
-            # OCR 결과 검증
             if not raw_text or len(raw_text) < 100:
                 error_msg = f"OCR 텍스트가 너무 짧음: {len(raw_text)}자 (최소 100자 필요)"
                 logger.error(f"❌ [OCR 실패] {error_msg}")
 
-                # 감사 로그 기록
                 log_parsing_error(
                     case_id=case_id or "unknown",
                     error_message=error_msg,
@@ -1228,42 +1122,39 @@ async def parse_registry_pdf(
                     user_id=user_id,
                     metadata={"text_length": len(raw_text), "min_required": 100}
                 )
-
                 return RegistryDocument(raw_text=raw_text)
         else:
-            logger.info("📝 [Step 2/3] 텍스트 PDF - OCR 생략")
+            logger.info("📝 [Step 2/3] 텍스트 PDF → OCR 생략")
 
-        # 원본 텍스트 미리보기 (디버깅용)
+        # 디버그용 텍스트 미리보기
         preview = raw_text[:500].replace('\n', ' ')
         logger.info(f"📄 [텍스트 미리보기] {preview}...")
 
-        # Step 3: 정규식 기반 파싱 (LLM 없음!)
+        # Step 3: 정규식 파싱
         logger.info("🔍 [Step 3/3] 정규식 기반 파싱 시작...")
         logger.info("✅ [DEBUG-STEP 3.1] parse_with_regex() 호출 직전")
+
         registry = parse_with_regex(raw_text)
-        logger.info("✅ [DEBUG-STEP 3.2] parse_with_regex() 호출 완료")
 
-        # 파싱 결과 상세 로깅
+        logger.info("✅ [DEBUG-STEP 3.2] parse_with_regex() 완료")
+
+        # 결과 로깅
         logger.info("✅ [DEBUG-STEP 4] 파싱 결과 로깅 시작")
-        logger.info(f"✅ [파싱 완료] 주소={registry.property_address or 'N/A'}")
+        logger.info(f"   └─ 주소: {registry.property_address or 'N/A'}")
         logger.info(f"   └─ 소유자: {registry.owner.name if registry.owner else 'N/A'}")
-        logger.info(f"   └─ 근저당: {len(registry.mortgages)}건 (총 {sum(m.amount or 0 for m in registry.mortgages)}만원)")
+        logger.info(f"   └─ 근저당: {len(registry.mortgages)}건")
         logger.info(f"   └─ 압류/가압류: {len(registry.seizures)}건")
-        logger.info(f"   └─ 질권: {len(registry.pledges)}건")
-        logger.info(f"   └─ 전세권: {len(registry.lease_rights)}건")
-        logger.info("✅ [DEBUG-STEP 5] 파싱 결과 로깅 완료")
+        logger.info("✅ [DEBUG-STEP 5] 결과 로깅 완료")
 
-        logger.info("✅ [DEBUG-STEP 6] 필드 검증 시작")
-        # 파싱 신뢰도 체크 (핵심 필드 누락 경고)
+        # 필드 검증
         missing_fields = []
         if not registry.property_address:
-            logger.warning("⚠️ [파싱 경고] 주소 추출 실패")
             missing_fields.append("property_address")
+            logger.warning("⚠️ 주소 추출 실패")
         if not registry.owner:
-            logger.warning("⚠️ [파싱 경고] 소유자 정보 추출 실패")
             missing_fields.append("owner")
+            logger.warning("⚠️ 소유자 추출 실패")
 
-        # 핵심 필드 누락 시 경고 로그
         if missing_fields:
             log_parsing_warning(
                 case_id=case_id or "unknown",
@@ -1277,8 +1168,7 @@ async def parse_registry_pdf(
                 }
             )
 
-        logger.info("✅ [DEBUG-STEP 7] 감사 로그 호출 직전")
-        # 성공 감사 로그
+        # 감사 로그
         log_parsing_success(
             case_id=case_id or "unknown",
             message=f"등기부 파싱 완료 (주소: {registry.property_address or 'N/A'})",
@@ -1288,49 +1178,23 @@ async def parse_registry_pdf(
                 "text_length": len(raw_text),
                 "mortgage_count": len(registry.mortgages),
                 "seizure_count": len(registry.seizures),
-                "missing_fields": missing_fields
+                "missing_fields": missing_fields,
             }
         )
 
         logger.info("✅ [DEBUG-STEP 8] return registry 직전")
         return registry
 
-    except RegexTimeoutError as e:
-        # 정규식 타임아웃 (catastrophic backtracking으로 인한 무한 루프)
-        error_msg = f"등기부 파싱 타임아웃: 정규식 처리 시간 초과 (30초)"
-        logger.error(f"❌ [파싱 타임아웃] {error_msg}", exc_info=True)
-
-        # 감사 로그 기록
-        log_parsing_error(
-            case_id=case_id or "unknown",
-            error_message=error_msg,
-            error_type=EventType.REGISTRY_PARSING_FAILED,
-            user_id=user_id,
-            metadata={
-                "pdf_path": pdf_path,
-                "error": str(e),
-                "error_type": "RegexTimeoutError",
-                "text_length": len(raw_text) if 'raw_text' in locals() else None,
-                "suggestion": "문서가 복잡하거나 비정상적인 패턴 포함"
-            }
-        )
-
-        # 빈 문서 반환 (타임아웃 시에도 서비스 유지)
-        return RegistryDocument(raw_text=raw_text if 'raw_text' in locals() else "")
-
     except Exception as e:
         error_msg = f"등기부 파싱 실패: {str(e)}"
         logger.error(f"❌ [파싱 실패] {error_msg}", exc_info=True)
-
-        # 감사 로그 기록
         log_parsing_error(
             case_id=case_id or "unknown",
             error_message=error_msg,
             error_type=EventType.REGISTRY_PARSING_FAILED,
             user_id=user_id,
-            metadata={"pdf_path": pdf_path, "error": str(e), "error_type": type(e).__name__}
+            metadata={"pdf_path": pdf_path, "error": str(e)}
         )
-
         raise
 
 

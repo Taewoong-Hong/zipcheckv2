@@ -4,24 +4,21 @@ import tempfile
 from pathlib import Path
 from typing import List, Dict, Any, cast
 
-import fitz  # PyMuPDF (import as fitz)
+import fitz  # PyMuPDF
 from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 
+# ----------------------------------------
+# 1) PyMuPDF 텍스트 추출
+# ----------------------------------------
 def _parse_with_pymupdf(path: str) -> str:
     """
     PyMuPDF로 빠르게 텍스트를 추출합니다.
-
-    Args:
-        path: PDF 파일 경로
-
-    Returns:
-        추출된 텍스트 (빈 문자열일 수 있음)
     """
     try:
-        doc = fitz.open(path)  # type: ignore
+        doc = fitz.open(path)  # type: ignore[attr-defined]
         texts = []
         for page in doc:
             texts.append(page.get_text("text"))
@@ -35,20 +32,6 @@ def _parse_with_pymupdf(path: str) -> str:
 def parse_pdf_to_text(path: str) -> str:
     """
     PDF 파일을 텍스트로 파싱합니다 (PyMuPDF 사용).
-
-    Args:
-        path: PDF 파일 경로
-
-    Returns:
-        추출된 전체 텍스트
-
-    Raises:
-        FileNotFoundError: 파일이 존재하지 않을 때
-        ValueError: 파싱 실패 시
-
-    Note:
-        - PyMuPDF (fitz): 빠른 텍스트 추출 (1-2초/문서)
-        - 스캔 PDF의 경우 parse_scanned_pdf_with_vision() 사용
     """
     file_path = Path(path)
     if not file_path.exists():
@@ -64,21 +47,12 @@ def parse_pdf_to_text(path: str) -> str:
         raise ValueError(f"PDF에서 텍스트를 추출할 수 없습니다: {path}")
 
 
+# ----------------------------------------
+# 2) PDF + 메타데이터 파싱
+# ----------------------------------------
 def parse_pdf_with_metadata(path: str) -> List[Dict[str, Any]]:
     """
-    PDF를 파싱하고 페이지별 메타데이터와 함께 반환합니다.
-
-    Args:
-        path: PDF 파일 경로
-
-    Returns:
-        페이지별 텍스트와 메타데이터 리스트
-        [{"text": str, "page": int, "metadata": dict}, ...]
-
-    Example:
-        >>> pages = parse_pdf_with_metadata("contract.pdf")
-        >>> for page_data in pages:
-        ...     print(f"페이지 {page_data['page']}: {page_data['text'][:100]}")
+    페이지별 텍스트 + 메타데이터 반환
     """
     file_path = Path(path)
     if not file_path.exists():
@@ -86,16 +60,17 @@ def parse_pdf_with_metadata(path: str) -> List[Dict[str, Any]]:
 
     try:
         logger.info(f"PDF 메타데이터 파싱 시작: {path}")
-        doc = fitz.open(str(file_path))  # type: ignore
 
+        doc = fitz.open(str(file_path))  # type: ignore[attr-defined]
         pages_data = []
+
         for page_num in range(len(doc)):
             page = doc[page_num]
             text = page.get_text()
 
             page_data = {
                 "text": text,
-                "page": page_num + 1,  # 1-indexed
+                "page": page_num + 1,
                 "metadata": {
                     "width": page.rect.width,
                     "height": page.rect.height,
@@ -105,7 +80,6 @@ def parse_pdf_with_metadata(path: str) -> List[Dict[str, Any]]:
             pages_data.append(page_data)
 
         doc.close()
-
         logger.info(f"PDF 메타데이터 파싱 완료: {len(pages_data)} 페이지")
         return pages_data
 
@@ -114,22 +88,12 @@ def parse_pdf_with_metadata(path: str) -> List[Dict[str, Any]]:
         raise ValueError(f"PDF 메타데이터 파싱 중 오류 발생: {e}") from e
 
 
+# ----------------------------------------
+# 3) PDF → 이미지 변환 (Vision API 용)
+# ----------------------------------------
 def pdf_to_images(path: str, output_dir: str | None = None, dpi: int = 200) -> List[str]:
     """
-    PDF 페이지를 이미지로 변환합니다 (Vision API용).
-
-    Args:
-        path: PDF 파일 경로
-        output_dir: 출력 디렉토리 (None이면 임시 디렉토리 사용)
-        dpi: 이미지 해상도 (기본값: 200, OCR용 권장)
-
-    Returns:
-        생성된 이미지 파일 경로 목록 (페이지 순서대로)
-
-    Example:
-        >>> images = pdf_to_images("contract.pdf")
-        >>> for img_path in images:
-        ...     result = extract_contract_with_vision(img_path)
+    PDF 페이지를 이미지로 변환합니다.
     """
     file_path = Path(path)
     if not file_path.exists():
@@ -144,19 +108,16 @@ def pdf_to_images(path: str, output_dir: str | None = None, dpi: int = 200) -> L
     logger.info(f"PDF → 이미지 변환 시작: {path}, DPI={dpi}")
 
     try:
-        doc = fitz.open(str(file_path))  # type: ignore
+        doc = fitz.open(str(file_path))  # type: ignore[attr-defined]
         image_paths = []
 
         for page_num in range(len(doc)):
             page = doc[page_num]
 
-            # PDF 페이지를 이미지로 렌더링
-            # matrix = zoom factor for DPI (200 DPI → zoom = 200/72 = 2.78)
             zoom = dpi / 72
             mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat)
 
-            # PNG로 저장
             image_filename = f"page_{page_num + 1:03d}.png"
             image_path = output_path / image_filename
             pix.save(str(image_path))
@@ -165,7 +126,6 @@ def pdf_to_images(path: str, output_dir: str | None = None, dpi: int = 200) -> L
             logger.debug(f"페이지 {page_num + 1} → {image_path}")
 
         doc.close()
-
         logger.info(f"PDF → 이미지 변환 완료: {len(image_paths)}개 페이지")
         return image_paths
 
@@ -174,46 +134,25 @@ def pdf_to_images(path: str, output_dir: str | None = None, dpi: int = 200) -> L
         raise ValueError(f"PDF를 이미지로 변환 중 오류 발생: {e}") from e
 
 
+# ----------------------------------------
+# 4) Vision OCR 기반 스캔 PDF 파싱
+# ----------------------------------------
 def parse_scanned_pdf_with_vision(path: str) -> Dict[str, Any]:
     """
-    스캔된 PDF를 GPT-4o Vision API로 구조화된 JSON으로 파싱합니다.
-
-    Args:
-        path: PDF 파일 경로
-
-    Returns:
-        구조화된 계약서 데이터 (RealEstateContract 스키마)
-
-    Raises:
-        FileNotFoundError: 파일이 존재하지 않을 때
-        ValueError: 파싱 실패 시
-
-    Note:
-        - PDF의 모든 페이지를 이미지로 변환한 후 Vision API 호출
-        - 여러 페이지의 정보를 자동으로 병합
-        - Structured Outputs로 일관된 JSON 스키마 보장
-
-    Example:
-        >>> result = parse_scanned_pdf_with_vision("scanned_contract.pdf")
-        >>> print(result["property"]["address"])
-        >>> print(result["terms"]["deposit"])
+    스캔 PDF를 Vision AI로 JSON 파싱합니다.
     """
     from ..core.vision import extract_contract_from_pdf_images
 
     logger.info(f"스캔 PDF Vision 파싱 시작: {path}")
 
-    # 1. PDF를 이미지로 변환
     image_paths = pdf_to_images(path, dpi=200)
 
     try:
-        # 2. Vision API로 구조화된 데이터 추출
         result = extract_contract_from_pdf_images(image_paths, combine=True)
         logger.info(f"스캔 PDF Vision 파싱 완료: {path}")
-        # combine=True일 때는 항상 Dict 반환
         return cast(Dict[str, Any], result)
 
     finally:
-        # 3. 임시 이미지 파일 정리
         for img_path in image_paths:
             try:
                 Path(img_path).unlink()
@@ -221,51 +160,36 @@ def parse_scanned_pdf_with_vision(path: str) -> Dict[str, Any]:
                 logger.warning(f"임시 이미지 삭제 실패: {img_path}, {e}")
 
 
+# ----------------------------------------
+# 5) PDF 유효성 검사
+# ----------------------------------------
 def validate_pdf(path: str, max_size_mb: int = 50) -> bool:
     """
-    PDF 파일 유효성을 검증합니다.
-
-    Args:
-        path: PDF 파일 경로
-        max_size_mb: 최대 파일 크기 (MB)
-
-    Returns:
-        유효하면 True, 아니면 False
-
-    Raises:
-        ValueError: 파일이 유효하지 않을 때
+    PDF 파일 유효성 검사.
     """
     file_path = Path(path)
 
-    # 파일 존재 확인
     if not file_path.exists():
         raise ValueError(f"파일이 존재하지 않습니다: {path}")
 
-    # 파일 크기 확인
     file_size_mb = file_path.stat().st_size / (1024 * 1024)
     if file_size_mb > max_size_mb:
         raise ValueError(
-            f"파일 크기가 너무 큽니다: {file_size_mb:.2f}MB "
-            f"(최대: {max_size_mb}MB)"
+            f"파일 크기가 너무 큽니다: {file_size_mb:.2f}MB (최대: {max_size_mb}MB)"
         )
 
-    # MIME 타입 확인 (확장자)
     if file_path.suffix.lower() != ".pdf":
         raise ValueError(f"PDF 파일이 아닙니다: {path}")
 
-    # PDF 열기 테스트
     try:
-        doc = fitz.open(str(file_path))  # type: ignore
+        doc = fitz.open(str(file_path))  # type: ignore[attr-defined]
         page_count = len(doc)
         doc.close()
 
         if page_count == 0:
             raise ValueError("PDF에 페이지가 없습니다")
 
-        logger.info(
-            f"PDF 유효성 검증 성공: {file_size_mb:.2f}MB, "
-            f"{page_count} 페이지"
-        )
+        logger.info(f"PDF 유효성 검증 성공: {file_size_mb:.2f}MB, {page_count} 페이지")
         return True
 
     except Exception as e:
