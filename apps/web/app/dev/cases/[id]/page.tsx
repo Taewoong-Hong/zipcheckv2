@@ -1324,6 +1324,7 @@ export default function DevCaseDetailPage({
                         <table className="w-full text-sm">
                           <thead className="bg-gray-50">
                             <tr>
+                              <th className="px-4 py-2 text-center w-16">순위</th>
                               <th className="px-4 py-2 text-left">상태</th>
                               <th className="px-4 py-2 text-left">유형</th>
                               <th className="px-4 py-2 text-left">채권자</th>
@@ -1333,6 +1334,9 @@ export default function DevCaseDetailPage({
                           <tbody>
                             {step1Result.registry_doc_masked.seizures.map((s: any, idx: number) => (
                               <tr key={idx} className={`border-t ${s.is_deleted ? 'bg-gray-100 text-gray-400' : ''}`}>
+                                <td className="px-4 py-2 text-center font-mono text-sm">
+                                  {s.rank_number || '-'}
+                                </td>
                                 <td className="px-4 py-2">
                                   {s.is_deleted ? (
                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">

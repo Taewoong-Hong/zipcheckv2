@@ -951,7 +951,18 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
         '기입', '촉탁', '신청', '접수', '완료', '처분', '금지', '가등기',
         '채권자', '권리자', '신청인', '의하여', '대하여', '청구',
         '주식회사', '유한회사', '합자회사', '합명회사',  # 회사 형태만 있는 경우 제외
+        # 잘못 추출되는 패턴 추가
+        '및', '기타사항', '기타', '사항', '원', '및 기타사항', '및 기타사항 원',
+        '서울중앙지방법', '서울지방법', '지방법', '법원', '지방법원',
+        '중앙지방법원', '동부지방법원', '서부지방법원', '남부지방법원', '북부지방법원',
+        '지방법원', '고등법원', '대법원', '가정법원',
     }
+
+    # 접수번호 패턴 체크 함수 (제XXXX호 형태)
+    def is_registration_number(text: str) -> bool:
+        """접수번호 패턴인지 확인 (제XXXX호, 제XXXXX호 등)"""
+        import re
+        return bool(re.match(r'^제?\d+호?$', text.strip()))
 
     for keyword, seizure_type in seizure_keywords.items():
         # 키워드가 있는지 확인
@@ -994,24 +1005,27 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
             creditor = None
             creditor_patterns = [
                 # 1. 명시적 "채권자:", "권리자:", "신청인:" 패턴 (최우선)
-                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]?\s*([가-힣a-zA-Z0-9\s\(\)㈜]{2,40})(?:\s{2,}|\n|$)',
-                # 2. 국세청/세무서 (공공기관)
+                # - 다음에 나오는 기관명/회사명만 추출 (제XXXX호 등 제외)
+                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]?\s*([가-힣a-zA-Z0-9\(\)㈜]+(?:\s*주식회사|\s*대부)?)',
+                # 2. 국세청/세무서 (공공기관) - "국" 약어 포함
                 r'([가-힣]{2,15}(?:지방국세청|국세청|세무서))',
+                r'\b(국)\b',  # 국세청 약어 "국"
                 # 3. 지자체 (시청, 구청 등)
                 r'([가-힣]{2,15}(?:시청|구청|군청|도청|읍사무소|면사무소|동주민센터))',
                 # 4. 공단/공사 (국민건강보험공단, 근로복지공단 등)
                 r'([가-힣]{4,20}(?:공단|공사))',
-                # 5. 금융기관
-                r'([가-힣]{2,20}(?:은행|캐피탈|금융|신협|저축은행|증권|보험|대부))',
-                # 6. "주식회사 XXX" 또는 "XXX 주식회사"
-                r'주식회사\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
-                r'([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})\s*주식회사',
-                # 7. "(주)XXX" 또는 "㈜XXX"
-                r'[\(（]주[\)）]\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
-                r'㈜\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
-                # 8. 지자체 패턴 (XX시, XX구, XX군) + "장" (시장, 구청장 등)
+                # 5. 금융기관/대부업체
+                r'([가-힣a-zA-Z0-9]{2,20}(?:은행|캐피탈|금융|신협|저축은행|증권|보험|대부))',
+                # 6. "주식회사 XXX" - 회사명만 추출
+                r'주식회사\s*([가-힣a-zA-Z0-9]+)',
+                # 7. "XXX 주식회사" - 회사명만 추출
+                r'([가-힣a-zA-Z0-9]+)\s*주식회사',
+                # 8. "(주)XXX" 또는 "㈜XXX" - 회사명만 추출
+                r'[\(（]주[\)）]\s*([가-힣a-zA-Z0-9]+)',
+                r'㈜\s*([가-힣a-zA-Z0-9]+)',
+                # 9. 지자체 패턴 (XX시, XX구, XX군) + "장" (시장, 구청장 등)
                 r'([가-힣]{2,10}(?:특별시|광역시|도|시|구|군))\s*(?:장)?(?:\s|$)',
-                # 9. 개인 이름 (2~4글자 한글, 맨 마지막 fallback)
+                # 10. 개인 이름 (2~4글자 한글, 맨 마지막 fallback)
                 r'(?:채권자|권리자|신청인)\s*[:：]?\s*([가-힣]{2,4})(?:\s|$)',
             ]
 
@@ -1019,11 +1033,15 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                 match = re.search(creditor_pattern, context)
                 if match:
                     candidate = match.group(1).strip()
-                    # 유효한 채권자인지 확인
-                    if candidate and len(candidate) >= 2 and candidate not in invalid_creditors:
+                    # 유효한 채권자인지 확인 (접수번호 패턴 제외)
+                    if (candidate and len(candidate) >= 2 and
+                        candidate not in invalid_creditors and
+                        not is_registration_number(candidate)):
                         # 불필요한 접미사 제거
                         candidate = re.sub(r'\s*(귀중|앞|님|의)\s*$', '', candidate).strip()
-                        if candidate and len(candidate) >= 2:
+                        # 접수번호 접미사 제거 (예: "동양자산관리대부 주식회사 제189752호" → "동양자산관리대부")
+                        candidate = re.sub(r'\s*제\d+호.*$', '', candidate).strip()
+                        if candidate and len(candidate) >= 2 and not is_registration_number(candidate):
                             creditor = candidate
                             break
 
@@ -1075,8 +1093,7 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                 is_deleted=is_deleted
             ))
 
-            # 같은 키워드의 첫 번째 발생만 처리 (중복 방지)
-            break
+            # break 제거: 모든 발생을 처리 (중복은 deduplicate_seizures_by_rank에서 처리)
 
     # 중복 제거: 같은 순위번호 내에서 가장 높은 부번호만 유지
     seizures = deduplicate_seizures_by_rank(seizures)
