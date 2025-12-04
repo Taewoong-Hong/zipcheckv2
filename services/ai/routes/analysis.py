@@ -481,13 +481,73 @@ async def stream_analysis(
                     recent_transactions = []
 
                     # 동적 기간 확대 로직: 3개월 → 6개월 → 12개월
-                    # - 3개월 내 데이터 < 5개 → 6개월 확대
-                    # - 6개월 내 데이터 < 10개 → 12개월 확대
+                    # - 필터링된 데이터 < 3개 → 6개월 확대
+                    # - 필터링된 데이터 < 5개 → 12개월 확대
                     from dateutil.relativedelta import relativedelta
 
                     def get_previous_month(year: int, month: int, months_back: int) -> str:
                         target_date = datetime(year, month, 1) - relativedelta(months=months_back)
                         return f"{target_date.year}{target_date.month:02d}"
+
+                    # ===========================
+                    # 필터링 로직: 동 + 지번 + 전용면적
+                    # ===========================
+                    # 주소에서 동, 지번 추출
+                    import re
+                    property_address = case.get('property_address', '')
+                    target_dong = None
+                    target_jibun = None
+                    target_area = registry_doc.area_m2 if registry_doc else None
+
+                    # 동 추출: "우면동", "역삼동" 등
+                    dong_match = re.search(r'([가-힣]+[동읍면리가])\s', property_address)
+                    if dong_match:
+                        target_dong = dong_match.group(1).rstrip('동읍면리가')
+
+                    # 지번 추출: "123-45" 또는 "123" 형태
+                    jibun_match = re.search(r'(\d+)(?:-\d+)?\s*(?:$|[^\d])', property_address)
+                    if jibun_match:
+                        target_jibun = int(jibun_match.group(1))
+
+                    logger.info(f"📍 필터링 기준: 동={target_dong}, 지번={target_jibun}, 전용면적={target_area}㎡")
+
+                    def filter_transactions(items: list) -> list:
+                        """동 + 지번 + 전용면적 필터링"""
+                        if not target_dong and not target_jibun and not target_area:
+                            return items  # 필터링 기준 없으면 전체 반환
+
+                        filtered = []
+                        for item in items:
+                            # 동 매칭
+                            if target_dong:
+                                item_dong = (item.get('umdNm') or item.get('dong') or '').strip()
+                                item_dong_clean = item_dong.rstrip('동읍면리가')
+                                if item_dong_clean != target_dong:
+                                    continue
+
+                            # 지번 매칭 (본번만 비교)
+                            if target_jibun:
+                                item_jibun_str = str(item.get('jibun') or '').strip()
+                                item_jibun_match = re.match(r'(\d+)', item_jibun_str)
+                                if not item_jibun_match:
+                                    continue
+                                item_jibun = int(item_jibun_match.group(1))
+                                if item_jibun != target_jibun:
+                                    continue
+
+                            # 전용면적 매칭 (±0.5㎡ 오차 허용)
+                            if target_area:
+                                item_area_str = str(item.get('excluUseAr') or item.get('exclusiveArea') or '').strip()
+                                try:
+                                    item_area = float(item_area_str)
+                                    if abs(item_area - target_area) > 0.5:
+                                        continue
+                                except (ValueError, TypeError):
+                                    continue
+
+                            filtered.append(item)
+
+                        return filtered
 
                     # Step 1: 3개월 조회
                     for months_back in range(3):
@@ -503,9 +563,13 @@ async def stream_analysis(
                             logger.warning(f"실거래가 조회 실패 ({deal_ymd}): {e}")
                             continue
 
-                    # Step 2: 3개월 데이터 < 5개 → 6개월까지 확대
-                    if len(recent_transactions) < 5:
-                        message = f'📊 3개월 데이터 {len(recent_transactions)}건 (5개 미만) → 6개월까지 확대 조회'
+                    # 필터링된 거래 건수 확인
+                    filtered_transactions = filter_transactions(recent_transactions)
+                    logger.info(f"📊 3개월 조회 결과: 전체 {len(recent_transactions)}건, 필터링 후 {len(filtered_transactions)}건")
+
+                    # Step 2: 필터링된 데이터 < 3개 → 6개월까지 확대
+                    if len(filtered_transactions) < 3:
+                        message = f'📊 3개월 필터링 데이터 {len(filtered_transactions)}건 (3개 미만) → 6개월까지 확대 조회'
                         yield f"data: {json.dumps({'step': 4, 'message': message, 'progress': 0.56}, ensure_ascii=False)}\n\n"
 
                         for months_back in range(3, 6):
@@ -521,9 +585,13 @@ async def stream_analysis(
                                 logger.warning(f"실거래가 조회 실패 ({deal_ymd}): {e}")
                                 continue
 
-                    # Step 3: 6개월 데이터 < 10개 → 12개월까지 확대
-                    if len(recent_transactions) < 10:
-                        message = f'📊 6개월 데이터 {len(recent_transactions)}건 (10개 미만) → 12개월까지 확대 조회'
+                        # 다시 필터링
+                        filtered_transactions = filter_transactions(recent_transactions)
+                        logger.info(f"📊 6개월 조회 결과: 전체 {len(recent_transactions)}건, 필터링 후 {len(filtered_transactions)}건")
+
+                    # Step 3: 필터링된 데이터 < 5개 → 12개월까지 확대
+                    if len(filtered_transactions) < 5:
+                        message = f'📊 6개월 필터링 데이터 {len(filtered_transactions)}건 (5개 미만) → 12개월까지 확대 조회'
                         yield f"data: {json.dumps({'step': 4, 'message': message, 'progress': 0.58}, ensure_ascii=False)}\n\n"
 
                         for months_back in range(6, 12):
@@ -539,13 +607,34 @@ async def stream_analysis(
                                 logger.warning(f"실거래가 조회 실패 ({deal_ymd}): {e}")
                                 continue
 
-                    if recent_transactions:
+                        # 다시 필터링
+                        filtered_transactions = filter_transactions(recent_transactions)
+                        logger.info(f"📊 12개월 조회 결과: 전체 {len(recent_transactions)}건, 필터링 후 {len(filtered_transactions)}건")
+
+                    # 필터링된 거래 기준으로 평균 계산
+                    if filtered_transactions:
+                        amounts = [item['dealAmount'] for item in filtered_transactions
+                                  if item.get('dealAmount')]
+                        if amounts:
+                            property_value_estimate = sum(amounts) // len(amounts)
+                            # 조회 기간 표시
+                            if len(recent_transactions) <= sum(1 for _ in range(3)):  # 3개월 데이터만
+                                period_text = "3개월"
+                            elif len([t for t in recent_transactions]) <= sum(1 for _ in range(6)):  # 6개월까지
+                                period_text = "6개월"
+                            else:
+                                period_text = "12개월"
+                            message = f'✅ 평균 실거래가: {property_value_estimate:,}만원 (최근 {period_text}, 동일 주소지 {len(amounts)}건 분석)'
+                            yield f"data: {json.dumps({'step': 4, 'message': message, 'progress': 0.6}, ensure_ascii=False)}\n\n"
+                            await asyncio.sleep(0.5)
+                    elif recent_transactions:
+                        # 필터링 결과 없으면 전체 데이터로 fallback
+                        logger.warning(f"⚠️ 필터링된 거래 없음, 전체 {len(recent_transactions)}건으로 fallback")
                         amounts = [item['dealAmount'] for item in recent_transactions
                                   if item.get('dealAmount')]
                         if amounts:
                             property_value_estimate = sum(amounts) // len(amounts)
-                            period_text = "3개월" if len(recent_transactions) < 10 else ("6개월" if len(recent_transactions) < 20 else "12개월")
-                            message = f'✅ 평균 실거래가: {property_value_estimate:,}만원 (최근 {period_text}, {len(amounts)}건 분석)'
+                            message = f'✅ 평균 실거래가: {property_value_estimate:,}만원 (법정동 전체 {len(amounts)}건 분석, 동일 주소지 데이터 없음)'
                             yield f"data: {json.dumps({'step': 4, 'message': message, 'progress': 0.6}, ensure_ascii=False)}\n\n"
                             await asyncio.sleep(0.5)
 

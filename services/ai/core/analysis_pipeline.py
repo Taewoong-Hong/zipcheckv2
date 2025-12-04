@@ -180,14 +180,115 @@ async def _fetch_public_data(context: AnalysisContext) -> None:
 
     법정동코드 조회 → 실거래가 조회 → property_value 추정
     결과는 context.property_value_estimate, context.recent_transactions에 저장됩니다.
+
+    필터링 로직:
+    - 동(umdNm) + 지번(jibun) + 전용면적(excluUseAr, ±0.5㎡) 기준으로 필터링
+    - 필터링된 건수 기준으로 동적 기간 확대 (3개월 → 6개월 → 12개월)
     """
     from core.public_data_api import AptTradeAPIClient, AptRentAPIClient, LegalDongCodeAPIClient
     from core.settings import settings
     import httpx
+    import re
 
     logger.info(f"🔍 [3/6] 공공데이터 조회 시작")
 
-    # 헬퍼 함수들 (analysis.py에서 추출)
+    # ===========================
+    # 필터링 대상 추출 (동/지번/전용면적)
+    # ===========================
+    target_dong = None
+    target_jibun = None
+    target_area = None
+
+    # 1) 등기부에서 추출 (우선순위 높음)
+    if context.registry_doc:
+        # 주소에서 동 추출 (예: "서울특별시 서초구 우면동 ..." → "우면")
+        address = context.registry_doc.property_address or ""
+        dong_match = re.search(r'([가-힣]+[동읍면리가])(?:\s|$)', address)
+        if dong_match:
+            target_dong = dong_match.group(1).rstrip('동읍면리가')
+            logger.info(f"   └─ 필터링 대상 동 (등기부): {target_dong}")
+
+        # 주소에서 지번 추출 (예: "... 123-45" → 123)
+        jibun_match = re.search(r'(\d+)(?:-\d+)?(?:\s|$)', address)
+        if jibun_match:
+            target_jibun = int(jibun_match.group(1))
+            logger.info(f"   └─ 필터링 대상 지번 (등기부): {target_jibun}")
+
+        # 전용면적 (등기부)
+        if context.registry_doc.area_m2:
+            target_area = context.registry_doc.area_m2
+            logger.info(f"   └─ 필터링 대상 전용면적 (등기부): {target_area}㎡")
+
+    # 2) case metadata에서 보완 (등기부 없거나 누락 시)
+    if not target_dong or not target_jibun:
+        case_address = context.case.get('property_address', '')
+        if not target_dong:
+            dong_match = re.search(r'([가-힣]+[동읍면리가])(?:\s|$)', case_address)
+            if dong_match:
+                target_dong = dong_match.group(1).rstrip('동읍면리가')
+                logger.info(f"   └─ 필터링 대상 동 (case): {target_dong}")
+        if not target_jibun:
+            jibun_match = re.search(r'(\d+)(?:-\d+)?(?:\s|$)', case_address)
+            if jibun_match:
+                target_jibun = int(jibun_match.group(1))
+                logger.info(f"   └─ 필터링 대상 지번 (case): {target_jibun}")
+
+    if not target_area:
+        case_area = context.case.get('metadata', {}).get('exclusive_area')
+        if case_area:
+            target_area = float(case_area)
+            logger.info(f"   └─ 필터링 대상 전용면적 (case): {target_area}㎡")
+
+    # ===========================
+    # 필터링 함수 정의
+    # ===========================
+    def filter_transactions(items: list) -> list:
+        """
+        동 + 지번 + 전용면적 기준 필터링
+
+        - 동: 마지막 글자(동/읍/면/리/가) 제외하고 비교
+        - 지번: 본번만 비교 (123-45 → 123)
+        - 전용면적: ±0.5㎡ 오차 허용
+        """
+        if not target_dong and not target_jibun and not target_area:
+            return items  # 필터링 조건 없으면 전체 반환
+
+        filtered = []
+        for item in items:
+            # 동 매칭
+            if target_dong:
+                item_dong = (item.get('umdNm') or item.get('dong') or '').strip()
+                item_dong_clean = item_dong.rstrip('동읍면리가')
+                if item_dong_clean != target_dong:
+                    continue
+
+            # 지번 매칭 (본번만 비교)
+            if target_jibun:
+                item_jibun_str = str(item.get('jibun') or '').strip()
+                item_jibun_match = re.match(r'(\d+)', item_jibun_str)
+                if not item_jibun_match:
+                    continue
+                item_jibun = int(item_jibun_match.group(1))
+                if item_jibun != target_jibun:
+                    continue
+
+            # 전용면적 매칭 (±0.5㎡ 오차 허용)
+            if target_area:
+                item_area_str = str(item.get('excluUseAr') or item.get('exclusiveArea') or '').strip()
+                try:
+                    item_area = float(item_area_str)
+                    if abs(item_area - target_area) > 0.5:
+                        continue
+                except (ValueError, TypeError):
+                    continue
+
+            filtered.append(item)
+
+        return filtered
+
+    # ===========================
+    # 헬퍼 함수들
+    # ===========================
     def get_previous_month(year: int, month: int, months_back: int = 1) -> str:
         """이전 월 계산 (YYYYMM 형식)"""
         from datetime import datetime
@@ -228,18 +329,23 @@ async def _fetch_public_data(context: AnalysisContext) -> None:
         now = datetime.now()
         contract_type = context.case.get('contract_type', '전세')
 
-        # 전세/월세: 듀얼 API (전세 6개월 + 매매 3개월)
+        # 전세/월세: 듀얼 API (전세 + 매매)
         if contract_type in ["전세", "월세"]:
-            logger.info(f"📊 [3/6] 듀얼 API - 전세(6개월) + 매매(3개월) 조회")
+            logger.info(f"📊 [3/6] 듀얼 API - 전세 + 매매 조회 (동적 기간 확대)")
 
-            # (1) 전세 실거래가 조회
+            # ===========================
+            # (1) 전세 실거래가 조회 (필터링 + 동적 확대)
+            # ===========================
             apt_rent_client = AptRentAPIClient(
                 api_key=settings.public_data_api_key,
                 client=client
             )
 
-            jeonse_amounts = []
-            for months_back in range(6):
+            all_jeonse_transactions = []
+            query_period_jeonse = "3개월"
+
+            # Step 1: 3개월 조회
+            for months_back in range(3):
                 deal_ymd = get_previous_month(now.year, now.month, months_back)
                 try:
                     rent_result = await apt_rent_client.get_apt_rent_transactions(
@@ -247,23 +353,64 @@ async def _fetch_public_data(context: AnalysisContext) -> None:
                         deal_ymd=deal_ymd
                     )
                     if rent_result['body']['items']:
+                        # 전세만 필터링 (월세 제외)
                         for item in rent_result['body']['items']:
                             if item.get('deposit') and not item.get('monthlyRent'):
-                                jeonse_amounts.append(item['deposit'])
+                                all_jeonse_transactions.append(item)
                 except Exception as e:
                     logger.warning(f"전세 실거래가 조회 실패 ({deal_ymd}): {e}")
 
-            if jeonse_amounts:
-                context.jeonse_market_average = sum(jeonse_amounts) // len(jeonse_amounts)
-                logger.info(f"✅ [3/6] 전세 평균: {context.jeonse_market_average:,}만원 ({len(jeonse_amounts)}건)")
+            # 필터링 적용
+            filtered_jeonse = filter_transactions(all_jeonse_transactions)
+            logger.info(f"   └─ 전세 3개월: 전체 {len(all_jeonse_transactions)}건 → 필터링 {len(filtered_jeonse)}건")
 
-            # (2) 매매 실거래가 조회
+            # Step 2: 필터링된 데이터 < 3개 → 6개월까지 확대
+            if len(filtered_jeonse) < 3:
+                logger.info(f"📊 전세 필터링 데이터 {len(filtered_jeonse)}건 (< 3개) → 6개월까지 확대 조회")
+                query_period_jeonse = "6개월"
+
+                for months_back in range(3, 6):
+                    deal_ymd = get_previous_month(now.year, now.month, months_back)
+                    try:
+                        rent_result = await apt_rent_client.get_apt_rent_transactions(
+                            lawd_cd=lawd_cd,
+                            deal_ymd=deal_ymd
+                        )
+                        if rent_result['body']['items']:
+                            for item in rent_result['body']['items']:
+                                if item.get('deposit') and not item.get('monthlyRent'):
+                                    all_jeonse_transactions.append(item)
+                    except Exception as e:
+                        logger.warning(f"전세 실거래가 조회 실패 ({deal_ymd}): {e}")
+
+                filtered_jeonse = filter_transactions(all_jeonse_transactions)
+                logger.info(f"   └─ 전세 6개월: 전체 {len(all_jeonse_transactions)}건 → 필터링 {len(filtered_jeonse)}건")
+
+            # 전세 평균 계산 (필터링 우선, fallback으로 전체)
+            if filtered_jeonse:
+                jeonse_amounts = [item['deposit'] for item in filtered_jeonse if item.get('deposit')]
+                if jeonse_amounts:
+                    context.jeonse_market_average = sum(jeonse_amounts) // len(jeonse_amounts)
+                    logger.info(f"✅ [3/6] 전세 평균 (필터링): {context.jeonse_market_average:,}만원 ({len(jeonse_amounts)}건, {query_period_jeonse})")
+            elif all_jeonse_transactions:
+                # Fallback: 필터링 결과 없으면 전체 데이터 사용
+                jeonse_amounts = [item['deposit'] for item in all_jeonse_transactions if item.get('deposit')]
+                if jeonse_amounts:
+                    context.jeonse_market_average = sum(jeonse_amounts) // len(jeonse_amounts)
+                    logger.info(f"✅ [3/6] 전세 평균 (전체, fallback): {context.jeonse_market_average:,}만원 ({len(jeonse_amounts)}건)")
+
+            # ===========================
+            # (2) 매매 실거래가 조회 (필터링 + 동적 확대)
+            # ===========================
             apt_trade_client = AptTradeAPIClient(
                 api_key=settings.public_data_api_key,
                 client=client
             )
 
-            sale_amounts = []
+            all_sale_transactions = []
+            query_period_sale = "3개월"
+
+            # Step 1: 3개월 조회
             for months_back in range(3):
                 deal_ymd = get_previous_month(now.year, now.month, months_back)
                 try:
@@ -272,38 +419,155 @@ async def _fetch_public_data(context: AnalysisContext) -> None:
                         deal_ymd=deal_ymd
                     )
                     if trade_result['body']['items']:
-                        context.recent_transactions.extend(trade_result['body']['items'])
-                        for item in trade_result['body']['items']:
-                            if item.get('dealAmount'):
-                                sale_amounts.append(item['dealAmount'])
+                        all_sale_transactions.extend(trade_result['body']['items'])
                 except Exception as e:
                     logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
 
-            if sale_amounts:
-                context.property_value_estimate = calculate_average_exclude_outliers(sale_amounts)
-                logger.info(f"✅ [3/6] 매매 평균: {context.property_value_estimate:,}만원 ({len(sale_amounts)}건)")
+            # 필터링 적용
+            filtered_sales = filter_transactions(all_sale_transactions)
+            logger.info(f"   └─ 매매 3개월: 전체 {len(all_sale_transactions)}건 → 필터링 {len(filtered_sales)}건")
 
-        # 매매: 단일 API (현재 월만)
+            # Step 2: 필터링된 데이터 < 3개 → 6개월까지 확대
+            if len(filtered_sales) < 3:
+                logger.info(f"📊 매매 필터링 데이터 {len(filtered_sales)}건 (< 3개) → 6개월까지 확대 조회")
+                query_period_sale = "6개월"
+
+                for months_back in range(3, 6):
+                    deal_ymd = get_previous_month(now.year, now.month, months_back)
+                    try:
+                        trade_result = await apt_trade_client.get_apt_trades(
+                            lawd_cd=lawd_cd,
+                            deal_ymd=deal_ymd
+                        )
+                        if trade_result['body']['items']:
+                            all_sale_transactions.extend(trade_result['body']['items'])
+                    except Exception as e:
+                        logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+
+                filtered_sales = filter_transactions(all_sale_transactions)
+                logger.info(f"   └─ 매매 6개월: 전체 {len(all_sale_transactions)}건 → 필터링 {len(filtered_sales)}건")
+
+            # Step 3: 필터링된 데이터 < 5개 → 12개월까지 확대
+            if len(filtered_sales) < 5:
+                logger.info(f"📊 매매 필터링 데이터 {len(filtered_sales)}건 (< 5개) → 12개월까지 확대 조회")
+                query_period_sale = "12개월"
+
+                for months_back in range(6, 12):
+                    deal_ymd = get_previous_month(now.year, now.month, months_back)
+                    try:
+                        trade_result = await apt_trade_client.get_apt_trades(
+                            lawd_cd=lawd_cd,
+                            deal_ymd=deal_ymd
+                        )
+                        if trade_result['body']['items']:
+                            all_sale_transactions.extend(trade_result['body']['items'])
+                    except Exception as e:
+                        logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+
+                filtered_sales = filter_transactions(all_sale_transactions)
+                logger.info(f"   └─ 매매 12개월: 전체 {len(all_sale_transactions)}건 → 필터링 {len(filtered_sales)}건")
+
+            # 매매 평균 계산 (필터링 우선, fallback으로 전체)
+            # recent_transactions는 필터링된 거래 저장
+            if filtered_sales:
+                context.recent_transactions = filtered_sales
+                sale_amounts = [item['dealAmount'] for item in filtered_sales if item.get('dealAmount')]
+                if sale_amounts:
+                    context.property_value_estimate = calculate_average_exclude_outliers(sale_amounts)
+                    logger.info(f"✅ [3/6] 매매 평균 (필터링): {context.property_value_estimate:,}만원 ({len(sale_amounts)}건, {query_period_sale})")
+            elif all_sale_transactions:
+                # Fallback: 필터링 결과 없으면 전체 데이터 사용
+                context.recent_transactions = all_sale_transactions
+                sale_amounts = [item['dealAmount'] for item in all_sale_transactions if item.get('dealAmount')]
+                if sale_amounts:
+                    context.property_value_estimate = calculate_average_exclude_outliers(sale_amounts)
+                    logger.info(f"✅ [3/6] 매매 평균 (전체, fallback): {context.property_value_estimate:,}만원 ({len(sale_amounts)}건)")
+
+        # ===========================
+        # 매매: 동적 기간 확대 (3개월 → 6개월 → 12개월)
+        # ===========================
         else:
-            logger.info(f"📊 [3/6] 단일 API - 매매(현재 월) 조회")
-            deal_ymd = f"{now.year}{now.month:02d}"
+            logger.info(f"📊 [3/6] 매매 계약 - 동적 기간 확대 조회")
 
             apt_trade_client = AptTradeAPIClient(
                 api_key=settings.public_data_api_key,
                 client=client
             )
-            trade_result = await apt_trade_client.get_apt_trades(
-                lawd_cd=lawd_cd,
-                deal_ymd=deal_ymd
-            )
 
-            if trade_result['body']['items']:
-                context.recent_transactions = trade_result['body']['items']
-                amounts = [item['dealAmount'] for item in context.recent_transactions
-                          if item.get('dealAmount')]
+            all_transactions = []
+            query_period = "3개월"
+
+            # Step 1: 3개월 조회
+            for months_back in range(3):
+                deal_ymd = get_previous_month(now.year, now.month, months_back)
+                try:
+                    trade_result = await apt_trade_client.get_apt_trades(
+                        lawd_cd=lawd_cd,
+                        deal_ymd=deal_ymd
+                    )
+                    if trade_result['body']['items']:
+                        all_transactions.extend(trade_result['body']['items'])
+                except Exception as e:
+                    logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+
+            # 필터링 적용
+            filtered_transactions = filter_transactions(all_transactions)
+            logger.info(f"   └─ 매매 3개월: 전체 {len(all_transactions)}건 → 필터링 {len(filtered_transactions)}건")
+
+            # Step 2: 필터링된 데이터 < 3개 → 6개월까지 확대
+            if len(filtered_transactions) < 3:
+                logger.info(f"📊 매매 필터링 데이터 {len(filtered_transactions)}건 (< 3개) → 6개월까지 확대 조회")
+                query_period = "6개월"
+
+                for months_back in range(3, 6):
+                    deal_ymd = get_previous_month(now.year, now.month, months_back)
+                    try:
+                        trade_result = await apt_trade_client.get_apt_trades(
+                            lawd_cd=lawd_cd,
+                            deal_ymd=deal_ymd
+                        )
+                        if trade_result['body']['items']:
+                            all_transactions.extend(trade_result['body']['items'])
+                    except Exception as e:
+                        logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+
+                filtered_transactions = filter_transactions(all_transactions)
+                logger.info(f"   └─ 매매 6개월: 전체 {len(all_transactions)}건 → 필터링 {len(filtered_transactions)}건")
+
+            # Step 3: 필터링된 데이터 < 5개 → 12개월까지 확대
+            if len(filtered_transactions) < 5:
+                logger.info(f"📊 매매 필터링 데이터 {len(filtered_transactions)}건 (< 5개) → 12개월까지 확대 조회")
+                query_period = "12개월"
+
+                for months_back in range(6, 12):
+                    deal_ymd = get_previous_month(now.year, now.month, months_back)
+                    try:
+                        trade_result = await apt_trade_client.get_apt_trades(
+                            lawd_cd=lawd_cd,
+                            deal_ymd=deal_ymd
+                        )
+                        if trade_result['body']['items']:
+                            all_transactions.extend(trade_result['body']['items'])
+                    except Exception as e:
+                        logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+
+                filtered_transactions = filter_transactions(all_transactions)
+                logger.info(f"   └─ 매매 12개월: 전체 {len(all_transactions)}건 → 필터링 {len(filtered_transactions)}건")
+
+            # 매매 평균 계산 (필터링 우선, fallback으로 전체)
+            if filtered_transactions:
+                context.recent_transactions = filtered_transactions
+                amounts = [item['dealAmount'] for item in filtered_transactions if item.get('dealAmount')]
+                if amounts:
+                    context.property_value_estimate = calculate_average_exclude_outliers(amounts)
+                    logger.info(f"✅ [3/6] 매매 평균 (필터링): {context.property_value_estimate:,}만원 ({len(amounts)}건, {query_period})")
+            elif all_transactions:
+                # Fallback: 필터링 결과 없으면 전체 데이터 사용
+                context.recent_transactions = all_transactions
+                amounts = [item['dealAmount'] for item in all_transactions if item.get('dealAmount')]
                 if amounts:
                     context.property_value_estimate = sum(amounts) // len(amounts)
-                    logger.info(f"✅ [3/6] 매매 평균: {context.property_value_estimate:,}만원 ({len(amounts)}건)")
+                    logger.info(f"✅ [3/6] 매매 평균 (전체, fallback): {context.property_value_estimate:,}만원 ({len(amounts)}건)")
 
 
 async def _analyze_risks(context: AnalysisContext) -> None:
