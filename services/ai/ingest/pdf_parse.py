@@ -2,7 +2,7 @@
 import logging
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, cast
 
 import fitz  # PyMuPDF (import as fitz)
 from PIL import Image
@@ -21,7 +21,7 @@ def _parse_with_pymupdf(path: str) -> str:
         추출된 텍스트 (빈 문자열일 수 있음)
     """
     try:
-        doc = fitz.open(path)
+        doc = fitz.open(path)  # type: ignore
         texts = []
         for page in doc:
             texts.append(page.get_text("text"))
@@ -86,7 +86,7 @@ def parse_pdf_with_metadata(path: str) -> List[Dict[str, Any]]:
 
     try:
         logger.info(f"PDF 메타데이터 파싱 시작: {path}")
-        doc = fitz.open(str(file_path))
+        doc = fitz.open(str(file_path))  # type: ignore
 
         pages_data = []
         for page_num in range(len(doc)):
@@ -144,7 +144,7 @@ def pdf_to_images(path: str, output_dir: str | None = None, dpi: int = 200) -> L
     logger.info(f"PDF → 이미지 변환 시작: {path}, DPI={dpi}")
 
     try:
-        doc = fitz.open(str(file_path))
+        doc = fitz.open(str(file_path))  # type: ignore
         image_paths = []
 
         for page_num in range(len(doc)):
@@ -209,7 +209,8 @@ def parse_scanned_pdf_with_vision(path: str) -> Dict[str, Any]:
         # 2. Vision API로 구조화된 데이터 추출
         result = extract_contract_from_pdf_images(image_paths, combine=True)
         logger.info(f"스캔 PDF Vision 파싱 완료: {path}")
-        return result
+        # combine=True일 때는 항상 Dict 반환
+        return cast(Dict[str, Any], result)
 
     finally:
         # 3. 임시 이미지 파일 정리
@@ -254,7 +255,7 @@ def validate_pdf(path: str, max_size_mb: int = 50) -> bool:
 
     # PDF 열기 테스트
     try:
-        doc = fitz.open(str(file_path))
+        doc = fitz.open(str(file_path))  # type: ignore
         page_count = len(doc)
         doc.close()
 

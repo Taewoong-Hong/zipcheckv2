@@ -25,6 +25,67 @@ logger = logging.getLogger(__name__)
 
 
 # ===========================
+# 타임아웃 데코레이터 (regex 무한 루프 방지)
+# ===========================
+import signal
+import functools
+
+class RegexTimeoutError(Exception):
+    """정규식 처리 타임아웃 예외"""
+    pass
+
+
+def timeout_handler(signum, frame):
+    """시그널 핸들러 - 타임아웃 발생 시 호출"""
+    raise RegexTimeoutError("정규식 처리 타임아웃 (30초 초과)")
+
+
+def with_timeout(seconds: int = 30):
+    """
+    함수에 타임아웃을 적용하는 데코레이터
+
+    사용법:
+        @with_timeout(30)
+        def slow_function():
+            ...
+
+    주의: Unix/Linux에서만 동작 (signal.SIGALRM 사용)
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Windows에서는 signal.SIGALRM이 없으므로 타임아웃 스킵
+            if not hasattr(signal, 'SIGALRM'):
+                return func(*args, **kwargs)
+
+            # 기존 핸들러 저장
+            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(seconds)  # 타임아웃 설정
+
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                signal.alarm(0)  # 타임아웃 해제
+                signal.signal(signal.SIGALRM, old_handler)  # 핸들러 복원
+
+            return result
+        return wrapper
+    return decorator
+
+
+# 입력 텍스트 크기 제한 (50KB) - catastrophic backtracking 방지
+MAX_TEXT_SIZE = 50 * 1024  # 50KB
+
+
+def truncate_text_if_needed(text: str) -> str:
+    """텍스트 크기가 너무 크면 잘라냄"""
+    if len(text) > MAX_TEXT_SIZE:
+        logger.warning(f"⚠️ 텍스트 크기 제한 초과: {len(text)} > {MAX_TEXT_SIZE} bytes, 잘라냄")
+        return text[:MAX_TEXT_SIZE]
+    return text
+
+
+# ===========================
 # 개인정보 마스킹
 # ===========================
 def mask_personal_name(name: Optional[str]) -> Optional[str]:
@@ -212,7 +273,7 @@ def is_text_extractable_pdf(pdf_path: str, min_chars: int = 500) -> tuple[bool, 
         - extracted_text: 추출된 텍스트 (이미지 PDF면 빈 문자열)
     """
     try:
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(pdf_path)  # type: ignore
         texts = []
         for page in doc:
             texts.append(page.get_text("text"))
@@ -723,16 +784,19 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
             context = text[start:end]
 
             # 근처에서 채권자 찾기 (여러 패턴 시도, 우선순위 순서)
+            # ⚠️ 주의: 중첩 수량자(nested quantifiers)는 catastrophic backtracking 유발
+            # 수정: (?:\s*[...]+ )* → [가-힣a-zA-Z0-9\s]{1,30} (길이 제한 + 단순화)
             creditor = None
             creditor_patterns = [
                 # 1. "주식회사 XXX" 또는 "XXX 주식회사" 형태 (전체 회사명 캡처)
-                r'주식회사\s*([가-힣a-zA-Z0-9]+(?:\s*[가-힣a-zA-Z0-9]+)*)',
-                r'([가-힣a-zA-Z0-9]+(?:\s*[가-힣a-zA-Z0-9]+)*)\s*주식회사',
+                # 수정: 최대 30자로 제한, 중첩 수량자 제거
+                r'주식회사\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
+                r'([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})\s*주식회사',
                 # 2. "(주)XXX" 또는 "㈜XXX" 형태
-                r'[\(（]주[\)）]\s*([가-힣a-zA-Z0-9]+(?:\s*[가-힣a-zA-Z0-9]+)*)',
-                r'㈜\s*([가-힣a-zA-Z0-9]+(?:\s*[가-힣a-zA-Z0-9]+)*)',
-                # 3. 명시적 "채권자:", "권리자:" 패턴 (전체 이름 캡처)
-                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]\s*([가-힣a-zA-Z0-9\s\(\)㈜]+?)(?:\s{2,}|\n|$)',
+                r'[\(（]주[\)）]\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
+                r'㈜\s*([가-힣a-zA-Z0-9][가-힣a-zA-Z0-9\s]{0,29})',
+                # 3. 명시적 "채권자:", "권리자:" 패턴 (전체 이름 캡처, 최대 40자)
+                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]\s*([가-힣a-zA-Z0-9\s\(\)㈜]{2,40})(?:\s{2,}|\n|$)',
                 # 4. 기관명 직접 매칭 (XX국세청, XX세무서 등)
                 r'([가-힣]{2,15}(?:지방국세청|국세청|세무서))',
                 r'([가-힣]{2,15}(?:시청|구청|군청|도청))',
@@ -882,6 +946,7 @@ def extract_lease_rights(text: str) -> List[LeaseRightInfo]:
     return lease_rights
 
 
+@with_timeout(30)  # 30초 타임아웃 - catastrophic backtracking 방지
 def parse_with_regex(raw_text: str) -> RegistryDocument:
     """
     정규식 기반 등기부 파싱 (LLM 없음)
@@ -890,27 +955,74 @@ def parse_with_regex(raw_text: str) -> RegistryDocument:
     1. 요약 섹션 먼저 파싱 (말소 여부 판별의 핵심)
     2. 요약 정보를 각 추출 함수에 전달
     3. 요약에 있는 항목만 유효, 나머지는 말소 처리
+
+    안전장치:
+    - 30초 타임아웃 (무한 루프 방지)
+    - 50KB 텍스트 크기 제한 (catastrophic backtracking 방지)
     """
+    import time
+    start_time = time.time()
+
+    logger.info("🔍 [R-STEP 1] parse_with_regex 진입")
+
+    # 안전장치: 텍스트 크기 제한 (catastrophic backtracking 방지)
+    raw_text = truncate_text_if_needed(raw_text)
+    logger.info(f"🔍 [R-STEP 1.1] 텍스트 크기: {len(raw_text)} bytes")
+
     # Step 1: 요약 섹션 파싱 (가장 먼저!)
+    logger.info("🔍 [R-STEP 2] parse_summary_section 호출 시작")
     summary = parse_summary_section(raw_text)
+    logger.info(f"🔍 [R-STEP 2] parse_summary_section 완료 ({time.time() - start_time:.2f}초)")
 
     # Step 2: 소유자 추출 (요약 우선, fallback으로 전체 문서)
+    logger.info("🔍 [R-STEP 3] 소유자 추출 시작")
     owner_name = summary.owner_name if summary.has_summary else extract_owner_name(raw_text)
+    logger.info(f"🔍 [R-STEP 3] 소유자 추출 완료: {owner_name} ({time.time() - start_time:.2f}초)")
 
-    # Step 3: 각 항목 추출 (요약 정보 전달)
-    return RegistryDocument(
-        property_address=extract_property_address(raw_text),
-        building_type=extract_building_type(raw_text),
-        area_m2=extract_exclusive_area(raw_text),
+    # Step 3: 각 항목 추출 (요약 정보 전달) - 개별 호출로 분리하여 디버깅
+    logger.info("🔍 [R-STEP 4] extract_property_address 호출 시작")
+    property_address = extract_property_address(raw_text)
+    logger.info(f"🔍 [R-STEP 4] extract_property_address 완료 ({time.time() - start_time:.2f}초)")
+
+    logger.info("🔍 [R-STEP 5] extract_building_type 호출 시작")
+    building_type = extract_building_type(raw_text)
+    logger.info(f"🔍 [R-STEP 5] extract_building_type 완료 ({time.time() - start_time:.2f}초)")
+
+    logger.info("🔍 [R-STEP 6] extract_exclusive_area 호출 시작")
+    area_m2 = extract_exclusive_area(raw_text)
+    logger.info(f"🔍 [R-STEP 6] extract_exclusive_area 완료 ({time.time() - start_time:.2f}초)")
+
+    logger.info("🔍 [R-STEP 7] extract_seizures 호출 시작")
+    seizures = extract_seizures(raw_text, summary)
+    logger.info(f"🔍 [R-STEP 7] extract_seizures 완료: {len(seizures)}건 ({time.time() - start_time:.2f}초)")
+
+    logger.info("🔍 [R-STEP 8] extract_mortgages 호출 시작")
+    mortgages = extract_mortgages(raw_text, summary)
+    logger.info(f"🔍 [R-STEP 8] extract_mortgages 완료: {len(mortgages)}건 ({time.time() - start_time:.2f}초)")
+
+    logger.info("🔍 [R-STEP 9] extract_pledges 호출 시작")
+    pledges = extract_pledges(raw_text)
+    logger.info(f"🔍 [R-STEP 9] extract_pledges 완료: {len(pledges)}건 ({time.time() - start_time:.2f}초)")
+
+    logger.info("🔍 [R-STEP 10] extract_lease_rights 호출 시작")
+    lease_rights = extract_lease_rights(raw_text)
+    logger.info(f"🔍 [R-STEP 10] extract_lease_rights 완료: {len(lease_rights)}건 ({time.time() - start_time:.2f}초)")
+
+    logger.info("🔍 [R-STEP 11] RegistryDocument 생성 시작")
+    registry = RegistryDocument(
+        property_address=property_address,
+        building_type=building_type,
+        area_m2=area_m2,
         owner=OwnerInfo(name=owner_name),
-        # 갑구 (요약 기반 말소 판별)
-        seizures=extract_seizures(raw_text, summary),
-        # 을구 (요약 기반 말소 판별)
-        mortgages=extract_mortgages(raw_text, summary),
-        pledges=extract_pledges(raw_text),
-        lease_rights=extract_lease_rights(raw_text),
+        seizures=seizures,
+        mortgages=mortgages,
+        pledges=pledges,
+        lease_rights=lease_rights,
         raw_text=raw_text
     )
+    logger.info(f"🔍 [R-STEP 12] RegistryDocument 생성 완료 - 총 소요시간: {time.time() - start_time:.2f}초")
+
+    return registry
 
 
 # ===========================
@@ -932,7 +1044,7 @@ async def ocr_with_gemini_vision(pdf_path: str) -> str:
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     # PDF → 이미지 변환 (첫 페이지만 or 전체)
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(pdf_path)  # type: ignore
     texts = []
 
     for page_num in range(len(doc)):
@@ -1033,13 +1145,14 @@ def structure_registry_with_llm(raw_text: str) -> RegistryDocument:
 
         # JSON 파싱
         import json
-        data = json.loads(response.content)
+        content = response.content if response.content else "{}"
+        data = json.loads(content)
 
         # Pydantic 모델로 변환
         registry = RegistryDocument(**data)
         registry.raw_text = raw_text  # 원본 보존
 
-        logger.info(f"등기부 구조화 완료: {len(registry.owners)}명 소유자, {len(registry.mortgages)}건 근저당")
+        logger.info(f"등기부 구조화 완료: {'1명' if registry.owner else '0명'} 소유자, {len(registry.mortgages)}건 근저당")
         return registry
 
     except Exception as e:
@@ -1181,6 +1294,29 @@ async def parse_registry_pdf(
 
         logger.info("✅ [DEBUG-STEP 8] return registry 직전")
         return registry
+
+    except RegexTimeoutError as e:
+        # 정규식 타임아웃 (catastrophic backtracking으로 인한 무한 루프)
+        error_msg = f"등기부 파싱 타임아웃: 정규식 처리 시간 초과 (30초)"
+        logger.error(f"❌ [파싱 타임아웃] {error_msg}", exc_info=True)
+
+        # 감사 로그 기록
+        log_parsing_error(
+            case_id=case_id or "unknown",
+            error_message=error_msg,
+            error_type=EventType.REGISTRY_PARSING_FAILED,
+            user_id=user_id,
+            metadata={
+                "pdf_path": pdf_path,
+                "error": str(e),
+                "error_type": "RegexTimeoutError",
+                "text_length": len(raw_text) if 'raw_text' in locals() else None,
+                "suggestion": "문서가 복잡하거나 비정상적인 패턴 포함"
+            }
+        )
+
+        # 빈 문서 반환 (타임아웃 시에도 서비스 유지)
+        return RegistryDocument(raw_text=raw_text if 'raw_text' in locals() else "")
 
     except Exception as e:
         error_msg = f"등기부 파싱 실패: {str(e)}"
@@ -1365,6 +1501,6 @@ if __name__ == "__main__":
     # 예시: 로컬 PDF 파싱
     # registry = parse_registry_pdf("/path/to/registry.pdf")
     # print(f"주소: {registry.property_address}")
-    # print(f"소유자: {registry.owners}")
+    # print(f"소유자: {registry.owner}")
     # print(f"근저당: {registry.mortgages}")
     pass
