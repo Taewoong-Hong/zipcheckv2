@@ -793,7 +793,8 @@ def deduplicate_mortgages_by_rank(mortgages: List[MortgageInfo]) -> List[Mortgag
     rank_groups: Dict[str, List[MortgageInfo]] = defaultdict(list)
 
     for m in ranked_mortgages:
-        rank_groups[m.rank_number].append(m)
+        if m.rank_number is not None:  # Type guard for Pylance
+            rank_groups[m.rank_number].append(m)
 
     # 각 그룹에서 가장 높은 sub_rank_number를 가진 항목만 선택
     deduplicated = []
