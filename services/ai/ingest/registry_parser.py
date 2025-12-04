@@ -230,6 +230,7 @@ class RegistryDocument(BaseModel):
             ],
             "seizures": [
                 {
+                    "rank_number": s.rank_number,  # 순위번호 (예: "1", "1-6")
                     "type": s.type,
                     "creditor": s.creditor,  # 기업명은 그대로
                     "amount": s.amount,
@@ -1005,7 +1006,8 @@ def parse_block_to_seizure(
             '가압류', '가처분', '압류', '경매', '개시결정', '결정', '등기',
             '말소', '해제', '해지', '취하', '년', '월', '일', '등', '호',
         }
-        if candidate and len(candidate) >= 2 and candidate not in invalid_creditors:
+        # 최소 1글자 허용 ("국" = 대한민국/국세청 약칭)
+        if candidate and len(candidate) >= 1 and candidate not in invalid_creditors:
             creditor = candidate
 
     # 금액 추출
@@ -1225,7 +1227,8 @@ def extract_seizures_legacy(text: str, summary: Optional[SummaryData] = None) ->
             creditor_match = re.search(creditor_pattern, context)
             if creditor_match:
                 candidate = creditor_match.group(1).strip()
-                if (candidate and len(candidate) >= 2 and
+                # 최소 1글자 허용 ("국" = 대한민국/국세청 약칭)
+                if (candidate and len(candidate) >= 1 and
                     candidate not in invalid_creditors and
                     not is_registration_number(candidate)):
                     creditor = candidate
