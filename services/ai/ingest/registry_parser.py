@@ -1012,6 +1012,23 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                             rank_number = num
                         break
 
+            # 🛟 Fallback: 바로 윗줄이 "숫자만 있는 줄"인 경우 (예: "15\n압류")
+            # 실제 PDF 텍스트 구조: 순위번호가 별도 줄에 있고, 다음 줄에 "압류" 등이 옴
+            if rank_number is None:
+                lines = front_context.rstrip().splitlines()
+                for line in reversed(lines):
+                    m = re.match(r'\s*(\d{1,2})(?:-(\d+))?\s*$', line)
+                    if m:
+                        num = m.group(1)
+                        sub = m.group(2)
+                        if num.isdigit() and 1 <= int(num) <= 30:
+                            if sub:
+                                rank_number = f"{num}-{sub}"
+                                sub_rank_number = int(sub)
+                            else:
+                                rank_number = num
+                        break
+
             # 중복 체크: 같은 순위번호는 한 번만 처리
             rank_key = f"{rank_number or 'none'}_{keyword_pos // 200}"
             if rank_key in processed_ranks:
