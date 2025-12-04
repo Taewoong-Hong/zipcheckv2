@@ -26,6 +26,41 @@ logger = logging.getLogger(__name__)
 
 
 # ===========================
+# 타입 변환 헬퍼 함수
+# ===========================
+def ensure_text(content: Any) -> str:
+    """
+    LangChain 응답의 content를 안전하게 문자열로 변환
+    
+    LangChain이 str 말고 list/fragment로 줄 수도 있으니 방어적으로 처리
+    
+    Args:
+        content: LangChain 응답의 content (str | list[str | dict[str, Any]])
+    
+    Returns:
+        str: 변환된 문자열
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # 예: ["문장1", "문장2"] 혹은 [{"type": "text", "text": "..."}, ...]
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                # 텍스트 필드가 있으면 우선 사용
+                text = item.get("text") or item.get("content") or ""
+                if text:
+                    parts.append(str(text))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    # 기타 타입은 그냥 str로
+    return str(content)
+
+
+# ===========================
 # 개별 LLM 스트리밍 함수
 # ===========================
 async def stream_gpt_draft(llm_prompt: str) -> AsyncGenerator[Dict[str, Any], None]:
@@ -48,7 +83,6 @@ async def stream_gpt_draft(llm_prompt: str) -> AsyncGenerator[Dict[str, Any], No
     llm_draft = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0.3,
-        max_tokens=4096,
         streaming=True
     )
     draft_content = ""
@@ -57,7 +91,7 @@ async def stream_gpt_draft(llm_prompt: str) -> AsyncGenerator[Dict[str, Any], No
     try:
         async for chunk in llm_draft.astream([HumanMessage(content=llm_prompt)]):
             if hasattr(chunk, 'content') and chunk.content:
-                draft_content += chunk.content
+                draft_content += ensure_text(chunk.content)
                 chunk_count += 1
 
                 # 이벤트 전송 (phase='draft', model='gpt-4o-mini')
@@ -118,10 +152,11 @@ async def stream_claude_validation(draft_content: str) -> AsyncGenerator[Dict[st
     judge_prompt = build_judge_prompt(draft_content)
 
     llm_judge = ChatAnthropic(
-        model="claude-3-5-sonnet-latest",
+        model_name="claude-3-5-sonnet-latest",
         temperature=0.1,
-        max_tokens=4096,
-        streaming=True
+        streaming=True,
+        timeout=60,
+        stop=None
     )
     validation_content = ""
     chunk_count = 0
@@ -129,7 +164,7 @@ async def stream_claude_validation(draft_content: str) -> AsyncGenerator[Dict[st
     try:
         async for chunk in llm_judge.astream([HumanMessage(content=judge_prompt)]):
             if hasattr(chunk, 'content') and chunk.content:
-                validation_content += chunk.content
+                validation_content += ensure_text(chunk.content)
                 chunk_count += 1
 
                 # 이벤트 전송 (phase='validation', model='claude-3-5-sonnet')
@@ -159,16 +194,17 @@ async def stream_claude_validation(draft_content: str) -> AsyncGenerator[Dict[st
             logger.warning("Claude Sonnet 실패, Haiku로 폴백")
 
             llm_haiku = ChatAnthropic(
-                model="claude-3-5-haiku-latest",
+                model_name="claude-3-5-haiku-latest",
                 temperature=0.1,
-                max_tokens=4096,
-                streaming=True
+                streaming=True,
+                timeout=60,
+                stop=None
             )
             validation_content = ""
 
             async for chunk in llm_haiku.astream([HumanMessage(content=judge_prompt)]):
                 if hasattr(chunk, 'content') and chunk.content:
-                    validation_content += chunk.content
+                    validation_content += ensure_text(chunk.content)
 
                     if chunk_count % 5 == 0:
                         yield {
@@ -203,45 +239,15 @@ async def merge_dual_streams(
     validation_generator_factory: Callable[[str], AsyncGenerator[Dict[str, Any], None]],
     step_base: float = 6.0,
     progress_base: float = 0.78
-) -> AsyncGenerator[str, Tuple[str, str, Optional[Dict[str, Any]]]]:
+) -> AsyncGenerator[str | Tuple[str, str, Optional[Dict[str, Any]]], None]:
     """
     듀얼 LLM 병렬 스트리밍 이벤트 머지
-
-    두 개의 async generator를 병렬로 실행하고 SSE 이벤트를 생성합니다.
-    GPT-4o-mini 초안 생성과 Claude Sonnet 검증을 동시에 처리하며,
-    각 단계의 진행 상황을 실시간으로 전달합니다.
-
-    Args:
-        draft_generator: GPT-4o-mini 초안 생성 제너레이터
-        validation_generator_factory: Claude 검증 제너레이터 팩토리
-            - 함수 시그니처: (draft_content: str) -> AsyncGenerator
-            - 초안이 완료되면 이 팩토리로 검증 제너레이터를 생성
-        step_base: SSE 이벤트 step 기준값 (기본값: 6.0)
-        progress_base: SSE 이벤트 progress 기준값 (기본값: 0.78)
-
-    Yields:
-        SSE 이벤트 문자열 (data: {...}\n\n)
-
-    Returns:
-        최종 yield: Tuple[str, str, dict]
-        - draft_content: 완성된 GPT 초안
-        - validation_content: 완성된 Claude 검증
-        - last_validation_event: 마지막 검증 이벤트 (model 정보 포함)
-
-    Algorithm:
-        1. GPT 초안 생성 시작 (timeout 0.1s로 non-blocking)
-        2. GPT 완료 시 Claude 검증 자동 시작
-        3. 또는 GPT 시작 3초 후 자동 시작 (병렬 검증)
-        4. 두 스트림이 모두 완료될 때까지 이벤트 전송
-        5. 최종 결과를 tuple로 반환
     """
-    import json
-
     draft_content = ""
     validation_content = ""
     draft_done = False
     validation_done = False
-    last_validation_event = None
+    last_validation_event: Optional[Dict[str, Any]] = None
 
     draft_gen = draft_generator
     validation_gen = None
@@ -254,39 +260,45 @@ async def merge_dual_streams(
                 try:
                     draft_event = await asyncio.wait_for(draft_gen.__anext__(), timeout=0.1)
 
-                    if draft_event.get('done'):
+                    if draft_event.get("done"):
                         draft_done = True
-                        draft_content = draft_event.get('final_content', draft_content)
+                        draft_content = draft_event.get("final_content", draft_content)
 
-                        yield f"data: {json.dumps({
-                            'step': step_base + 0.1,
-                            'phase': 'draft',
-                            'model': 'gpt-4o-mini',
-                            'message': f'✅ GPT-4o-mini 초안 완료 ({len(draft_content)}자)',
-                            'progress': progress_base + 0.04,
-                            'draft_length': len(draft_content)
-                        }, ensure_ascii=False)}\n\n"
+                        message = f"✅ GPT-4o-mini 초안 완료 ({len(draft_content)}자)"
+                        payload = {
+                            "step": step_base + 0.1,
+                            "phase": "draft",
+                            "model": "gpt-4o-mini",
+                            "message": message,
+                            "progress": progress_base + 0.04,
+                            "draft_length": len(draft_content),
+                        }
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
                         # Claude 검증 시작
                         if validation_gen is None:
                             validation_gen = validation_generator_factory(draft_content)
-                            yield f"data: {json.dumps({
-                                'step': step_base + 0.2,
-                                'phase': 'validation',
-                                'message': '🔍 Claude Sonnet 검증 시작...',
-                                'progress': progress_base + 0.05
-                            }, ensure_ascii=False)}\n\n"
+                            payload = {
+                                "step": step_base + 0.2,
+                                "phase": "validation",
+                                "message": "🔍 Claude Sonnet 검증 시작...",
+                                "progress": progress_base + 0.05,
+                            }
+                            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     else:
-                        total_length = draft_event.get('total_length', 0)
+                        total_length = draft_event.get("total_length", 0)
                         if total_length > 0 and total_length % 100 == 0:
-                            yield f"data: {json.dumps({
-                                'step': step_base + 0.1,
-                                'phase': 'draft',
-                                'model': 'gpt-4o-mini',
-                                'message': f'📝 초안 생성 중... ({total_length}자)',
-                                'progress': progress_base + min(total_length / 2000, 1) * 0.04,
-                                'partial_length': total_length
-                            }, ensure_ascii=False)}\n\n"
+                            message = f"📝 초안 생성 중... ({total_length}자)"
+                            payload = {
+                                "step": step_base + 0.1,
+                                "phase": "draft",
+                                "model": "gpt-4o-mini",
+                                "message": message,
+                                "progress": progress_base
+                                + min(total_length / 2000, 1) * 0.04,
+                                "partial_length": total_length,
+                            }
+                            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
                 except asyncio.TimeoutError:
                     pass
@@ -296,33 +308,48 @@ async def merge_dual_streams(
             # Claude 검증 스트림 처리
             if validation_gen is not None and not validation_done:
                 try:
-                    validation_event = await asyncio.wait_for(validation_gen.__anext__(), timeout=0.1)
+                    validation_event = await asyncio.wait_for(
+                        validation_gen.__anext__(), timeout=0.1
+                    )
                     last_validation_event = validation_event
 
-                    if validation_event.get('done'):
+                    if validation_event.get("done"):
                         validation_done = True
-                        validation_content = validation_event.get('final_content', validation_content)
+                        validation_content = validation_event.get(
+                            "final_content", validation_content
+                        )
 
-                        model_name = validation_event.get('model', 'claude-3-5-sonnet')
-                        yield f"data: {json.dumps({
-                            'step': step_base + 0.2,
-                            'phase': 'validation',
-                            'model': model_name,
-                            'message': f'✅ {model_name} 검증 완료 ({len(validation_content)}자)',
-                            'progress': progress_base + 0.10,
-                            'validation_length': len(validation_content)
-                        }, ensure_ascii=False)}\n\n"
+                        model_name = validation_event.get(
+                            "model", "claude-3-5-sonnet"
+                        )
+                        message = f"✅ {model_name} 검증 완료 ({len(validation_content)}자)"
+                        payload = {
+                            "step": step_base + 0.2,
+                            "phase": "validation",
+                            "model": model_name,
+                            "message": message,
+                            "progress": progress_base + 0.10,
+                            "validation_length": len(validation_content),
+                        }
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     else:
-                        total_length = validation_event.get('total_length', 0)
+                        total_length = validation_event.get("total_length", 0)
                         if total_length > 0 and total_length % 100 == 0:
-                            yield f"data: {json.dumps({
-                                'step': step_base + 0.2,
-                                'phase': 'validation',
-                                'model': validation_event.get('model', 'claude-3-5-sonnet'),
-                                'message': f'🔍 검증 중... ({total_length}자)',
-                                'progress': progress_base + 0.06 + min(total_length / 2000, 1) * 0.04,
-                                'partial_length': total_length
-                            }, ensure_ascii=False)}\n\n"
+                            model_name = validation_event.get(
+                                "model", "claude-3-5-sonnet"
+                            )
+                            message = f"🔍 검증 중... ({total_length}자)"
+                            payload = {
+                                "step": step_base + 0.2,
+                                "phase": "validation",
+                                "model": model_name,
+                                "message": message,
+                                "progress": progress_base
+                                + 0.06
+                                + min(total_length / 2000, 1) * 0.04,
+                                "partial_length": total_length,
+                            }
+                            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
                 except asyncio.TimeoutError:
                     pass
@@ -330,15 +357,18 @@ async def merge_dual_streams(
                     validation_done = True
 
             # 병렬 검증 시작 (초안 시작 3초 후)
-            if validation_gen is None and (asyncio.get_event_loop().time() - draft_start_time) > 3:
+            if validation_gen is None and (
+                asyncio.get_event_loop().time() - draft_start_time
+            ) > 3:
                 if draft_content:
                     validation_gen = validation_generator_factory(draft_content)
-                    yield f"data: {json.dumps({
-                        'step': step_base + 0.2,
-                        'phase': 'validation',
-                        'message': '🔍 Claude Sonnet 검증 시작 (병렬)...',
-                        'progress': progress_base + 0.05
-                    }, ensure_ascii=False)}\n\n"
+                    payload = {
+                        "step": step_base + 0.2,
+                        "phase": "validation",
+                        "message": "🔍 Claude Sonnet 검증 시작 (병렬)...",
+                        "progress": progress_base + 0.05,
+                    }
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
             await asyncio.sleep(0.05)
 
@@ -347,8 +377,7 @@ async def merge_dual_streams(
             break
 
     # 최종 결과를 tuple로 yield (async generator는 return 불가)
-    yield (draft_content, validation_content, last_validation_event)
-
+    yield (draft_content, validation_content, last_validation_event)  # type: ignore
 
 # ===========================
 # 통합 래퍼 함수
@@ -357,7 +386,7 @@ async def dual_stream_analysis(
     llm_prompt: str,
     step_base: float = 6.0,
     progress_base: float = 0.78
-) -> AsyncGenerator[str, Tuple[str, str, float, List[str]]]:
+) -> AsyncGenerator[str | Tuple[str, str, float, List[str]], None]:
     """
     듀얼 LLM 병렬 스트리밍 분석 (통합 래퍼)
 
@@ -469,7 +498,6 @@ async def simple_llm_analysis(
     llm = ChatOpenAI(
         model=model,
         temperature=temperature,
-        max_tokens=max_tokens,
         max_retries=0,  # 재시도는 수동으로 처리
         timeout=timeout
     )
@@ -479,8 +507,9 @@ async def simple_llm_analysis(
     for attempt in range(1, max_retries + 1):
         try:
             response = llm.invoke(messages)
-            logger.info(f"LLM 해석 완료 (시도 {attempt}): {len(response.content)}자")
-            return response.content
+            final_content = ensure_text(response.content)
+            logger.info(f"LLM 해석 완료 (시도 {attempt}): {len(final_content)}자")
+            return final_content
         except Exception as e:
             last_err = e
             logger.warning(f"LLM 호출 시도 {attempt} 실패: {e}")

@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     // PDF 파싱은 시간이 오래 걸릴 수 있으므로 타임아웃 설정
     // DEV_DISABLE_TIMEOUT=true 환경변수로 타임아웃 비활성화 가능 (디버깅용)
     const disableTimeout = process.env.DEV_DISABLE_TIMEOUT === 'true';
-    const timeoutMs = disableTimeout ? 0 : 180000; // 180초 (3분)
+    const timeoutMs = disableTimeout ? 0 : 360000; // 360초 (6분)
 
     const controller = new AbortController();
     let timeoutId: ReturnType<typeof setTimeout> | null = null;

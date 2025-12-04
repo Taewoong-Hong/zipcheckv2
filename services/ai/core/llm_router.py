@@ -4,7 +4,7 @@ LLM 라우터
 ChatGPT (초안 생성) + Claude (검증) 듀얼 시스템
 """
 import logging
-from typing import Dict, List, Optional, Literal
+from typing import Dict, List, Optional, Literal, Any
 from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -12,6 +12,41 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from core.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ===========================
+# 타입 변환 헬퍼 함수
+# ===========================
+def ensure_text(content: Any) -> str:
+    """
+    LangChain 응답의 content를 안전하게 문자열로 변환
+    
+    LangChain이 str 말고 list/fragment로 줄 수도 있으니 방어적으로 처리
+    
+    Args:
+        content: LangChain 응답의 content (str | list[str | dict[str, Any]])
+    
+    Returns:
+        str: 변환된 문자열
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # 예: ["문장1", "문장2"] 혹은 [{"type": "text", "text": "..."}, ...]
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                # 텍스트 필드가 있으면 우선 사용
+                text = item.get("text") or item.get("content") or ""
+                if text:
+                    parts.append(str(text))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    # 기타 타입은 그냥 str로
+    return str(content)
 
 
 # ===========================
@@ -103,7 +138,7 @@ def single_model_analyze(
     response = llm.invoke(messages)
 
     return LLMResponse(
-        content=response.content,
+        content=ensure_text(response.content),
         model=llm.model_name,
         provider=provider,
         tokens=response.response_metadata.get("token_usage", {}).get("total_tokens"),
@@ -149,7 +184,7 @@ def dual_model_analyze(
     ]
     draft_response = draft_llm.invoke(draft_messages)
     draft = LLMResponse(
-        content=draft_response.content,
+        content=ensure_text(draft_response.content),
         model=draft_model,
         provider="openai",
         tokens=draft_response.response_metadata.get("token_usage", {}).get("total_tokens"),
@@ -201,7 +236,7 @@ def dual_model_analyze(
         else:
             raise
     validation = LLMResponse(
-        content=judge_response.content,
+        content=ensure_text(judge_response.content),
         model=judge_model,
         provider="claude",
         tokens=judge_response.response_metadata.get("usage", {}).get("total_tokens"),
@@ -219,15 +254,15 @@ def dual_model_analyze(
     # Step 4: 최종 답변 생성
     if len(conflicts) == 0:
         # 불일치 없음 → 초안 그대로 사용
-        final_answer = draft.content
+        final_answer = ensure_text(draft.content)
         confidence = 0.95
     else:
         # 불일치 있음 → 검증 결과 포함
         final_answer = f"""### ChatGPT 초안
-{draft.content}
+{ensure_text(draft.content)}
 
 ### Claude 검증 의견
-{validation.content}
+{ensure_text(validation.content)}
 
 ⚠️ 두 모델 간 견해 차이가 있습니다. 최종 판단은 법무사 또는 변호사와 상담하세요.
 """

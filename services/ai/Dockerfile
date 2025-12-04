@@ -2,7 +2,7 @@
 FROM python:3.11-slim
 
 # 작업 디렉토리 설정
-WORKDIR /app
+WORKDIR /app/services/ai
 
 # 시스템 의존성 설치 (gcc, libmagic, git)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,4 +34,5 @@ EXPOSE 8080
 
 # Uvicorn 단독 실행 (Gunicorn 워커 타임아웃 이슈 제거)
 # Cloud Run 단일 인스턴스 환경에서는 Uvicorn 단독으로 충분
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1 --timeout-keep-alive 5 --log-level info"]
+# --timeout-keep-alive 600: 장시간 PDF 파싱(GPT-4o Vision OCR)을 위한 10분 타임아웃
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT} --workers 1 --timeout-keep-alive 600 --log-level info"]

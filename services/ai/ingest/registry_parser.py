@@ -18,6 +18,8 @@ from core.audit_logger import (
     log_parsing_warning,
     EventType
 )
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 
 logger = logging.getLogger(__name__)
 
@@ -1124,16 +1126,21 @@ async def parse_registry_pdf(
 
         # Step 3: 정규식 기반 파싱 (LLM 없음!)
         logger.info("🔍 [Step 3/3] 정규식 기반 파싱 시작...")
+        logger.info("✅ [DEBUG-STEP 3.1] parse_with_regex() 호출 직전")
         registry = parse_with_regex(raw_text)
+        logger.info("✅ [DEBUG-STEP 3.2] parse_with_regex() 호출 완료")
 
         # 파싱 결과 상세 로깅
+        logger.info("✅ [DEBUG-STEP 4] 파싱 결과 로깅 시작")
         logger.info(f"✅ [파싱 완료] 주소={registry.property_address or 'N/A'}")
         logger.info(f"   └─ 소유자: {registry.owner.name if registry.owner else 'N/A'}")
         logger.info(f"   └─ 근저당: {len(registry.mortgages)}건 (총 {sum(m.amount or 0 for m in registry.mortgages)}만원)")
         logger.info(f"   └─ 압류/가압류: {len(registry.seizures)}건")
         logger.info(f"   └─ 질권: {len(registry.pledges)}건")
         logger.info(f"   └─ 전세권: {len(registry.lease_rights)}건")
+        logger.info("✅ [DEBUG-STEP 5] 파싱 결과 로깅 완료")
 
+        logger.info("✅ [DEBUG-STEP 6] 필드 검증 시작")
         # 파싱 신뢰도 체크 (핵심 필드 누락 경고)
         missing_fields = []
         if not registry.property_address:
@@ -1157,6 +1164,7 @@ async def parse_registry_pdf(
                 }
             )
 
+        logger.info("✅ [DEBUG-STEP 7] 감사 로그 호출 직전")
         # 성공 감사 로그
         log_parsing_success(
             case_id=case_id or "unknown",
@@ -1171,6 +1179,7 @@ async def parse_registry_pdf(
             }
         )
 
+        logger.info("✅ [DEBUG-STEP 8] return registry 직전")
         return registry
 
     except Exception as e:

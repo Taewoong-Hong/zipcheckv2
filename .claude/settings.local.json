@@ -71,7 +71,14 @@
       "Bash(do echo \"=== PID $pid ===\")",
       "Bash(tasklist /FI \"PID eq $pid\" /FO TABLE)",
       "Bash(timeout /t 5 /nobreak)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(gcloud builds list:*)",
+      "Bash(while read dir)",
+      "Bash(do if ls $dir/*.py)",
+      "Bash(then if [ ! -f \"$dir/__init__.py\" ])",
+      "Bash(then echo \"Missing __init__.py in: $dir\")",
+      "Bash(fi)",
+      "Bash(gcloud run services delete:*)"
     ],
     "deny": [],
     "ask": []
