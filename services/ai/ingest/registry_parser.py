@@ -380,22 +380,24 @@ def parse_summary_section(text: str) -> SummaryData:
 
         # 순위번호 추출 (근저당과 동일한 방식)
         # 패턴: 줄 시작 또는 공백 뒤에 오는 숫자 (1~2자리)
-        # 뒤에 "-숫자" (부번호) 또는 공백/압류/가압류 등이 올 수 있음
-        seizure_rank_pattern = r'(?:^|\s)(\d{1,2})(?:-\d+)?(?:\s|압류|가압류|가처분|경매|$)'
+        # 부번호 포함 (예: "1", "1-6", "6-1" 등 전체 캡처)
+        seizure_rank_pattern = r'(?:^|\s)(\d{1,2}(?:-\d+)?)(?:\s|압류|가압류|가처분|경매|$)'
 
         found_seizure_ranks = set()
         for match in re.finditer(seizure_rank_pattern, section2_text, re.MULTILINE):
             rank = match.group(1)
-            # 순위번호는 보통 1~20 범위
-            if 1 <= int(rank) <= 30:
-                found_seizure_ranks.add(rank)
+            # 주순위번호 추출 (예: "1-6" -> "1")
+            main_rank = rank.split('-')[0]
+            if 1 <= int(main_rank) <= 30:
+                found_seizure_ranks.add(rank)  # 부번호 포함된 전체 순위번호 저장
 
-        # Fallback: 테이블 형식에서 첫 컬럼이 순위번호인 경우
+        # Fallback: 테이블 형식에서 첫 컬럼이 순위번호인 경우 (부번호 포함)
         if not found_seizure_ranks:
-            row_pattern = r'^(\d{1,2})\s+'
+            row_pattern = r'^(\d{1,2}(?:-\d+)?)\s+'
             for match in re.finditer(row_pattern, section2_text, re.MULTILINE):
                 rank = match.group(1)
-                if 1 <= int(rank) <= 30:
+                main_rank = rank.split('-')[0]
+                if 1 <= int(main_rank) <= 30:
                     found_seizure_ranks.add(rank)
 
         # 순위번호 저장
@@ -413,23 +415,25 @@ def parse_summary_section(text: str) -> SummaryData:
 
         # 방법 1: 순위번호 패턴으로 직접 추출
         # 패턴: 줄 시작 또는 공백 뒤에 오는 숫자 (1~2자리)
-        # 뒤에 "-숫자" (부번호) 또는 공백/근저당 등이 올 수 있음
-        rank_pattern = r'(?:^|\s)(\d{1,2})(?:-\d+)?(?:\s|근저당|$)'
+        # 부번호 포함 (예: "1", "1-6", "6-1" 등 전체 캡처)
+        rank_pattern = r'(?:^|\s)(\d{1,2}(?:-\d+)?)(?:\s|근저당|질권|전세권|$)'
 
         found_ranks = set()
         for match in re.finditer(rank_pattern, section3_text[:3000], re.MULTILINE):
             rank = match.group(1)
-            # 순위번호는 보통 1~20 범위
-            if 1 <= int(rank) <= 30:
-                found_ranks.add(rank)
+            # 주순위번호 추출 (예: "1-6" -> "1")
+            main_rank = rank.split('-')[0]
+            if 1 <= int(main_rank) <= 30:
+                found_ranks.add(rank)  # 부번호 포함된 전체 순위번호 저장
 
         # 방법 2 (fallback): 테이블 형식에서 첫 컬럼이 순위번호인 경우
-        # 패턴: 줄 시작의 숫자 (공백으로 구분)
+        # 패턴: 줄 시작의 숫자 (부번호 포함)
         if not found_ranks:
-            row_pattern = r'^(\d{1,2})\s+'
+            row_pattern = r'^(\d{1,2}(?:-\d+)?)\s+'
             for match in re.finditer(row_pattern, section3_text[:3000], re.MULTILINE):
                 rank = match.group(1)
-                if 1 <= int(rank) <= 30:
+                main_rank = rank.split('-')[0]
+                if 1 <= int(main_rank) <= 30:
                     found_ranks.add(rank)
 
         # 순위번호 저장
@@ -779,10 +783,15 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
             if rank_matches:
                 # 가장 마지막 (가까운) 매치 사용
                 last_match = rank_matches[-1]
-                if last_match.group(1):
-                    rank_number = last_match.group(1)
-                    if last_match.group(2):
-                        sub_rank_number = int(last_match.group(2))
+                num = last_match.group(1)
+                sub = last_match.group(2) if last_match.lastindex and last_match.lastindex >= 2 else None
+                if num:
+                    # "1-6" 형태로 full rank 저장 (요약과 동일한 형식)
+                    if sub:
+                        rank_number = f"{num}-{sub}"
+                        sub_rank_number = int(sub)
+                    else:
+                        rank_number = num
                     break
 
         creditor = None
@@ -992,13 +1001,16 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                 rank_matches = list(re.finditer(rp, front_context, re.MULTILINE))
                 if rank_matches:
                     last_match = rank_matches[-1]
-                    if last_match.group(1):
-                        candidate = last_match.group(1)
-                        if candidate.isdigit() and 1 <= int(candidate) <= 30:
-                            rank_number = candidate
-                            if last_match.lastindex and last_match.lastindex >= 2 and last_match.group(2):
-                                sub_rank_number = int(last_match.group(2))
-                            break
+                    num = last_match.group(1)
+                    sub = last_match.group(2) if last_match.lastindex and last_match.lastindex >= 2 else None
+                    if num and num.isdigit() and 1 <= int(num) <= 30:
+                        # "1-6" 형태로 full rank 저장 (요약과 동일한 형식)
+                        if sub:
+                            rank_number = f"{num}-{sub}"
+                            sub_rank_number = int(sub)
+                        else:
+                            rank_number = num
+                        break
 
             # 중복 체크: 같은 순위번호는 한 번만 처리
             rank_key = f"{rank_number or 'none'}_{keyword_pos // 200}"
