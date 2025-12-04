@@ -302,6 +302,7 @@ class SummaryData:
         self.active_mortgage_amounts: List[int] = []  # 유효 근저당 금액 목록 (만원)
         self.active_mortgage_creditors: List[str] = []  # 유효 근저당 채권자 목록
         self.active_mortgage_ranks: List[str] = []  # 유효 근저당 순위번호 목록 (말소 판별용)
+        self.active_mortgage_entries: List[Dict[str, Any]] = []  # 유효 근저당 엔트리 목록 (순위, 금액, 채권자)
         self.active_seizure_types: List[str] = []  # 유효 압류 유형 목록 (임의경매개시결정, 압류 등)
         self.has_summary: bool = False  # 요약 섹션 존재 여부
 
@@ -383,27 +384,82 @@ def parse_summary_section(text: str) -> SummaryData:
     if section3_match:
         section3_text = summary_text[section3_match.start():]
 
-        # 순위번호 + 채권최고액을 함께 추출 (테이블 행 단위)
-        # 요약 테이블 형식: "순위번호 | 등기목적 | ... | 채권최고액 금XXX원"
-        # 패턴: 줄 시작의 숫자(순위번호) ... 금XXX원
+        # 순위번호 + 채권최고액 + 채권자를 함께 추출 (테이블 행 단위)
+        # 요약 테이블 형식: "순위번호 | 등기목적 | 접수정보 | 주요등기사항 (채권자, 금액 포함)"
+        # 행 단위로 파싱하여 (순위, 금액, 채권자) 엔트리 생성
 
-        # 방법 1: 행 단위로 파싱 (각 행에서 순위번호와 금액 추출)
-        # 테이블 행 패턴: 시작에 순위번호, 중간에 금액
-        row_pattern = r'(?:^|\n)\s*(\d+)(?:-\d+)?\s+[^\n]*?금\s*([\d,]+)\s*원'
-        for match in re.finditer(row_pattern, section3_text[:3000], re.MULTILINE):
-            rank_number = match.group(1)
-            amount_str = match.group(2).replace(',', '')
-            try:
-                amount_won = int(amount_str)
-                amount_man = amount_won // 10000
-                summary.active_mortgage_amounts.append(amount_man)
-                summary.active_mortgage_ranks.append(rank_number)
-                logger.info(f"   └─ 유효 근저당 (요약): 순위 {rank_number}, {amount_man:,}만원")
-            except ValueError:
-                pass
+        # 각 행을 개별적으로 파싱
+        lines = section3_text[:4000].split('\n')
+        current_rank = None
+        current_amount = None
+        current_creditor = None
 
-        # 방법 2 (Fallback): 순위번호 없이 금액만 추출 (기존 로직)
-        if not summary.active_mortgage_amounts:
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # 순위번호 추출 (행 시작에 숫자)
+            rank_match = re.match(r'^(\d+)(?:-\d+)?\s', line)
+            if rank_match:
+                # 이전 엔트리 저장
+                if current_rank and current_amount:
+                    entry = {
+                        'rank': current_rank,
+                        'amount': current_amount,
+                        'creditor': current_creditor
+                    }
+                    summary.active_mortgage_entries.append(entry)
+                    summary.active_mortgage_amounts.append(current_amount)
+                    summary.active_mortgage_ranks.append(current_rank)
+                    if current_creditor:
+                        summary.active_mortgage_creditors.append(current_creditor)
+                    logger.info(f"   └─ 유효 근저당 (요약): 순위 {current_rank}, {current_amount:,}만원, 채권자={current_creditor or 'N/A'}")
+
+                # 새 엔트리 시작
+                current_rank = rank_match.group(1)
+                current_amount = None
+                current_creditor = None
+
+            # 금액 추출
+            amount_match = re.search(r'금\s*([\d,]+)\s*원', line)
+            if amount_match and current_rank:
+                amount_str = amount_match.group(1).replace(',', '')
+                try:
+                    current_amount = int(amount_str) // 10000
+                except ValueError:
+                    pass
+
+            # 채권자 추출 (여러 패턴)
+            creditor_patterns = [
+                r'(?:근저당권자|채권자)\s*[:：]?\s*([^\s\n,]+(?:은행|저축은행|캐피탈|금융|신협|공사|공단)?)',
+                r'주식회사\s*([가-힣a-zA-Z0-9]+)',
+                r'([가-힣]+(?:은행|캐피탈|금융|저축은행|신협))',
+            ]
+            for cp in creditor_patterns:
+                creditor_match = re.search(cp, line)
+                if creditor_match and current_rank:
+                    creditor = creditor_match.group(1).strip()
+                    if creditor and len(creditor) >= 2:
+                        current_creditor = creditor
+                        break
+
+        # 마지막 엔트리 저장
+        if current_rank and current_amount:
+            entry = {
+                'rank': current_rank,
+                'amount': current_amount,
+                'creditor': current_creditor
+            }
+            summary.active_mortgage_entries.append(entry)
+            summary.active_mortgage_amounts.append(current_amount)
+            summary.active_mortgage_ranks.append(current_rank)
+            if current_creditor:
+                summary.active_mortgage_creditors.append(current_creditor)
+            logger.info(f"   └─ 유효 근저당 (요약): 순위 {current_rank}, {current_amount:,}만원, 채권자={current_creditor or 'N/A'}")
+
+        # Fallback: 엔트리가 없으면 금액만 추출 (기존 로직)
+        if not summary.active_mortgage_entries:
             amount_pattern = r'금\s*([\d,]+)\s*원'
             for match in re.finditer(amount_pattern, section3_text[:2000]):
                 amount_str = match.group(1).replace(',', '')
@@ -411,19 +467,17 @@ def parse_summary_section(text: str) -> SummaryData:
                     amount_won = int(amount_str)
                     amount_man = amount_won // 10000
                     summary.active_mortgage_amounts.append(amount_man)
-                    summary.active_mortgage_ranks.append("")  # 순위번호 없음
-                    logger.info(f"   └─ 유효 근저당 (요약, 순위없음): {amount_man:,}만원")
+                    summary.active_mortgage_ranks.append("")
+                    summary.active_mortgage_entries.append({
+                        'rank': '',
+                        'amount': amount_man,
+                        'creditor': None
+                    })
+                    logger.info(f"   └─ 유효 근저당 (요약, fallback): {amount_man:,}만원")
                 except ValueError:
                     pass
 
-        # 채권자 추출 (근저당권자: XXX 패턴)
-        creditor_pattern = r'(?:근저당권자|채권자)[:\s]*([^\s\n]+(?:은행|저축은행|캐피탈|금융|신협)?)'
-        for match in re.finditer(creditor_pattern, section3_text[:2000]):
-            creditor = match.group(1).strip()
-            if creditor and len(creditor) >= 2:
-                summary.active_mortgage_creditors.append(creditor)
-
-    logger.info(f"📋 요약 파싱 완료: 소유자={summary.owner_name}, 유효근저당={len(summary.active_mortgage_amounts)}건 (순위: {summary.active_mortgage_ranks}), 유효압류={len(summary.active_seizure_types)}건")
+    logger.info(f"📋 요약 파싱 완료: 소유자={summary.owner_name}, 유효근저당={len(summary.active_mortgage_entries)}건, 유효압류={len(summary.active_seizure_types)}건")
 
     return summary
 
@@ -713,15 +767,17 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
     rank_pattern = r'(?:순위번호|순위)\s*[:：]?\s*(\d+)(?:-(\d+))?|^(\d+)(?:-(\d+))?\s'
 
     # 요약 기반 유효 항목 (복사본 사용)
-    # 순위번호가 있으면 순위번호로 매칭, 없으면 금액으로 매칭
-    active_ranks = list(summary.active_mortgage_ranks) if summary and summary.has_summary else []
+    # 복합 매칭: (금액 + 채권자) 또는 (금액 + 순위) 조합으로 매칭
+    active_entries = list(summary.active_mortgage_entries) if summary and summary.has_summary else []
     active_amounts = list(summary.active_mortgage_amounts) if summary and summary.has_summary else []
 
-    # 순위번호 기반 매칭 사용 여부 (요약에서 순위번호가 추출되었는지)
-    use_rank_matching = bool(active_ranks and any(r for r in active_ranks))
+    # 복합 매칭 사용 여부 (요약에서 엔트리가 추출되었는지)
+    use_composite_matching = bool(active_entries)
 
-    if use_rank_matching:
-        logger.info(f"말소 판별: 순위번호 기반 매칭 사용 (유효 순위: {active_ranks})")
+    if use_composite_matching:
+        logger.info(f"말소 판별: 복합 매칭 사용 (요약 엔트리 {len(active_entries)}개)")
+        for entry in active_entries:
+            logger.info(f"   └─ 유효 엔트리: 순위={entry.get('rank')}, 금액={entry.get('amount')}만원, 채권자={entry.get('creditor')}")
     else:
         logger.info(f"말소 판별: 금액 기반 매칭 사용 (유효 금액: {active_amounts})")
 
@@ -769,19 +825,55 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
         if debtor_match:
             debtor = debtor_match.group(1).strip()
 
-        # 말소 여부 판별
+        # 말소 여부 판별 (복합 매칭: 요약 우선)
         if summary and summary.has_summary:
             is_deleted = True
+            matched_entry_idx = None
 
-            if use_rank_matching and rank_number:
-                # 순위번호 기반 판별: 요약의 유효 순위번호와 매칭되면 유효
-                if rank_number in active_ranks:
-                    is_deleted = False
-                    logger.info(f"   └─ 순위 {rank_number} 근저당 ({amount_man:,}만원): 유효 (요약에 순위 존재)")
-                else:
-                    logger.info(f"   └─ 순위 {rank_number} 근저당 ({amount_man:,}만원): 말소 (요약에 순위 없음)")
+            if use_composite_matching:
+                # 복합 매칭: (금액 + 채권자) 또는 (금액 + 순위) 조합으로 매칭
+                for idx, entry in enumerate(active_entries):
+                    entry_amount = entry.get('amount')
+                    entry_creditor = entry.get('creditor')
+                    entry_rank = entry.get('rank')
+
+                    # 금액 일치 확인 (±1만원 오차)
+                    if entry_amount and abs(amount_man - entry_amount) <= 1:
+                        # 1) 채권자 매칭 시도 (가장 정확)
+                        if entry_creditor and creditor:
+                            # 채권자명 일부 포함 확인 (예: "국민은행" in "주식회사국민은행")
+                            if entry_creditor in creditor or creditor in entry_creditor:
+                                is_deleted = False
+                                matched_entry_idx = idx
+                                logger.info(f"   └─ 근저당 ({amount_man:,}만원, {creditor}): 유효 (금액+채권자 매칭)")
+                                break
+
+                        # 2) 순위번호 매칭 시도
+                        if is_deleted and rank_number and entry_rank:
+                            if rank_number == entry_rank:
+                                is_deleted = False
+                                matched_entry_idx = idx
+                                logger.info(f"   └─ 순위 {rank_number} 근저당 ({amount_man:,}만원): 유효 (금액+순위 매칭)")
+                                break
+
+                        # 3) 해당 금액이 요약에 1개만 있으면 금액만으로 매칭
+                        if is_deleted:
+                            same_amount_entries = [e for e in active_entries
+                                                   if e.get('amount') and abs(amount_man - e.get('amount')) <= 1]
+                            if len(same_amount_entries) == 1:
+                                is_deleted = False
+                                matched_entry_idx = idx
+                                logger.info(f"   └─ 근저당 ({amount_man:,}만원): 유효 (유일 금액 매칭)")
+                                break
+
+                # 매칭된 엔트리 제거 (중복 매칭 방지)
+                if matched_entry_idx is not None:
+                    active_entries.pop(matched_entry_idx)
+                elif is_deleted:
+                    logger.info(f"   └─ 근저당 ({amount_man:,}만원, {creditor or 'N/A'}): 말소 (요약에 매칭 없음)")
+
             else:
-                # 금액 기반 판별 (Fallback): 요약에 있는 금액과 매칭되면 유효
+                # Fallback: 금액 기반 판별 (요약 엔트리가 없는 경우)
                 for i, active_amount in enumerate(active_amounts):
                     # 금액이 일치하면 유효 (±1만원 오차 허용)
                     if abs(amount_man - active_amount) <= 1:

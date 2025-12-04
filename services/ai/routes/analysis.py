@@ -478,17 +478,74 @@ async def stream_analysis(
                         client=client
                     )
                     now = datetime.now()
-                    trade_result = await apt_trade_client.get_apt_trades(
-                        lawd_cd=lawd_cd,
-                        deal_ymd=f"{now.year}{now.month:02d}"
-                    )
+                    recent_transactions = []
 
-                    if trade_result['body']['items']:
-                        amounts = [item['dealAmount'] for item in trade_result['body']['items']
-                                  if item['dealAmount']]
+                    # 동적 기간 확대 로직: 3개월 → 6개월 → 12개월
+                    # - 3개월 내 데이터 < 5개 → 6개월 확대
+                    # - 6개월 내 데이터 < 10개 → 12개월 확대
+                    from dateutil.relativedelta import relativedelta
+
+                    def get_previous_month(year: int, month: int, months_back: int) -> str:
+                        target_date = datetime(year, month, 1) - relativedelta(months=months_back)
+                        return f"{target_date.year}{target_date.month:02d}"
+
+                    # Step 1: 3개월 조회
+                    for months_back in range(3):
+                        deal_ymd = get_previous_month(now.year, now.month, months_back)
+                        try:
+                            trade_result = await apt_trade_client.get_apt_trades(
+                                lawd_cd=lawd_cd,
+                                deal_ymd=deal_ymd
+                            )
+                            if trade_result['body']['items']:
+                                recent_transactions.extend(trade_result['body']['items'])
+                        except Exception as e:
+                            logger.warning(f"실거래가 조회 실패 ({deal_ymd}): {e}")
+                            continue
+
+                    # Step 2: 3개월 데이터 < 5개 → 6개월까지 확대
+                    if len(recent_transactions) < 5:
+                        message = f'📊 3개월 데이터 {len(recent_transactions)}건 (5개 미만) → 6개월까지 확대 조회'
+                        yield f"data: {json.dumps({'step': 4, 'message': message, 'progress': 0.56}, ensure_ascii=False)}\n\n"
+
+                        for months_back in range(3, 6):
+                            deal_ymd = get_previous_month(now.year, now.month, months_back)
+                            try:
+                                trade_result = await apt_trade_client.get_apt_trades(
+                                    lawd_cd=lawd_cd,
+                                    deal_ymd=deal_ymd
+                                )
+                                if trade_result['body']['items']:
+                                    recent_transactions.extend(trade_result['body']['items'])
+                            except Exception as e:
+                                logger.warning(f"실거래가 조회 실패 ({deal_ymd}): {e}")
+                                continue
+
+                    # Step 3: 6개월 데이터 < 10개 → 12개월까지 확대
+                    if len(recent_transactions) < 10:
+                        message = f'📊 6개월 데이터 {len(recent_transactions)}건 (10개 미만) → 12개월까지 확대 조회'
+                        yield f"data: {json.dumps({'step': 4, 'message': message, 'progress': 0.58}, ensure_ascii=False)}\n\n"
+
+                        for months_back in range(6, 12):
+                            deal_ymd = get_previous_month(now.year, now.month, months_back)
+                            try:
+                                trade_result = await apt_trade_client.get_apt_trades(
+                                    lawd_cd=lawd_cd,
+                                    deal_ymd=deal_ymd
+                                )
+                                if trade_result['body']['items']:
+                                    recent_transactions.extend(trade_result['body']['items'])
+                            except Exception as e:
+                                logger.warning(f"실거래가 조회 실패 ({deal_ymd}): {e}")
+                                continue
+
+                    if recent_transactions:
+                        amounts = [item['dealAmount'] for item in recent_transactions
+                                  if item.get('dealAmount')]
                         if amounts:
                             property_value_estimate = sum(amounts) // len(amounts)
-                            message = f'✅ 평균 실거래가: {property_value_estimate:,}만원 ({len(amounts)}건 분석)'
+                            period_text = "3개월" if len(recent_transactions) < 10 else ("6개월" if len(recent_transactions) < 20 else "12개월")
+                            message = f'✅ 평균 실거래가: {property_value_estimate:,}만원 (최근 {period_text}, {len(amounts)}건 분석)'
                             yield f"data: {json.dumps({'step': 4, 'message': message, 'progress': 0.6}, ensure_ascii=False)}\n\n"
                             await asyncio.sleep(0.5)
 
@@ -1280,14 +1337,17 @@ async def execute_analysis_pipeline(case_id: str):
                     else:
                         logger.warning("⚠️ 전세 실거래가 데이터 없음 (6개월)")
 
-                    # (2) 매매 실거래가 조회 (3개월, 최대/최소 제외)
+                    # (2) 매매 실거래가 조회 (동적 기간 확대: 3개월 → 6개월 → 12개월)
                     apt_trade_client = AptTradeAPIClient(
                         api_key=settings.public_data_api_key,
                         client=client
                     )
 
                     sale_amounts = []
-                    for months_back in range(3):  # 최근 3개월
+                    query_period = "3개월"
+
+                    # Step 1: 3개월 조회
+                    for months_back in range(3):
                         deal_ymd = get_previous_month(now.year, now.month, months_back)
 
                         try:
@@ -1305,41 +1365,146 @@ async def execute_analysis_pipeline(case_id: str):
                             logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
                             continue
 
+                    # Step 2: 3개월 데이터 < 5개 → 6개월까지 확대
+                    if len(sale_amounts) < 5:
+                        logger.info(f"📊 매매 실거래가 {len(sale_amounts)}건 (< 5건) → 6개월까지 확대 조회")
+                        query_period = "6개월"
+
+                        for months_back in range(3, 6):
+                            deal_ymd = get_previous_month(now.year, now.month, months_back)
+
+                            try:
+                                trade_result = await apt_trade_client.get_apt_trades(
+                                    lawd_cd=lawd_cd,
+                                    deal_ymd=deal_ymd
+                                )
+
+                                if trade_result['body']['items']:
+                                    recent_transactions.extend(trade_result['body']['items'])
+                                    for item in trade_result['body']['items']:
+                                        if item.get('dealAmount'):
+                                            sale_amounts.append(item['dealAmount'])
+                            except Exception as e:
+                                logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+                                continue
+
+                    # Step 3: 6개월 데이터 < 10개 → 12개월까지 확대
+                    if len(sale_amounts) < 10:
+                        logger.info(f"📊 매매 실거래가 {len(sale_amounts)}건 (< 10건) → 12개월까지 확대 조회")
+                        query_period = "12개월"
+
+                        for months_back in range(6, 12):
+                            deal_ymd = get_previous_month(now.year, now.month, months_back)
+
+                            try:
+                                trade_result = await apt_trade_client.get_apt_trades(
+                                    lawd_cd=lawd_cd,
+                                    deal_ymd=deal_ymd
+                                )
+
+                                if trade_result['body']['items']:
+                                    recent_transactions.extend(trade_result['body']['items'])
+                                    for item in trade_result['body']['items']:
+                                        if item.get('dealAmount'):
+                                            sale_amounts.append(item['dealAmount'])
+                            except Exception as e:
+                                logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+                                continue
+
                     # 매매 평균 계산 (최대/최소 제외)
                     if sale_amounts:
                         filtered_average = calculate_average_exclude_outliers(sale_amounts)
                         if filtered_average:
                             property_value_estimate = filtered_average
-                            logger.info(f"✅ 매매 실거래가 평균 (3개월, 최대/최소 제외): {property_value_estimate:,}만원 ({len(sale_amounts)}건 중 {len(sale_amounts)-2}건 분석)")
+                            analyzed_count = max(len(sale_amounts) - 2, len(sale_amounts))
+                            logger.info(f"✅ 매매 실거래가 평균 ({query_period}, 최대/최소 제외): {property_value_estimate:,}만원 ({len(sale_amounts)}건 중 {analyzed_count}건 분석)")
                         else:
                             logger.warning("⚠️ 매매 실거래가 필터링 후 데이터 부족")
                     else:
-                        logger.warning("⚠️ 매매 실거래가 데이터 없음 (3개월)")
+                        logger.warning(f"⚠️ 매매 실거래가 데이터 없음 ({query_period})")
 
                 # ============================
-                # 매매 계약: 매매 실거래가만 조회 (현재 월)
+                # 매매 계약: 매매 실거래가만 조회 (동적 기간 확대: 3개월 → 6개월 → 12개월)
                 # ============================
                 else:
-                    logger.info(f"[단일 API] 매매 계약 - 매매 실거래가(현재 월) 조회")
-
-                    deal_ymd = f"{now.year}{now.month:02d}"
+                    logger.info(f"[단일 API] 매매 계약 - 매매 실거래가(동적 기간 확대) 조회")
 
                     apt_trade_client = AptTradeAPIClient(
                         api_key=settings.public_data_api_key,
                         client=client
                     )
-                    trade_result = await apt_trade_client.get_apt_trades(
-                        lawd_cd=lawd_cd,
-                        deal_ymd=deal_ymd
-                    )
 
-                    if trade_result['body']['items']:
-                        recent_transactions = trade_result['body']['items']
-                        amounts = [item['dealAmount'] for item in recent_transactions
-                                  if item['dealAmount']]
-                        if amounts:
-                            property_value_estimate = sum(amounts) // len(amounts)
-                            logger.info(f"✅ 매매 실거래가 평균 (현재 월): {property_value_estimate:,}만원 ({len(amounts)}건 분석)")
+                    amounts = []
+                    query_period = "3개월"
+
+                    # Step 1: 3개월 조회
+                    for months_back in range(3):
+                        deal_ymd = get_previous_month(now.year, now.month, months_back)
+
+                        try:
+                            trade_result = await apt_trade_client.get_apt_trades(
+                                lawd_cd=lawd_cd,
+                                deal_ymd=deal_ymd
+                            )
+
+                            if trade_result['body']['items']:
+                                recent_transactions.extend(trade_result['body']['items'])
+                                for item in trade_result['body']['items']:
+                                    if item.get('dealAmount'):
+                                        amounts.append(item['dealAmount'])
+                        except Exception as e:
+                            logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+                            continue
+
+                    # Step 2: 3개월 데이터 < 5개 → 6개월까지 확대
+                    if len(amounts) < 5:
+                        logger.info(f"📊 매매 실거래가 {len(amounts)}건 (< 5건) → 6개월까지 확대 조회")
+                        query_period = "6개월"
+
+                        for months_back in range(3, 6):
+                            deal_ymd = get_previous_month(now.year, now.month, months_back)
+
+                            try:
+                                trade_result = await apt_trade_client.get_apt_trades(
+                                    lawd_cd=lawd_cd,
+                                    deal_ymd=deal_ymd
+                                )
+
+                                if trade_result['body']['items']:
+                                    recent_transactions.extend(trade_result['body']['items'])
+                                    for item in trade_result['body']['items']:
+                                        if item.get('dealAmount'):
+                                            amounts.append(item['dealAmount'])
+                            except Exception as e:
+                                logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+                                continue
+
+                    # Step 3: 6개월 데이터 < 10개 → 12개월까지 확대
+                    if len(amounts) < 10:
+                        logger.info(f"📊 매매 실거래가 {len(amounts)}건 (< 10건) → 12개월까지 확대 조회")
+                        query_period = "12개월"
+
+                        for months_back in range(6, 12):
+                            deal_ymd = get_previous_month(now.year, now.month, months_back)
+
+                            try:
+                                trade_result = await apt_trade_client.get_apt_trades(
+                                    lawd_cd=lawd_cd,
+                                    deal_ymd=deal_ymd
+                                )
+
+                                if trade_result['body']['items']:
+                                    recent_transactions.extend(trade_result['body']['items'])
+                                    for item in trade_result['body']['items']:
+                                        if item.get('dealAmount'):
+                                            amounts.append(item['dealAmount'])
+                            except Exception as e:
+                                logger.warning(f"매매 실거래가 조회 실패 ({deal_ymd}): {e}")
+                                continue
+
+                    if amounts:
+                        property_value_estimate = sum(amounts) // len(amounts)
+                        logger.info(f"✅ 매매 실거래가 평균 ({query_period}): {property_value_estimate:,}만원 ({len(amounts)}건 분석)")
 
         # 4️⃣ 리스크 엔진 실행 (계약 타입에 따라 분기)
         contract_type = case.get('contract_type', '전세')
