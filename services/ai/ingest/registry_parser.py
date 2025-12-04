@@ -301,6 +301,7 @@ class SummaryData:
         self.owner_name: Optional[str] = None
         self.active_mortgage_amounts: List[int] = []  # 유효 근저당 금액 목록 (만원)
         self.active_mortgage_creditors: List[str] = []  # 유효 근저당 채권자 목록
+        self.active_mortgage_ranks: List[str] = []  # 유효 근저당 순위번호 목록 (말소 판별용)
         self.active_seizure_types: List[str] = []  # 유효 압류 유형 목록 (임의경매개시결정, 압류 등)
         self.has_summary: bool = False  # 요약 섹션 존재 여부
 
@@ -382,17 +383,38 @@ def parse_summary_section(text: str) -> SummaryData:
     if section3_match:
         section3_text = summary_text[section3_match.start():]
 
-        # 채권최고액 추출 (금XXX,XXX,XXX원 패턴)
-        amount_pattern = r'금\s*([\d,]+)\s*원'
-        for match in re.finditer(amount_pattern, section3_text[:2000]):  # 섹션 3 내에서만
-            amount_str = match.group(1).replace(',', '')
+        # 순위번호 + 채권최고액을 함께 추출 (테이블 행 단위)
+        # 요약 테이블 형식: "순위번호 | 등기목적 | ... | 채권최고액 금XXX원"
+        # 패턴: 줄 시작의 숫자(순위번호) ... 금XXX원
+
+        # 방법 1: 행 단위로 파싱 (각 행에서 순위번호와 금액 추출)
+        # 테이블 행 패턴: 시작에 순위번호, 중간에 금액
+        row_pattern = r'(?:^|\n)\s*(\d+)(?:-\d+)?\s+[^\n]*?금\s*([\d,]+)\s*원'
+        for match in re.finditer(row_pattern, section3_text[:3000], re.MULTILINE):
+            rank_number = match.group(1)
+            amount_str = match.group(2).replace(',', '')
             try:
                 amount_won = int(amount_str)
                 amount_man = amount_won // 10000
                 summary.active_mortgage_amounts.append(amount_man)
-                logger.info(f"   └─ 유효 근저당 (요약): {amount_man:,}만원")
+                summary.active_mortgage_ranks.append(rank_number)
+                logger.info(f"   └─ 유효 근저당 (요약): 순위 {rank_number}, {amount_man:,}만원")
             except ValueError:
                 pass
+
+        # 방법 2 (Fallback): 순위번호 없이 금액만 추출 (기존 로직)
+        if not summary.active_mortgage_amounts:
+            amount_pattern = r'금\s*([\d,]+)\s*원'
+            for match in re.finditer(amount_pattern, section3_text[:2000]):
+                amount_str = match.group(1).replace(',', '')
+                try:
+                    amount_won = int(amount_str)
+                    amount_man = amount_won // 10000
+                    summary.active_mortgage_amounts.append(amount_man)
+                    summary.active_mortgage_ranks.append("")  # 순위번호 없음
+                    logger.info(f"   └─ 유효 근저당 (요약, 순위없음): {amount_man:,}만원")
+                except ValueError:
+                    pass
 
         # 채권자 추출 (근저당권자: XXX 패턴)
         creditor_pattern = r'(?:근저당권자|채권자)[:\s]*([^\s\n]+(?:은행|저축은행|캐피탈|금융|신협)?)'
@@ -401,7 +423,7 @@ def parse_summary_section(text: str) -> SummaryData:
             if creditor and len(creditor) >= 2:
                 summary.active_mortgage_creditors.append(creditor)
 
-    logger.info(f"📋 요약 파싱 완료: 소유자={summary.owner_name}, 유효근저당={len(summary.active_mortgage_amounts)}건, 유효압류={len(summary.active_seizure_types)}건")
+    logger.info(f"📋 요약 파싱 완료: 소유자={summary.owner_name}, 유효근저당={len(summary.active_mortgage_amounts)}건 (순위: {summary.active_mortgage_ranks}), 유효압류={len(summary.active_seizure_types)}건")
 
     return summary
 
@@ -690,8 +712,18 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
     # 앞쪽 컨텍스트에서 순위번호 찾기 (숫자-숫자 또는 단독 숫자)
     rank_pattern = r'(?:순위번호|순위)\s*[:：]?\s*(\d+)(?:-(\d+))?|^(\d+)(?:-(\d+))?\s'
 
-    # 요약 기반 유효 금액 목록 (복사본 사용 - 매칭 시 제거)
+    # 요약 기반 유효 항목 (복사본 사용)
+    # 순위번호가 있으면 순위번호로 매칭, 없으면 금액으로 매칭
+    active_ranks = list(summary.active_mortgage_ranks) if summary and summary.has_summary else []
     active_amounts = list(summary.active_mortgage_amounts) if summary and summary.has_summary else []
+
+    # 순위번호 기반 매칭 사용 여부 (요약에서 순위번호가 추출되었는지)
+    use_rank_matching = bool(active_ranks and any(r for r in active_ranks))
+
+    if use_rank_matching:
+        logger.info(f"말소 판별: 순위번호 기반 매칭 사용 (유효 순위: {active_ranks})")
+    else:
+        logger.info(f"말소 판별: 금액 기반 매칭 사용 (유효 금액: {active_amounts})")
 
     # 모든 근저당권 찾기
     for amount_match in re.finditer(amount_pattern, text):
@@ -739,14 +771,23 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
 
         # 말소 여부 판별
         if summary and summary.has_summary:
-            # 요약 기반 판별: 요약에 있는 금액과 매칭되면 유효
             is_deleted = True
-            for i, active_amount in enumerate(active_amounts):
-                # 금액이 일치하면 유효 (±1만원 오차 허용)
-                if abs(amount_man - active_amount) <= 1:
+
+            if use_rank_matching and rank_number:
+                # 순위번호 기반 판별: 요약의 유효 순위번호와 매칭되면 유효
+                if rank_number in active_ranks:
                     is_deleted = False
-                    active_amounts.pop(i)  # 이미 매칭된 금액은 제거
-                    break
+                    logger.info(f"   └─ 순위 {rank_number} 근저당 ({amount_man:,}만원): 유효 (요약에 순위 존재)")
+                else:
+                    logger.info(f"   └─ 순위 {rank_number} 근저당 ({amount_man:,}만원): 말소 (요약에 순위 없음)")
+            else:
+                # 금액 기반 판별 (Fallback): 요약에 있는 금액과 매칭되면 유효
+                for i, active_amount in enumerate(active_amounts):
+                    # 금액이 일치하면 유효 (±1만원 오차 허용)
+                    if abs(amount_man - active_amount) <= 1:
+                        is_deleted = False
+                        active_amounts.pop(i)  # 이미 매칭된 금액은 제거
+                        break
         else:
             # Fallback: 텍스트 키워드 기반 판별
             deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제']
