@@ -995,14 +995,18 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
             context = text[start:end]
             front_context = text[start:keyword_pos]
 
-            # 순위번호 추출 (근저당과 동일한 방식)
+            # 순위번호 추출 (테이블 형식 지원 강화)
             rank_number = None
             sub_rank_number = None
 
+            # 테이블 형식에서 순위번호는 보통 줄 시작에 있음
+            # 예: "1   압류   2023년..." 또는 "1-2   가압류..."
             rank_patterns = [
                 r'순위번호\s*[:：]?\s*(\d+)(?:-(\d+))?',  # "순위번호: 1-6"
-                r'(?:^|\s)(\d+)(?:-(\d+))?\s+(?:압류|가압류|가처분|경매)',  # "1-6 압류"
-                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s',  # 줄 시작 "1-6 "
+                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s+(?:압류|가압류|가처분|경매)',  # 줄시작 "1 압류" 또는 "1-6 압류"
+                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s{2,}',  # 줄시작 "1   " (공백 2개 이상 = 테이블 컬럼)
+                r'(?:^|\n)(\d+)(?:-(\d+))?\t',  # 줄시작 + 탭 (테이블 형식)
+                r'(?:^|\n)\s*(\d+)\s*$',  # 줄 전체가 숫자만 (단독 순위번호)
             ]
 
             for rp in rank_patterns:
@@ -1011,54 +1015,30 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
                     # 가장 마지막 (가까운) 매치 사용
                     last_match = rank_matches[-1]
                     if last_match.group(1):
-                        rank_number = last_match.group(1)
-                        if last_match.lastindex and last_match.lastindex >= 2 and last_match.group(2):
-                            sub_rank_number = int(last_match.group(2))
-                        break
-
-            # 채권자/권리자 추출 (강화된 패턴)
-            creditor = None
-            creditor_patterns = [
-                # 1. 명시적 "채권자:", "권리자:", "신청인:" 패턴 (최우선)
-                # - 다음에 나오는 기관명/회사명만 추출 (제XXXX호 등 제외)
-                r'(?:채권자|권리자|신청인|신청권자)\s*[:：]?\s*([가-힣a-zA-Z0-9\(\)㈜]+(?:\s*주식회사|\s*대부)?)',
-                # 2. 국세청/세무서 (공공기관) - "국" 약어 포함
-                r'([가-힣]{2,15}(?:지방국세청|국세청|세무서))',
-                r'\b(국)\b',  # 국세청 약어 "국"
-                # 3. 지자체 (시청, 구청 등)
-                r'([가-힣]{2,15}(?:시청|구청|군청|도청|읍사무소|면사무소|동주민센터))',
-                # 4. 공단/공사 (국민건강보험공단, 근로복지공단 등)
-                r'([가-힣]{4,20}(?:공단|공사))',
-                # 5. 금융기관/대부업체
-                r'([가-힣a-zA-Z0-9]{2,20}(?:은행|캐피탈|금융|신협|저축은행|증권|보험|대부))',
-                # 6. "주식회사 XXX" - 회사명만 추출
-                r'주식회사\s*([가-힣a-zA-Z0-9]+)',
-                # 7. "XXX 주식회사" - 회사명만 추출
-                r'([가-힣a-zA-Z0-9]+)\s*주식회사',
-                # 8. "(주)XXX" 또는 "㈜XXX" - 회사명만 추출
-                r'[\(（]주[\)）]\s*([가-힣a-zA-Z0-9]+)',
-                r'㈜\s*([가-힣a-zA-Z0-9]+)',
-                # 9. 지자체 패턴 (XX시, XX구, XX군) + "장" (시장, 구청장 등)
-                r'([가-힣]{2,10}(?:특별시|광역시|도|시|구|군))\s*(?:장)?(?:\s|$)',
-                # 10. 개인 이름 (2~4글자 한글, 맨 마지막 fallback)
-                r'(?:채권자|권리자|신청인)\s*[:：]?\s*([가-힣]{2,4})(?:\s|$)',
-            ]
-
-            for creditor_pattern in creditor_patterns:
-                match = re.search(creditor_pattern, context)
-                if match:
-                    candidate = match.group(1).strip()
-                    # 유효한 채권자인지 확인 (접수번호 패턴 제외)
-                    if (candidate and len(candidate) >= 2 and
-                        candidate not in invalid_creditors and
-                        not is_registration_number(candidate)):
-                        # 불필요한 접미사 제거
-                        candidate = re.sub(r'\s*(귀중|앞|님|의)\s*$', '', candidate).strip()
-                        # 접수번호 접미사 제거 (예: "동양자산관리대부 주식회사 제189752호" → "동양자산관리대부")
-                        candidate = re.sub(r'\s*제\d+호.*$', '', candidate).strip()
-                        if candidate and len(candidate) >= 2 and not is_registration_number(candidate):
-                            creditor = candidate
+                        candidate_rank = last_match.group(1)
+                        # 순위번호 유효성 검사 (1~30 범위)
+                        if candidate_rank.isdigit() and 1 <= int(candidate_rank) <= 30:
+                            rank_number = candidate_rank
+                            if last_match.lastindex and last_match.lastindex >= 2 and last_match.group(2):
+                                sub_rank_number = int(last_match.group(2))
                             break
+
+            # 채권자/권리자 추출 (간단화: 키워드 다음 바로 오는 단어 추출)
+            # 예: "권리자: 서초구(서울특별시)" → "서초구(서울특별시)" 그대로 추출
+            creditor = None
+
+            # "권리자", "채권자", "신청인" 다음에 바로 오는 단어를 추출
+            # 괄호가 있으면 괄호 내용까지 포함 (예: "서초구(서울특별시)")
+            simple_creditor_pattern = r'(?:권리자|채권자|신청인|신청권자)\s*[:：]?\s*([가-힣a-zA-Z0-9]+(?:[\(（][^\)）]+[\)）])?)'
+
+            match = re.search(simple_creditor_pattern, context)
+            if match:
+                candidate = match.group(1).strip()
+                # 유효성 검사 (접수번호나 무효 단어 제외)
+                if (candidate and len(candidate) >= 2 and
+                    candidate not in invalid_creditors and
+                    not is_registration_number(candidate)):
+                    creditor = candidate
 
             # 금액 찾기 (있을 경우)
             amount = None
