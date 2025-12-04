@@ -872,13 +872,15 @@ def deduplicate_mortgages_by_rank(mortgages: List[MortgageInfo]) -> List[Mortgag
     if not ranked_mortgages:
         return mortgages
 
-    # 같은 rank_number별로 그룹화
+    # 같은 주순위번호별로 그룹화 (예: "1-1", "1-6" → "1")
     from collections import defaultdict
     rank_groups: Dict[str, List[MortgageInfo]] = defaultdict(list)
 
     for m in ranked_mortgages:
         if m.rank_number is not None:  # Type guard for Pylance
-            rank_groups[m.rank_number].append(m)
+            # 주순위번호 추출 (예: "1-6" -> "1")
+            main_rank = m.rank_number.split('-')[0]
+            rank_groups[main_rank].append(m)
 
     # 각 그룹에서 가장 높은 sub_rank_number를 가진 항목만 선택
     deduplicated = []
@@ -906,9 +908,9 @@ def deduplicate_mortgages_by_rank(mortgages: List[MortgageInfo]) -> List[Mortgag
     # 순위번호 없는 항목 + 중복 제거된 항목 합치기
     result = no_rank_mortgages + deduplicated
 
-    # 원래 순서 유지를 위해 정렬 (rank_number 기준)
+    # 원래 순서 유지를 위해 정렬 (주순위번호 기준)
     result.sort(key=lambda x: (
-        int(x.rank_number) if x.rank_number and x.rank_number.isdigit() else 999,
+        int(x.rank_number.split('-')[0]) if x.rank_number else 999,
         x.sub_rank_number or 0
     ))
 
@@ -1320,13 +1322,15 @@ def deduplicate_seizures_by_rank(seizures: List[SeizureInfo]) -> List[SeizureInf
     if not ranked_seizures:
         return no_rank_seizures
 
-    # 같은 rank_number별로 그룹화
+    # 같은 주순위번호별로 그룹화 (예: "1-1", "1-6" → "1")
     from collections import defaultdict
     rank_groups: Dict[str, List[SeizureInfo]] = defaultdict(list)
 
     for s in ranked_seizures:
         if s.rank_number is not None:  # Type guard for Pylance
-            rank_groups[s.rank_number].append(s)
+            # 주순위번호 추출 (예: "1-6" -> "1")
+            main_rank = s.rank_number.split('-')[0]
+            rank_groups[main_rank].append(s)
 
     # 각 그룹에서 가장 높은 sub_rank_number를 가진 항목만 선택
     deduplicated = []
@@ -1352,9 +1356,9 @@ def deduplicate_seizures_by_rank(seizures: List[SeizureInfo]) -> List[SeizureInf
     # 순위번호 없는 항목 + 중복 제거된 항목 합치기
     result = no_rank_seizures + deduplicated
 
-    # 원래 순서 유지를 위해 정렬 (rank_number 기준)
+    # 원래 순서 유지를 위해 정렬 (주순위번호 기준)
     result.sort(key=lambda x: (
-        int(x.rank_number) if x.rank_number and x.rank_number.isdigit() else 999,
+        int(x.rank_number.split('-')[0]) if x.rank_number else 999,
         x.sub_rank_number or 0
     ))
 
