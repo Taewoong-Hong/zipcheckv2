@@ -914,9 +914,190 @@ def deduplicate_mortgages_by_rank(mortgages: List[MortgageInfo]) -> List[Mortgag
     return result
 
 
+# ===========================
+# 갑구 블록 기반 파싱 헬퍼 함수들
+# ===========================
+def get_gapgu_text(text: str) -> str:
+    """
+    갑구 섹션 텍스트만 추출
+
+    【갑구】 ~ 【을구】 사이의 텍스트를 반환합니다.
+    패턴을 찾지 못하면 전체 텍스트를 반환합니다.
+    """
+    start_patterns = [r'【\s*갑\s*구\s*】', r'\[\s*갑\s*구\s*\]', r'갑\s*구']
+    end_patterns = [r'【\s*을\s*구\s*】', r'\[\s*을\s*구\s*\]', r'을\s*구']
+
+    start = 0
+    for p in start_patterns:
+        m = re.search(p, text)
+        if m:
+            start = m.start()
+            break
+
+    end = len(text)
+    for p in end_patterns:
+        m = re.search(p, text[start:])
+        if m:
+            end = start + m.start()
+            break
+
+    return text[start:end]
+
+
+def detect_seizure_type(block: str) -> Optional[str]:
+    """
+    블록 내용에서 압류 유형 판별
+
+    우선순위:
+    1. 가처분 (가장 구체적)
+    2. 가압류
+    3. 압류 (경매개시결정 포함)
+
+    압류 관련 키워드가 전혀 없으면 None 반환 (소유권 등기 블록)
+    """
+    block_lower = block.lower()
+
+    if '가처분' in block:
+        return '가처분'
+    if '가압류' in block:
+        return '가압류'
+    if ('압류' in block or '행정재산압류' in block or
+        '지분압류' in block or '경매개시결정' in block or
+        '임의경매개시' in block or '강제경매' in block or '임의경매' in block):
+        return '압류'
+
+    # 압류 관련 키워드가 없으면 None (소유권이전 등 다른 등기)
+    return None
+
+
+def parse_block_to_seizure(
+    rank: str,
+    sub: Optional[str],
+    block: str,
+    summary: Optional[SummaryData]
+) -> Optional[SeizureInfo]:
+    """
+    개별 블록을 SeizureInfo로 파싱
+
+    Args:
+        rank: 주순위번호 (예: "1", "15")
+        sub: 부순위번호 (예: "6" for 1-6, None if no sub)
+        block: 해당 순위번호의 등기 내용 텍스트
+        summary: 요약 섹션 데이터 (말소 판별용)
+
+    Returns:
+        SeizureInfo 또는 None (압류 관련 등기가 아닌 경우)
+    """
+    # 압류 유형 판별
+    seizure_type = detect_seizure_type(block)
+    if seizure_type is None:
+        # 소유권이전, 소유권보존 등 압류와 무관한 등기
+        return None
+
+    # 채권자/권리자 추출
+    creditor = None
+    creditor_pattern = r'(?:권리자|채권자|신청인|신청권자)\s*[:：]?\s*([^\n]+)'
+    creditor_match = re.search(creditor_pattern, block)
+    if creditor_match:
+        candidate = creditor_match.group(1).strip()
+        # 불필요한 키워드 제거
+        invalid_creditors = {
+            '가압류', '가처분', '압류', '경매', '개시결정', '결정', '등기',
+            '말소', '해제', '해지', '취하', '년', '월', '일', '등', '호',
+        }
+        if candidate and len(candidate) >= 2 and candidate not in invalid_creditors:
+            creditor = candidate
+
+    # 금액 추출
+    amount = None
+    amount_pattern = r'(?:청구금액|채권금액|금)\s*([\d,]+)\s*원'
+    amount_match = re.search(amount_pattern, block)
+    if amount_match:
+        amount_str = amount_match.group(1).replace(',', '')
+        amount = int(amount_str) // 10000
+
+    # 순위번호 full 형태 생성
+    full_rank = f"{rank}-{sub}" if sub else rank
+
+    # 말소 여부 판별
+    if summary and summary.has_summary:
+        # 요약에 순위번호가 있으면 유효, 없으면 말소
+        active_ranks = set(summary.active_seizure_ranks)
+        is_deleted = full_rank not in active_ranks
+        logger.info(f"   └─ 순위 {full_rank} {seizure_type}: {'유효' if not is_deleted else '말소'} (블록 파싱)")
+    else:
+        # 요약 없으면 키워드 기반 판별
+        deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
+        is_deleted = any(k in block for k in deletion_keywords)
+
+    return SeizureInfo(
+        type=seizure_type,
+        creditor=creditor,
+        amount=amount,
+        registration_date=None,
+        description=None,
+        rank_number=full_rank,
+        sub_rank_number=int(sub) if sub else None,
+        is_deleted=is_deleted
+    )
+
+
 def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[SeizureInfo]:
     """
-    압류/가압류/가처분 추출 (갑구) - 근저당(을구)과 동일한 방식
+    압류/가압류/가처분 추출 (갑구) - 블록 기반 파싱
+
+    새로운 전략:
+    1. 갑구 텍스트만 분리 (【갑구】~【을구】)
+    2. "순위번호만 있는 줄" 기준으로 블록 분할
+    3. 각 블록에서 압류 유형/채권자/금액/말소여부 추출
+    4. 순위번호 줄을 찾지 못하면 기존 keyword 방식으로 fallback
+
+    장점:
+    - 한 등기 안에서 "압류" 키워드가 여러 번 등장해도 중복 추출 안 됨
+    - "말소기준등기 10번 압류" 같은 문장을 별도 등기로 잘못 파싱하지 않음
+    - 순위번호 추출 정확도 향상
+    """
+    gapgu = get_gapgu_text(text)
+
+    # 순위번호만 있는 줄 패턴: "15" 또는 "1-6" 형태
+    # ^와 $로 줄 전체가 순위번호인 경우만 매칭
+    rank_line_pattern = re.compile(r'(?m)^\s*(\d{1,2})(?:-(\d+))?\s*$')
+    matches = list(rank_line_pattern.finditer(gapgu))
+
+    if not matches:
+        logger.warning("⚠️ 갑구에서 순위번호 줄을 찾지 못함, 기존 keyword 방식으로 fallback")
+        return extract_seizures_legacy(text, summary)
+
+    logger.info(f"블록 기반 압류 추출: {len(matches)}개 순위번호 줄 발견")
+
+    seizures: List[SeizureInfo] = []
+    for i, m in enumerate(matches):
+        rank = m.group(1)
+        sub = m.group(2)
+
+        # 블록 범위: 현재 순위번호 줄 끝 ~ 다음 순위번호 줄 시작
+        block_start = m.end()
+        block_end = matches[i + 1].start() if i + 1 < len(matches) else len(gapgu)
+        block = gapgu[block_start:block_end]
+
+        # 블록 파싱
+        seizure = parse_block_to_seizure(rank, sub, block, summary)
+        if seizure:
+            seizures.append(seizure)
+
+    # 중복 제거
+    seizures = deduplicate_seizures_by_rank(seizures)
+
+    logger.info(f"압류 추출 완료 (블록 기반): 총 {len(seizures)}건 (유효: {sum(1 for s in seizures if not s.is_deleted)}건, 말소: {sum(1 for s in seizures if s.is_deleted)}건)")
+
+    return seizures
+
+
+def extract_seizures_legacy(text: str, summary: Optional[SummaryData] = None) -> List[SeizureInfo]:
+    """
+    압류/가압류/가처분 추출 (갑구) - 레거시 키워드 기반 방식
+
+    [DEPRECATED] 블록 기반 파싱 실패 시 fallback으로만 사용
 
     동작 방식:
     1. 표제부 갑구에서 모든 압류/가압류/가처분 등기목적 찾기
