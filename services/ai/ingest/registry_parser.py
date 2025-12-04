@@ -271,7 +271,7 @@ def is_text_extractable_pdf(pdf_path: str, min_chars: int = 500) -> tuple[bool, 
         - extracted_text: 추출된 텍스트 (이미지 PDF면 빈 문자열)
     """
     try:
-        doc = fitz.open(pdf_path)  # type: ignore[attr-defined]
+        doc = fitz.open(pdf_path)  # type: ignore
         texts = []
         for page in doc:
             texts.append(page.get_text("text"))
@@ -1042,7 +1042,7 @@ async def ocr_with_gemini_vision(pdf_path: str) -> str:
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     # PDF → 이미지 변환 (첫 페이지만 or 전체)
-    doc = fitz.open(pdf_path)  # type: ignore[attr-defined]
+    doc = fitz.open(pdf_path)  # type: ignore
     texts = []
 
     for page_num in range(len(doc)):
