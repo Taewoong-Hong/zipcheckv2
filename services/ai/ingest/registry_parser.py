@@ -907,24 +907,24 @@ def deduplicate_mortgages_by_rank(mortgages: List[MortgageInfo]) -> List[Mortgag
 
 def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[SeizureInfo]:
     """
-    압류/가압류/가처분 추출 (갑구)
+    압류/가압류/가처분 추출 (갑구) - 근저당(을구)과 동일한 방식
 
-    말소 판별 로직 (우선순위):
-    1. 요약 섹션이 있으면: 순위번호 매칭 (근저당과 동일 방식)
-    2. 순위번호 없으면: 키워드 유형 매칭 (fallback)
-    3. 요약 섹션이 없으면: 텍스트 키워드 기반 판별 (fallback)
+    동작 방식:
+    1. 표제부 갑구에서 모든 압류/가압류/가처분 등기목적 찾기
+    2. 해당 항목의 순위번호, 권리자/채권자 추출
+    3. 요약(참고용) 갑구의 순위번호와 매칭
+    4. 요약에 있으면 유효(is_deleted=False), 없으면 말소(is_deleted=True)
+    5. 모든 항목 반환 (유효+말소 모두)
 
-    중복 방지:
-    - 이미 처리한 텍스트 위치 추적 (같은 압류가 여러 키워드에 매칭되는 것 방지)
-    - 순위번호 기반 중복 제거 + 채권자+유형 기반 중복 제거
+    순위번호 추출: 근저당과 동일한 패턴 사용
+    채권자 추출: "권리자/채권자" 키워드 다음 단어 추출
     """
     seizures = []
 
-    # 이미 처리한 위치 추적 (중복 방지)
-    processed_positions: set = set()
+    # 이미 처리한 순위번호 추적 (중복 방지)
+    processed_ranks: set = set()
 
-    # 패턴: "압류", "가압류", "가처분", "임의경매" 등
-    # 순서 중요: 더 구체적인 키워드를 먼저 처리 (임의경매개시결정 → 압류)
+    # 등기목적 키워드 → 압류 유형 매핑
     seizure_keywords = {
         '임의경매개시결정': '압류',
         '강제경매개시결정': '압류',
@@ -936,162 +936,138 @@ def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[S
         '압류': '압류',
     }
 
-    # 요약에서 유효 순위번호 및 유형 (복사본 사용)
+    # 요약에서 유효 순위번호 (말소 판별의 핵심)
     active_ranks = set(summary.active_seizure_ranks) if summary and summary.has_summary else set()
-    active_seizure_types = list(summary.active_seizure_types) if summary and summary.has_summary else []
 
-    # 순위번호 기반 매칭 사용 여부
-    use_rank_matching = bool(active_ranks)
+    logger.info(f"압류 추출 시작: 요약 유효 순위번호={sorted(active_ranks) if active_ranks else '없음'}")
 
-    if use_rank_matching:
-        logger.info(f"압류 말소 판별: 순위번호 매칭 사용 (유효 순위: {sorted(active_ranks)})")
-    else:
-        logger.info(f"압류 말소 판별: 키워드 기반 매칭 사용 (유효 유형: {active_seizure_types})")
-
-    # 말소 여부 판별 키워드 (fallback용)
+    # 말소 여부 판별 키워드 (요약 없을 때 fallback용)
     deletion_keywords = ['말소', '해지', '말소기준등기', '말소됨', '해제', '취하']
 
-    # 채권자로 잘못 추출되면 안 되는 단어들 (제외 목록)
+    # 채권자로 잘못 추출되면 안 되는 단어들
     invalid_creditors = {
         '가압류', '가처분', '압류', '경매', '개시결정', '결정', '등기',
         '말소', '해제', '해지', '취하', '년', '월', '일', '등', '호',
         '소유권', '이전', '설정', '근저당', '전세권', '임의', '강제',
         '기입', '촉탁', '신청', '접수', '완료', '처분', '금지', '가등기',
         '채권자', '권리자', '신청인', '의하여', '대하여', '청구',
-        '주식회사', '유한회사', '합자회사', '합명회사',  # 회사 형태만 있는 경우 제외
-        # 잘못 추출되는 패턴 추가
-        '및', '기타사항', '기타', '사항', '원', '및 기타사항', '및 기타사항 원',
-        '서울중앙지방법', '서울지방법', '지방법', '법원', '지방법원',
-        '중앙지방법원', '동부지방법원', '서부지방법원', '남부지방법원', '북부지방법원',
-        '지방법원', '고등법원', '대법원', '가정법원',
+        '주식회사', '유한회사', '합자회사', '합명회사',
+        '및', '기타사항', '기타', '사항', '원',
+        '법원', '지방법원', '중앙지방법원', '고등법원', '대법원',
     }
 
-    # 접수번호 패턴 체크 함수 (제XXXX호 형태)
-    def is_registration_number(text: str) -> bool:
-        """접수번호 패턴인지 확인 (제XXXX호, 제XXXXX호 등)"""
-        import re
-        return bool(re.match(r'^제?\d+호?$', text.strip()))
+    def is_registration_number(s: str) -> bool:
+        """접수번호 패턴 체크 (제XXXX호)"""
+        return bool(re.match(r'^제?\d+호?$', s.strip()))
 
+    # 키워드별로 모든 발생 위치 찾기
     for keyword, seizure_type in seizure_keywords.items():
-        # 키워드가 있는지 확인
-        pattern_search = f'{keyword}'
-        if pattern_search not in text:
+        if keyword not in text:
             continue
 
-        # 키워드 위치 찾기 - 모든 발생 위치를 찾음
         for keyword_match in re.finditer(re.escape(keyword), text):
             keyword_pos = keyword_match.start()
 
-            # 위치 기반 중복 방지: 이미 처리한 위치 근처(±100자)면 스킵
-            # 같은 압류 항목이 여러 키워드("압류", "임의경매" 등)에 매칭되는 것을 방지
-            position_key = keyword_pos // 100  # 100자 단위로 그룹화
-            if position_key in processed_positions:
-                continue
-            processed_positions.add(position_key)
-
-            # 컨텍스트 추출 (앞뒤 400자로 확대)
+            # 컨텍스트 추출 (앞 300자, 뒤 400자)
             start = max(0, keyword_pos - 300)
             end = min(len(text), keyword_pos + 400)
             context = text[start:end]
             front_context = text[start:keyword_pos]
 
-            # 순위번호 추출 (테이블 형식 지원 강화)
+            # ========================================
+            # 1. 순위번호 추출 (근저당과 동일한 패턴)
+            # ========================================
             rank_number = None
             sub_rank_number = None
 
-            # 테이블 형식에서 순위번호는 보통 줄 시작에 있음
-            # 예: "1   압류   2023년..." 또는 "1-2   가압류..."
+            # 근저당과 동일한 순위번호 패턴
             rank_patterns = [
                 r'순위번호\s*[:：]?\s*(\d+)(?:-(\d+))?',  # "순위번호: 1-6"
-                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s+(?:압류|가압류|가처분|경매)',  # 줄시작 "1 압류" 또는 "1-6 압류"
-                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s{2,}',  # 줄시작 "1   " (공백 2개 이상 = 테이블 컬럼)
-                r'(?:^|\n)(\d+)(?:-(\d+))?\t',  # 줄시작 + 탭 (테이블 형식)
-                r'(?:^|\n)\s*(\d+)\s*$',  # 줄 전체가 숫자만 (단독 순위번호)
+                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s+(?:압류|가압류|가처분|경매)',  # "1 압류"
+                r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s{2,}',  # "1   " (테이블)
+                r'(?:^|\n)(\d+)(?:-(\d+))?\t',  # 탭 구분
             ]
 
             for rp in rank_patterns:
                 rank_matches = list(re.finditer(rp, front_context, re.MULTILINE))
                 if rank_matches:
-                    # 가장 마지막 (가까운) 매치 사용
                     last_match = rank_matches[-1]
                     if last_match.group(1):
-                        candidate_rank = last_match.group(1)
-                        # 순위번호 유효성 검사 (1~30 범위)
-                        if candidate_rank.isdigit() and 1 <= int(candidate_rank) <= 30:
-                            rank_number = candidate_rank
+                        candidate = last_match.group(1)
+                        if candidate.isdigit() and 1 <= int(candidate) <= 30:
+                            rank_number = candidate
                             if last_match.lastindex and last_match.lastindex >= 2 and last_match.group(2):
                                 sub_rank_number = int(last_match.group(2))
                             break
 
-            # 채권자/권리자 추출 (간단화: 키워드 다음 바로 오는 단어 추출)
-            # 예: "권리자: 서초구(서울특별시)" → "서초구(서울특별시)" 그대로 추출
+            # 중복 체크: 같은 순위번호는 한 번만 처리
+            rank_key = f"{rank_number or 'none'}_{keyword_pos // 200}"
+            if rank_key in processed_ranks:
+                continue
+            processed_ranks.add(rank_key)
+
+            # ========================================
+            # 2. 채권자/권리자 추출 (키워드 다음 단어)
+            # ========================================
             creditor = None
+            creditor_pattern = r'(?:권리자|채권자|신청인|신청권자)\s*[:：]?\s*([가-힣a-zA-Z0-9]+(?:[\(（][^\)）]+[\)）])?)'
 
-            # "권리자", "채권자", "신청인" 다음에 바로 오는 단어를 추출
-            # 괄호가 있으면 괄호 내용까지 포함 (예: "서초구(서울특별시)")
-            simple_creditor_pattern = r'(?:권리자|채권자|신청인|신청권자)\s*[:：]?\s*([가-힣a-zA-Z0-9]+(?:[\(（][^\)）]+[\)）])?)'
-
-            match = re.search(simple_creditor_pattern, context)
-            if match:
-                candidate = match.group(1).strip()
-                # 유효성 검사 (접수번호나 무효 단어 제외)
+            creditor_match = re.search(creditor_pattern, context)
+            if creditor_match:
+                candidate = creditor_match.group(1).strip()
                 if (candidate and len(candidate) >= 2 and
                     candidate not in invalid_creditors and
                     not is_registration_number(candidate)):
                     creditor = candidate
 
-            # 금액 찾기 (있을 경우)
+            # ========================================
+            # 3. 금액 추출 (있을 경우)
+            # ========================================
             amount = None
             amount_pattern = r'(?:청구금액|채권금액|금)\s*([\d,]+)\s*원'
             amount_match = re.search(amount_pattern, context)
             if amount_match:
                 amount_str = amount_match.group(1).replace(',', '')
-                amount = int(amount_str) // 10000  # 만원 단위
+                amount = int(amount_str) // 10000
 
-            # 말소 여부 판별 (순위번호 기반: 근저당과 동일)
+            # ========================================
+            # 4. 말소 여부 판별 (요약 우선, 근저당과 동일)
+            # ========================================
             if summary and summary.has_summary:
-                is_deleted = True  # 기본값: 말소 (요약에서 찾지 못하면 말소)
+                # 요약이 있으면: 요약에 순위번호가 있으면 유효, 없으면 말소
+                is_deleted = True  # 기본값: 말소
 
-                if use_rank_matching and rank_number:
-                    # 순위번호 매칭: 요약의 유효 순위번호에 있으면 유효
+                if rank_number:
                     if rank_number in active_ranks:
                         is_deleted = False
-                        logger.info(f"   └─ 순위 {rank_number} {seizure_type}: 유효 (순위번호 매칭)")
+                        logger.info(f"   └─ 순위 {rank_number} {seizure_type}: 유효 (요약에 존재)")
                     else:
-                        logger.info(f"   └─ 순위 {rank_number} {seizure_type}: 말소 (요약에 순위 없음)")
-                elif use_rank_matching and not rank_number:
-                    # 순위번호 추출 실패 → 키워드로 fallback
-                    for i, active_type in enumerate(active_seizure_types):
-                        if keyword in active_type or active_type in keyword:
-                            is_deleted = False
-                            active_seizure_types.pop(i)
-                            logger.info(f"   └─ {seizure_type} ({keyword}): 유효 (키워드 fallback)")
-                            break
+                        logger.info(f"   └─ 순위 {rank_number} {seizure_type}: 말소 (요약에 없음)")
                 else:
-                    # Fallback: 키워드 유형 매칭
-                    for i, active_type in enumerate(active_seizure_types):
-                        if keyword in active_type or active_type in keyword:
-                            is_deleted = False
-                            active_seizure_types.pop(i)
-                            break
+                    # 순위번호 없으면 키워드 말소 체크
+                    is_deleted = any(del_kw in context for del_kw in deletion_keywords)
+                    logger.info(f"   └─ 순위번호 없음 {seizure_type}: {'말소' if is_deleted else '유효'} (키워드 체크)")
             else:
-                # Fallback: 텍스트 키워드 기반 판별
+                # 요약 없으면: 텍스트 키워드 기반 판별
                 is_deleted = any(del_kw in context for del_kw in deletion_keywords)
 
+            # ========================================
+            # 5. 결과 추가 (모든 항목, 유효+말소)
+            # ========================================
             seizures.append(SeizureInfo(
                 type=seizure_type,
                 creditor=creditor,
                 amount=amount,
-                description=keyword,  # 원본 키워드 저장
+                description=keyword,
                 rank_number=rank_number,
                 sub_rank_number=sub_rank_number,
                 is_deleted=is_deleted
             ))
 
-            # break 제거: 모든 발생을 처리 (중복은 deduplicate_seizures_by_rank에서 처리)
-
     # 중복 제거: 같은 순위번호 내에서 가장 높은 부번호만 유지
     seizures = deduplicate_seizures_by_rank(seizures)
+
+    logger.info(f"압류 추출 완료: 총 {len(seizures)}건 (유효: {sum(1 for s in seizures if not s.is_deleted)}건, 말소: {sum(1 for s in seizures if s.is_deleted)}건)")
 
     return seizures
 
