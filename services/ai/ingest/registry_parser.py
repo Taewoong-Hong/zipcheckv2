@@ -138,6 +138,8 @@ class MortgageInfo(BaseModel):
     debtor: Optional[str] = None  # 채무자
     registration_date: Optional[str] = None  # 설정일
     registration_number: Optional[str] = None  # 접수번호
+    rank_number: Optional[str] = None  # 순위번호 (예: "1", "2")
+    sub_rank_number: Optional[int] = None  # 부번호 (예: 1-6의 6)
     is_deleted: bool = False  # 말소 여부 (True면 말소됨)
 
     def get_masked_debtor(self) -> Optional[str]:
@@ -215,6 +217,7 @@ class RegistryDocument(BaseModel):
             } if self.owner else None,
             "mortgages": [
                 {
+                    "rank_number": m.rank_number,  # 순위번호 (예: "1", "2")
                     "creditor": m.creditor,  # 기업명은 그대로
                     "amount": m.amount,
                     "debtor": m.get_masked_debtor(),  # 개인만 마스킹
@@ -670,14 +673,22 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
     말소 판별 로직 (우선순위):
     1. 요약 섹션이 있으면: 요약에 있는 금액만 유효, 나머지 말소
     2. 요약 섹션이 없으면: 텍스트 키워드 기반 판별 (fallback)
+
+    순위번호 처리:
+    - 같은 순위번호 내에서 기타사항 수정 시 1-1, 1-2, ... 1-6 형식으로 부번호 증가
+    - 부번호가 있는 경우, 같은 주순위번호 중 가장 높은 부번호만 유지 (최신 버전)
     """
     mortgages = []
 
-    # 패턴: 채권최고액, 채권자, 채무자 추출
+    # 패턴: 채권최고액, 채권자, 채무자, 순위번호 추출
     # 예: "채권최고액 금 1,172,400,000원"
     amount_pattern = r'채권최고액\s*금?\s*([\d,]+)\s*원'
     creditor_pattern = r'(?:근저당권자|채권자)\s*[:：]?\s*([^\n]+?)(?:\s|$)'
     debtor_pattern = r'채무자\s*[:：]?\s*([가-힣]+)'
+
+    # 순위번호 패턴: "1", "1-1", "1-6", "2", "2-3" 등
+    # 앞쪽 컨텍스트에서 순위번호 찾기 (숫자-숫자 또는 단독 숫자)
+    rank_pattern = r'(?:순위번호|순위)\s*[:：]?\s*(\d+)(?:-(\d+))?|^(\d+)(?:-(\d+))?\s'
 
     # 요약 기반 유효 금액 목록 (복사본 사용 - 매칭 시 제거)
     active_amounts = list(summary.active_mortgage_amounts) if summary and summary.has_summary else []
@@ -688,10 +699,33 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
         amount_won = int(amount_str)
         amount_man = amount_won // 10000  # 만원 단위
 
-        # 근처에서 채권자/채무자 찾기 (앞뒤 200자 범위)
-        start = max(0, amount_match.start() - 200)
+        # 근처에서 채권자/채무자/순위번호 찾기 (앞뒤 300자 범위로 확대)
+        start = max(0, amount_match.start() - 300)
         end = min(len(text), amount_match.end() + 200)
         context = text[start:end]
+
+        # 앞쪽 컨텍스트에서 순위번호 추출 (가장 가까운 것)
+        front_context = text[start:amount_match.start()]
+        rank_number = None
+        sub_rank_number = None
+
+        # 순위번호 찾기 (여러 패턴 시도)
+        rank_patterns = [
+            r'순위번호\s*[:：]?\s*(\d+)(?:-(\d+))?',  # "순위번호: 1-6"
+            r'(?:^|\s)(\d+)(?:-(\d+))?\s+근저당권',  # "1-6 근저당권"
+            r'(?:^|\n)\s*(\d+)(?:-(\d+))?\s',  # 줄 시작 "1-6 "
+        ]
+
+        for rp in rank_patterns:
+            rank_matches = list(re.finditer(rp, front_context, re.MULTILINE))
+            if rank_matches:
+                # 가장 마지막 (가까운) 매치 사용
+                last_match = rank_matches[-1]
+                if last_match.group(1):
+                    rank_number = last_match.group(1)
+                    if last_match.group(2):
+                        sub_rank_number = int(last_match.group(2))
+                    break
 
         creditor = None
         creditor_match = re.search(creditor_pattern, context)
@@ -722,10 +756,78 @@ def extract_mortgages(text: str, summary: Optional[SummaryData] = None) -> List[
             creditor=creditor,
             amount=amount_man,
             debtor=debtor,
+            rank_number=rank_number,
+            sub_rank_number=sub_rank_number,
             is_deleted=is_deleted
         ))
 
+    # 중복 제거: 같은 순위번호 내에서 가장 높은 부번호만 유지
+    mortgages = deduplicate_mortgages_by_rank(mortgages)
+
     return mortgages
+
+
+def deduplicate_mortgages_by_rank(mortgages: List[MortgageInfo]) -> List[MortgageInfo]:
+    """
+    같은 순위번호 내에서 가장 높은 부번호(sub_rank_number)만 유지
+
+    예: 1-1, 1-2, 1-6 → 1-6만 유지 (가장 최신 버전)
+
+    규칙:
+    - rank_number가 같고 sub_rank_number가 다른 경우, 가장 높은 것만 유지
+    - rank_number가 None인 항목은 그대로 유지
+    - 말소된 항목(is_deleted=True)도 포함하여 처리
+    """
+    if not mortgages:
+        return mortgages
+
+    # rank_number가 None인 항목과 있는 항목 분리
+    no_rank_mortgages = [m for m in mortgages if m.rank_number is None]
+    ranked_mortgages = [m for m in mortgages if m.rank_number is not None]
+
+    if not ranked_mortgages:
+        return mortgages
+
+    # 같은 rank_number별로 그룹화
+    from collections import defaultdict
+    rank_groups: Dict[str, List[MortgageInfo]] = defaultdict(list)
+
+    for m in ranked_mortgages:
+        rank_groups[m.rank_number].append(m)
+
+    # 각 그룹에서 가장 높은 sub_rank_number를 가진 항목만 선택
+    deduplicated = []
+    for rank_num, group in rank_groups.items():
+        if len(group) == 1:
+            # 그룹에 1개만 있으면 그대로 추가
+            deduplicated.append(group[0])
+        else:
+            # 여러 개 있으면 sub_rank_number가 가장 높은 것 선택
+            # sub_rank_number가 None인 경우 0으로 처리
+            sorted_group = sorted(
+                group,
+                key=lambda x: x.sub_rank_number if x.sub_rank_number is not None else 0,
+                reverse=True
+            )
+            highest = sorted_group[0]
+
+            logger.info(
+                f"   └─ 순위번호 {rank_num} 중복 제거: "
+                f"{len(group)}개 → 1개 유지 (부번호: {highest.sub_rank_number or '없음'})"
+            )
+
+            deduplicated.append(highest)
+
+    # 순위번호 없는 항목 + 중복 제거된 항목 합치기
+    result = no_rank_mortgages + deduplicated
+
+    # 원래 순서 유지를 위해 정렬 (rank_number 기준)
+    result.sort(key=lambda x: (
+        int(x.rank_number) if x.rank_number and x.rank_number.isdigit() else 999,
+        x.sub_rank_number or 0
+    ))
+
+    return result
 
 
 def extract_seizures(text: str, summary: Optional[SummaryData] = None) -> List[SeizureInfo]:
