@@ -118,6 +118,9 @@ async function fetchMonthData(
           bonbeon: raw.bonbeon,
           bubeon: raw.bubeon,
           landCd: raw.landCd,
+          // 국토부 API 공식 필드명 (2024년 스펙)
+          lnbrMnnm: raw.lnbrMnnm,  // 지번 본번
+          lnbrSlno: raw.lnbrSlno,  // 지번 부번
           // 숫자 필드들 모두 확인 (jibun이 다른 필드일 수 있음)
           aptSeq: raw.aptSeq,
           sggCd: raw.sggCd,
@@ -157,7 +160,8 @@ function normalizeItem(r: any) {
     aptName: S(r.aptNm || r.aptName || r.아파트 || r.아파트명 || r.단지명 || ''),
     // 국토부 API는 umdNm 필드 사용 - 우선순위 조정
     dong: S(r.umdNm || r.dong || r.emdNm || r.법정동 || r.읍면동 || ''),
-    jibun: S(r.지번 || r.jibun || ''),
+    // 국토부 API 필드명: lnbrMnnm (지번 본번), lnbrSlno (지번 부번) - lnbrMnnm 우선
+    jibun: S(r.lnbrMnnm || r.지번 || r.jibun || ''),
     exclusiveArea: N(r.excluUseAr || r.전용면적 || r.exclusiveArea),
     floor: N(r.층 || r.floor),
     buildYear: N(r.건축년도 || r.buildYear),
