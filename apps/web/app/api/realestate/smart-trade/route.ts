@@ -93,7 +93,34 @@ async function fetchMonthData(
 
       // rows 추출
       const rows = xml?.response?.body?.items?.item ?? []
-      return Array.isArray(rows) ? rows : (rows ? [rows] : [])
+      const items = Array.isArray(rows) ? rows : (rows ? [rows] : [])
+
+      // 디버그: 첫 번째 원본 아이템 필드명 확인
+      if (items.length > 0) {
+        console.log('[smart-trade] DEBUG RAW FIELDS:', Object.keys(items[0]))
+        console.log('[smart-trade] DEBUG RAW ITEM:', JSON.stringify(items[0]))
+        // 동 관련 필드 상세 확인
+        const raw = items[0]
+        console.log('[smart-trade] DEBUG DONG FIELDS:', {
+          umdNm: raw.umdNm,
+          dong: raw.dong,
+          emdNm: raw.emdNm,
+          '법정동': raw['법정동'],
+          '읍면동': raw['읍면동'],
+          sggCd: raw.sggCd,
+        })
+        console.log('[smart-trade] DEBUG JIBUN FIELDS:', {
+          '지번': raw['지번'],
+          jibun: raw.jibun,
+        })
+        console.log('[smart-trade] DEBUG AREA FIELDS:', {
+          excluUseAr: raw.excluUseAr,
+          '전용면적': raw['전용면적'],
+          exclusiveArea: raw.exclusiveArea,
+        })
+      }
+
+      return items
 
     } catch (error: any) {
       console.warn(`[smart-trade] ${version} API 오류 (${dealYmd}):`, error.message)
@@ -105,24 +132,26 @@ async function fetchMonthData(
 }
 
 // 데이터 정규화
+// NOTE: || 연산자 사용 - 빈 문자열("")도 falsy로 처리하여 다음 fallback으로 넘어감
 function normalizeItem(r: any) {
   return {
-    dealAmount: N(r.거래금액 ?? r.dealAmount),
-    dealYear: N(r.년 ?? r.dealYear),
-    dealMonth: N(r.월 ?? r.dealMonth),
-    dealDay: N(r.일 ?? r.dealDay),
-    aptName: S(r.aptNm ?? r.aptName ?? r.아파트 ?? r.아파트명 ?? r.단지명 ?? ''),
-    dong: S(r.dong ?? r.emdNm ?? r.umdNm ?? r.법정동 ?? r.읍면동 ?? ''),
-    jibun: S(r.지번 ?? r.jibun),
-    exclusiveArea: N(r.excluUseAr ?? r.전용면적 ?? r.exclusiveArea),
-    floor: N(r.층 ?? r.floor),
-    buildYear: N(r.건축년도 ?? r.buildYear),
-    cancelDealType: S(r.해제여부 ?? r.cancelDealType ?? r.cdealType),
-    cancelDealDate: S(r.해제사유발생일 ?? r.cancelDealDate ?? r.cdealDay),
-    sggCd: S(r.지역코드 ?? r.sggCd),
-    dealingGbn: S(r.dealingGbn ?? r.거래유형 ?? r.거래구분 ?? r.중개구분),
-    estateAgentSggNm: S(r.estateAgentSggNm ?? r.중개사소재지),
-    rgstDate: S(r.rgstDate ?? r.등기일자),
+    dealAmount: N(r.거래금액 || r.dealAmount),
+    dealYear: N(r.년 || r.dealYear),
+    dealMonth: N(r.월 || r.dealMonth),
+    dealDay: N(r.일 || r.dealDay),
+    aptName: S(r.aptNm || r.aptName || r.아파트 || r.아파트명 || r.단지명 || ''),
+    // 국토부 API는 umdNm 필드 사용 - 우선순위 조정
+    dong: S(r.umdNm || r.dong || r.emdNm || r.법정동 || r.읍면동 || ''),
+    jibun: S(r.지번 || r.jibun || ''),
+    exclusiveArea: N(r.excluUseAr || r.전용면적 || r.exclusiveArea),
+    floor: N(r.층 || r.floor),
+    buildYear: N(r.건축년도 || r.buildYear),
+    cancelDealType: S(r.해제여부 || r.cancelDealType || r.cdealType),
+    cancelDealDate: S(r.해제사유발생일 || r.cancelDealDate || r.cdealDay),
+    sggCd: S(r.지역코드 || r.sggCd),
+    dealingGbn: S(r.dealingGbn || r.거래유형 || r.거래구분 || r.중개구분),
+    estateAgentSggNm: S(r.estateAgentSggNm || r.중개사소재지),
+    rgstDate: S(r.rgstDate || r.등기일자),
   }
 }
 
@@ -239,6 +268,39 @@ export async function POST(req: NextRequest) {
 
       queriedMonths = targetMonths
       queryPeriod = `${targetMonths}개월`
+
+      // 디버그: 첫 번째 아이템의 실제 필드 값 확인 (정규화 후)
+      if (allRawItems.length > 0 && targetMonths === 3) {
+        const sample = allRawItems[0]
+        console.log('[smart-trade] DEBUG NORMALIZED SAMPLE:', JSON.stringify(sample))
+        console.log('[smart-trade] DEBUG FILTER CRITERIA:', { targetDong: dong, targetJibun: jibun, targetArea: area })
+
+        // 수동 필터링 테스트
+        if (dong) {
+          const itemDong = String(sample.dong || '').trim()
+          const cleanItemDong = itemDong.replace(/[동읍면리가]$/, '')
+          const cleanTargetDong = dong.replace(/[동읍면리가]$/, '')
+          console.log('[smart-trade] DEBUG DONG COMPARE:', { itemDong, cleanItemDong, cleanTargetDong, match: cleanItemDong === cleanTargetDong })
+        }
+        if (jibun) {
+          const itemJibun = String(sample.jibun || '').trim()
+          const itemJibunMatch = itemJibun.match(/^(\d+)/)
+          const targetJibunMatch = jibun.match(/^(\d+)/)
+          console.log('[smart-trade] DEBUG JIBUN COMPARE:', {
+            itemJibun,
+            targetJibun: jibun,
+            itemMain: itemJibunMatch ? itemJibunMatch[1] : null,
+            targetMain: targetJibunMatch ? targetJibunMatch[1] : null,
+          })
+        }
+        if (area) {
+          console.log('[smart-trade] DEBUG AREA COMPARE:', {
+            itemArea: sample.exclusiveArea,
+            targetArea: area,
+            diff: sample.exclusiveArea ? Math.abs(sample.exclusiveArea - area) : 'N/A'
+          })
+        }
+      }
 
       // 필터링 수행
       filteredItems = filterTransactions(
