@@ -141,7 +141,7 @@ export default function DevCaseDetailPage({
   const [shRentLoading, setShRentLoading] = useState(false);
   const [shTradeRentTab, setShTradeRentTab] = useState<'trade' | 'rent'>('trade');
 
-  // 자동 실거래가 조회 결과 (파싱된 주소 기반)
+  // 자동 실거래가 조회 결과 (파싱된 주소 기반) - 스마트 API 사용
   const [autoTradeResult, setAutoTradeResult] = useState<{
     loading: boolean;
     error: string | null;
@@ -157,6 +157,8 @@ export default function DevCaseDetailPage({
     minPrice: number | null;         // 최소 거래가
     maxPrice: number | null;         // 최대 거래가
     filteredTransactions: any[];     // 필터링된 거래 목록
+    queryPeriod: string | null;      // 조회 기간 (예: "3개월", "6개월", "12개월")
+    periodExpanded: boolean;         // 기간 확대 여부 (3개월 초과 시 true)
   }>({
     loading: false,
     error: null,
@@ -172,6 +174,8 @@ export default function DevCaseDetailPage({
     minPrice: null,
     maxPrice: null,
     filteredTransactions: [],
+    queryPeriod: null,
+    periodExpanded: false,
   });
 
   // 파싱된 주소 정보 (지번 포함)
@@ -953,7 +957,7 @@ export default function DevCaseDetailPage({
     }
   }, [step1Result]);
 
-  // 자동 실거래가 조회 및 평균 계산 (parsedAddress가 있을 때)
+  // 자동 실거래가 조회 및 평균 계산 (parsedAddress가 있을 때) - 스마트 API 사용
   useEffect(() => {
     const fetchAutoTradeData = async () => {
       if (!parsedAddress?.addressUntilDong || !parsedAddress?.dong || !parsedAddress?.jibun) {
@@ -978,113 +982,91 @@ export default function DevCaseDetailPage({
         const lawdCd = legalDongData.body.items[0].lawd5;
         const lawdName = legalDongData.body.items[0].locataddNm;
 
-        // 2. 실거래가 조회 (최근 3개월)
-        const now = new Date();
-        const allTransactions: any[] = [];
-
-        for (let i = 0; i < 3; i++) {
-          const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          const dealYmd = `${targetDate.getFullYear()}${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
-
-          try {
-            const aptTradeRes = await fetch('/api/realestate/apt-trade', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ lawdCd, dealYmd }),
-            });
-            const aptTradeData = await aptTradeRes.json();
-            const items = aptTradeData.body?.items || [];
-            allTransactions.push(...items);
-            console.log(`[자동 조회] ${dealYmd}: ${items.length}건`);
-          } catch (err) {
-            console.warn(`[자동 조회] ${dealYmd} 실패:`, err);
-          }
-        }
-
-        console.log(`[자동 조회] 최근 3개월 총: ${allTransactions.length}건`);
-
-        // 3. 필터링 (동 + 지번 + 전용면적 정확히 일치)
+        // 2. 스마트 API 호출 (동적 기간 확대 + 서버 필터링)
         const targetDong = parsedAddress.dong.replace(/[동읍면리가]$/, '');
-        const targetBonbun = parseInt(parsedAddress.jibun.split('-')[0], 10);
+        const targetJibun = parsedAddress.jibun;
         const targetArea = parsedAddress.area_m2;
 
-        const isDongMatch = (item: any) => {
-          const itemDong = (item.umdNm || item.dong || '').toString().trim().replace(/[동읍면리가]$/, '');
-          return itemDong === targetDong;
-        };
+        console.log('[스마트 API 호출]', {
+          lawdCd,
+          dong: targetDong,
+          jibun: targetJibun,
+          area: targetArea,
+        });
 
-        const isJibunMatch = (item: any) => {
-          const itemJibun = item.jibun?.toString().trim();
-          if (!itemJibun) return false;
-          const itemBonbun = parseInt(itemJibun.split('-')[0], 10);
-          return !isNaN(itemBonbun) && itemBonbun === targetBonbun;
-        };
+        const smartTradeRes = await fetch('/api/realestate/smart-trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lawdCd,
+            dong: targetDong,
+            jibun: targetJibun,
+            area: targetArea,
+            minCount: 3,        // 최소 3건 이상일 때까지 기간 확대
+            maxMonths: 12,      // 최대 12개월까지 조회
+            areaTolerance: 0.5, // 전용면적 ±0.5㎡ 오차 허용
+          }),
+        });
 
-        const isAreaMatch = (item: any) => {
-          if (!targetArea) return true; // 면적 정보가 없으면 필터링하지 않음
-          const itemAreaStr = item.exclusiveArea || item.excluUseAr;
-          if (!itemAreaStr) return false;
-          const itemArea = parseFloat(itemAreaStr.toString().trim());
-          if (isNaN(itemArea)) return false;
-          // 전용면적 ±0.5㎡ 오차 허용
-          return Math.abs(itemArea - targetArea) <= 0.5;
-        };
+        const smartTradeData = await smartTradeRes.json();
 
-        const dongMatchedItems = allTransactions.filter(isDongMatch);
-        const jibunMatchedItems = allTransactions.filter(isJibunMatch);
-        const areaMatchedItems = targetArea ? allTransactions.filter(isAreaMatch) : [];
+        if (smartTradeData.header?.resultCode !== '000') {
+          throw new Error(smartTradeData.body?.error || '스마트 API 호출 실패');
+        }
 
-        // 동 + 지번 일치 (기존 필터)
-        const dongJibunFiltered = allTransactions.filter((item: any) => isDongMatch(item) && isJibunMatch(item));
+        const {
+          items: filteredItems,
+          totalCount,
+          filteredCount,
+          queryPeriod,
+          averagePrice,
+          filterCriteria,
+        } = smartTradeData.body;
 
-        // 동 + 지번 + 전용면적 일치 (새 필터)
-        const filteredItems = targetArea
-          ? dongJibunFiltered.filter(isAreaMatch)
-          : dongJibunFiltered;
-
-        // 4. 평균/최소/최대 계산
+        // 최소/최대 계산 (클라이언트에서)
         const prices = filteredItems
           .map((item: any) => item.dealAmount)
           .filter((p: any) => p && typeof p === 'number');
 
-        let averagePrice = null;
         let minPrice = null;
         let maxPrice = null;
 
         if (prices.length > 0) {
-          averagePrice = Math.round(prices.reduce((a: number, b: number) => a + b, 0) / prices.length);
           minPrice = Math.min(...prices);
           maxPrice = Math.max(...prices);
         }
+
+        // 기간 확대 여부 확인 (3개월 초과 시)
+        const periodExpanded = queryPeriod !== '3개월';
 
         setAutoTradeResult({
           loading: false,
           error: null,
           lawdCd,
           lawdName,
-          totalCount: allTransactions.length,
-          filteredCount: filteredItems.length,
-          dongMatchCount: dongMatchedItems.length,
-          jibunMatchCount: jibunMatchedItems.length,
-          areaMatchCount: areaMatchedItems.length,
-          dongJibunCount: dongJibunFiltered.length,
+          totalCount,
+          filteredCount,
+          dongMatchCount: filteredCount, // 스마트 API에서는 필터링된 결과만 반환
+          jibunMatchCount: filteredCount,
+          areaMatchCount: filteredCount,
+          dongJibunCount: filteredCount,
           averagePrice,
           minPrice,
           maxPrice,
           filteredTransactions: filteredItems,
+          queryPeriod,
+          periodExpanded,
         });
 
-        console.log('[자동 실거래가 조회]', {
+        console.log('[스마트 API 결과]', {
           lawdCd,
           lawdName,
-          total: allTransactions.length,
-          dongMatch: dongMatchedItems.length,
-          jibunMatch: jibunMatchedItems.length,
-          areaMatch: areaMatchedItems.length,
-          dongJibun: dongJibunFiltered.length,
-          filtered: filteredItems.length,
-          targetArea,
+          totalCount,
+          filteredCount,
+          queryPeriod,
+          periodExpanded,
           averagePrice,
+          filterCriteria,
         });
 
       } catch (err: any) {
@@ -1093,6 +1075,8 @@ export default function DevCaseDetailPage({
           ...prev,
           loading: false,
           error: err.message || '조회 실패',
+          queryPeriod: null,
+          periodExpanded: false,
         }));
       }
     };
@@ -2986,6 +2970,28 @@ export default function DevCaseDetailPage({
                       </div>
                     </div>
 
+                    {/* 조회 기간 표시 (스마트 API 결과) */}
+                    {autoTradeResult.queryPeriod && (
+                      <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
+                        autoTradeResult.periodExpanded
+                          ? 'bg-purple-50 border border-purple-200'
+                          : 'bg-gray-50 border border-gray-200'
+                      }`}>
+                        <span className="text-lg">📅</span>
+                        <span className={`font-medium ${autoTradeResult.periodExpanded ? 'text-purple-800' : 'text-gray-700'}`}>
+                          조회 기간: {autoTradeResult.queryPeriod}
+                        </span>
+                        {autoTradeResult.periodExpanded && (
+                          <span className="px-2 py-0.5 bg-purple-200 text-purple-800 rounded-full text-xs font-medium">
+                            📈 기간 자동 확대됨
+                          </span>
+                        )}
+                        <span className="text-xs text-gray-500 ml-auto">
+                          데이터 부족 시 3개월 → 6개월 → 12개월 자동 확대
+                        </span>
+                      </div>
+                    )}
+
                     {/* 필터 조건 표시 */}
                     <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm">
                       <span className="font-medium text-yellow-800">🎯 필터 조건:</span>
@@ -3049,10 +3055,15 @@ export default function DevCaseDetailPage({
                     {autoTradeResult.filteredCount === 0 && (
                       <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg text-center">
                         <div className="text-gray-500 text-sm">
-                          😔 동 + 지번이 정확히 일치하는 거래가 없습니다.
+                          😔 동 + 지번 + 전용면적 조건에 일치하는 거래가 없습니다.
                         </div>
+                        {autoTradeResult.queryPeriod && (
+                          <div className="text-gray-400 text-xs mt-1">
+                            최대 {autoTradeResult.queryPeriod}까지 조회했지만 일치하는 거래를 찾지 못했습니다.
+                          </div>
+                        )}
                         <div className="text-gray-400 text-xs mt-1">
-                          동 일치: {autoTradeResult.dongMatchCount}건 | 지번 일치: {autoTradeResult.jibunMatchCount}건
+                          전체 거래: {autoTradeResult.totalCount}건 (필터 조건에 맞는 거래 없음)
                         </div>
                       </div>
                     )}
