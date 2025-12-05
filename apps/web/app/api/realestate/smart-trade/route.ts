@@ -1,0 +1,307 @@
+/**
+ * 스마트 실거래가 조회 API
+ *
+ * 동적 기간 확대 + 필터링을 서버에서 처리하여 단일 API 호출로 완결
+ *
+ * 로직:
+ * 1. 3개월 조회 → 필터링 결과 < minCount → 6개월 확대
+ * 2. 6개월 조회 → 필터링 결과 < minCount → 12개월 확대
+ * 3. 필터링 기준: 동(umdNm) + 지번(jibun) + 전용면적(±areaTolerance㎡)
+ *
+ * 응답:
+ * - items: 필터링된 거래 목록
+ * - queryPeriod: 실제 조회된 기간 (예: "6개월")
+ * - totalCount: 전체 거래 건수 (필터링 전)
+ * - filteredCount: 필터링된 거래 건수
+ * - averagePrice: 평균 거래금액 (만원)
+ */
+import { NextRequest, NextResponse } from 'next/server'
+import { XMLParser } from 'fast-xml-parser'
+
+export const runtime = 'nodejs'
+
+// 국토교통부 실거래가 API
+const API_URLS = {
+  new: 'http://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade',
+  old: 'http://apis.data.go.kr/1611000/RTMSObsvService/getRTMSDataSvcAptTradeDev'
+}
+
+// 안전한 문자열/숫자 변환
+const S = (v: unknown): string => (v == null ? '' : String(v).trim())
+const N = (v: unknown): number | null => {
+  const s = S(v).replace(/[ ,]/g, '')
+  const num = Number(s)
+  return Number.isFinite(num) ? num : null
+}
+
+// 이전 월 계산 (YYYYMM 형식)
+function getPreviousMonth(year: number, month: number, monthsBack: number): string {
+  const date = new Date(year, month - 1 - monthsBack, 1)
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+// 단일 월 실거래가 조회
+async function fetchMonthData(
+  serviceKey: string,
+  lawdCd: string,
+  dealYmd: string
+): Promise<any[]> {
+  for (const [version, baseUrl] of Object.entries(API_URLS)) {
+    const qs = new URLSearchParams({
+      serviceKey,
+      LAWD_CD: String(lawdCd),
+      DEAL_YMD: String(dealYmd),
+      pageNo: '1',
+      numOfRows: '1000'
+    }).toString()
+
+    const url = `${baseUrl}?${qs}`
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      const res = await fetch(url, {
+        cache: 'no-store',
+        signal: controller.signal
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!res.ok && res.status === 404) continue
+
+      const text = (await res.text()).replace(/^\uFEFF/, '')
+
+      if (!res.ok) continue
+
+      // XML 파싱
+      const parser = new XMLParser({ ignoreAttributes: false, trimValues: true })
+      const xml = parser.parse(text)
+
+      // 결과 코드 확인
+      const resultCode = xml?.response?.header?.resultCode
+      const successCodes = ['00', '0000', 'INFO-000', '03', 'INFO-003']
+
+      if (resultCode && !successCodes.includes(resultCode)) {
+        continue
+      }
+
+      // NO_DATA 처리
+      if (resultCode === '03' || resultCode === 'INFO-003') {
+        return []
+      }
+
+      // rows 추출
+      const rows = xml?.response?.body?.items?.item ?? []
+      return Array.isArray(rows) ? rows : (rows ? [rows] : [])
+
+    } catch (error: any) {
+      console.warn(`[smart-trade] ${version} API 오류 (${dealYmd}):`, error.message)
+      continue
+    }
+  }
+
+  return []
+}
+
+// 데이터 정규화
+function normalizeItem(r: any) {
+  return {
+    dealAmount: N(r.거래금액 ?? r.dealAmount),
+    dealYear: N(r.년 ?? r.dealYear),
+    dealMonth: N(r.월 ?? r.dealMonth),
+    dealDay: N(r.일 ?? r.dealDay),
+    aptName: S(r.aptNm ?? r.aptName ?? r.아파트 ?? r.아파트명 ?? r.단지명 ?? ''),
+    dong: S(r.dong ?? r.emdNm ?? r.umdNm ?? r.법정동 ?? r.읍면동 ?? ''),
+    jibun: S(r.지번 ?? r.jibun),
+    exclusiveArea: N(r.excluUseAr ?? r.전용면적 ?? r.exclusiveArea),
+    floor: N(r.층 ?? r.floor),
+    buildYear: N(r.건축년도 ?? r.buildYear),
+    cancelDealType: S(r.해제여부 ?? r.cancelDealType ?? r.cdealType),
+    cancelDealDate: S(r.해제사유발생일 ?? r.cancelDealDate ?? r.cdealDay),
+    sggCd: S(r.지역코드 ?? r.sggCd),
+    dealingGbn: S(r.dealingGbn ?? r.거래유형 ?? r.거래구분 ?? r.중개구분),
+    estateAgentSggNm: S(r.estateAgentSggNm ?? r.중개사소재지),
+    rgstDate: S(r.rgstDate ?? r.등기일자),
+  }
+}
+
+// 필터링 함수
+function filterTransactions(
+  items: any[],
+  targetDong: string | null,
+  targetJibun: string | null,
+  targetArea: number | null,
+  areaTolerance: number
+): any[] {
+  if (!targetDong && !targetJibun && !targetArea) {
+    return items // 필터링 기준 없으면 전체 반환
+  }
+
+  return items.filter(item => {
+    // 동 매칭
+    if (targetDong) {
+      const itemDong = S(item.dong).replace(/[동읍면리가]$/, '')
+      const cleanTargetDong = targetDong.replace(/[동읍면리가]$/, '')
+      if (itemDong !== cleanTargetDong) return false
+    }
+
+    // 지번 매칭 (본번만 비교)
+    if (targetJibun) {
+      const itemJibun = S(item.jibun)
+      const itemJibunMatch = itemJibun.match(/^(\d+)/)
+      const targetJibunMatch = targetJibun.match(/^(\d+)/)
+
+      if (!itemJibunMatch || !targetJibunMatch) return false
+      if (itemJibunMatch[1] !== targetJibunMatch[1]) return false
+    }
+
+    // 전용면적 매칭 (±tolerance㎡)
+    if (targetArea !== null) {
+      const itemArea = item.exclusiveArea
+      if (itemArea === null) return false
+      if (Math.abs(itemArea - targetArea) > areaTolerance) return false
+    }
+
+    return true
+  })
+}
+
+export async function POST(req: NextRequest) {
+  console.log('[smart-trade] POST 요청 시작')
+
+  try {
+    const body = await req.json()
+    const {
+      lawdCd,
+      dong = null,
+      jibun = null,
+      area = null,
+      minCount = 3,
+      maxMonths = 12,
+      areaTolerance = 0.5
+    } = body
+
+    console.log('[smart-trade] params:', { lawdCd, dong, jibun, area, minCount, maxMonths })
+
+    // 파라미터 검증
+    if (!lawdCd || String(lawdCd).length !== 5) {
+      return NextResponse.json({
+        header: { resultCode: '400', resultMsg: 'Bad Request' },
+        body: {
+          items: [],
+          totalCount: 0,
+          filteredCount: 0,
+          queryPeriod: '0개월',
+          error: 'Invalid lawdCd (must be 5 digits)'
+        }
+      }, { status: 400 })
+    }
+
+    const serviceKey = process.env.DATA_GO_KR_API_KEY
+    if (!serviceKey) {
+      return NextResponse.json({
+        header: { resultCode: '500', resultMsg: 'Internal Server Error' },
+        body: {
+          items: [],
+          totalCount: 0,
+          filteredCount: 0,
+          queryPeriod: '0개월',
+          error: 'API 키가 설정되지 않았습니다.'
+        }
+      }, { status: 500 })
+    }
+
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = now.getMonth() + 1
+
+    // 기간 확대 단계: 3개월 → 6개월 → 12개월
+    const periodSteps = [3, 6, Math.min(maxMonths, 12)]
+
+    let allRawItems: any[] = []
+    let queriedMonths = 0
+    let filteredItems: any[] = []
+    let queryPeriod = '3개월'
+
+    for (const targetMonths of periodSteps) {
+      // 이전 단계에서 이미 조회한 월 이후부터 추가 조회
+      for (let i = queriedMonths; i < targetMonths; i++) {
+        const dealYmd = getPreviousMonth(year, month, i)
+        console.log(`[smart-trade] 조회: ${dealYmd} (${i + 1}/${targetMonths}개월)`)
+
+        const monthData = await fetchMonthData(serviceKey, lawdCd, dealYmd)
+
+        // 정규화하여 추가
+        const normalizedData = monthData.map(normalizeItem)
+        allRawItems.push(...normalizedData)
+      }
+
+      queriedMonths = targetMonths
+      queryPeriod = `${targetMonths}개월`
+
+      // 필터링 수행
+      filteredItems = filterTransactions(
+        allRawItems,
+        dong,
+        jibun,
+        area,
+        areaTolerance
+      )
+
+      console.log(`[smart-trade] ${queryPeriod} 결과: 전체 ${allRawItems.length}건, 필터링 ${filteredItems.length}건`)
+
+      // 충분한 데이터가 있으면 종료
+      if (filteredItems.length >= minCount) {
+        console.log(`[smart-trade] 충분한 데이터 확보 (${filteredItems.length} >= ${minCount})`)
+        break
+      }
+
+      // 다음 단계로 확대 필요 여부 로깅
+      if (targetMonths < periodSteps[periodSteps.length - 1]) {
+        console.log(`[smart-trade] 데이터 부족 (${filteredItems.length} < ${minCount}), 기간 확대 필요`)
+      }
+    }
+
+    // 평균 거래금액 계산
+    const validAmounts = filteredItems
+      .map(item => item.dealAmount)
+      .filter((amount): amount is number => amount !== null && amount > 0)
+
+    const averagePrice = validAmounts.length > 0
+      ? Math.round(validAmounts.reduce((a, b) => a + b, 0) / validAmounts.length)
+      : null
+
+    // 응답
+    return NextResponse.json({
+      header: { resultCode: '000', resultMsg: 'OK' },
+      body: {
+        items: filteredItems,
+        totalCount: allRawItems.length,
+        filteredCount: filteredItems.length,
+        queryPeriod,
+        averagePrice,
+        filterCriteria: {
+          dong: dong || null,
+          jibun: jibun || null,
+          area: area || null,
+          areaTolerance
+        },
+        params: { lawdCd, minCount, maxMonths }
+      }
+    })
+
+  } catch (err: any) {
+    console.error('[smart-trade] 오류:', err)
+    return NextResponse.json({
+      header: { resultCode: '500', resultMsg: 'Internal Server Error' },
+      body: {
+        items: [],
+        totalCount: 0,
+        filteredCount: 0,
+        queryPeriod: '0개월',
+        error: err?.message ?? String(err)
+      }
+    }, { status: 500 })
+  }
+}
