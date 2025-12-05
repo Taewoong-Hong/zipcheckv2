@@ -98,7 +98,7 @@ async function fetchMonthData(
       // 디버그: 첫 번째 원본 아이템 필드명 확인
       if (items.length > 0) {
         console.log('[smart-trade] DEBUG RAW FIELDS:', Object.keys(items[0]))
-        console.log('[smart-trade] DEBUG RAW ITEM:', JSON.stringify(items[0]))
+        console.log('[smart-trade] DEBUG RAW ITEM (FULL):', JSON.stringify(items[0], null, 2))
         // 동 관련 필드 상세 확인
         const raw = items[0]
         console.log('[smart-trade] DEBUG DONG FIELDS:', {
@@ -109,14 +109,29 @@ async function fetchMonthData(
           '읍면동': raw['읍면동'],
           sggCd: raw.sggCd,
         })
-        console.log('[smart-trade] DEBUG JIBUN FIELDS:', {
+        // 지번 관련 모든 가능한 필드명 확인 (본번, 부번 포함)
+        console.log('[smart-trade] DEBUG JIBUN FIELDS (ALL POSSIBLE):', {
           '지번': raw['지번'],
           jibun: raw.jibun,
+          '본번': raw['본번'],
+          '부번': raw['부번'],
+          bonbeon: raw.bonbeon,
+          bubeon: raw.bubeon,
+          landCd: raw.landCd,
+          // 숫자 필드들 모두 확인 (jibun이 다른 필드일 수 있음)
+          aptSeq: raw.aptSeq,
+          sggCd: raw.sggCd,
+          dealDay: raw.dealDay,
         })
         console.log('[smart-trade] DEBUG AREA FIELDS:', {
           excluUseAr: raw.excluUseAr,
           '전용면적': raw['전용면적'],
           exclusiveArea: raw.exclusiveArea,
+        })
+        // 모든 필드와 값 출력 (10개 아이템 샘플)
+        console.log('[smart-trade] DEBUG ALL FIELDS SAMPLE (3 items):')
+        items.slice(0, 3).forEach((item: any, idx: number) => {
+          console.log(`[smart-trade] Item ${idx}:`, JSON.stringify(item))
         })
       }
 
@@ -274,6 +289,24 @@ export async function POST(req: NextRequest) {
         const sample = allRawItems[0]
         console.log('[smart-trade] DEBUG NORMALIZED SAMPLE:', JSON.stringify(sample))
         console.log('[smart-trade] DEBUG FILTER CRITERIA:', { targetDong: dong, targetJibun: jibun, targetArea: area })
+
+        // 지번 773이 있는 아이템 찾기
+        if (jibun) {
+          const targetMain = jibun.match(/^(\d+)/)?.[1]
+          const matchingJibunItems = allRawItems.filter(item => {
+            const itemJibun = String(item.jibun || '')
+            const itemMain = itemJibun.match(/^(\d+)/)?.[1]
+            return itemMain === targetMain
+          })
+          console.log(`[smart-trade] DEBUG JIBUN SEARCH: 지번 ${targetMain} 검색 결과 ${matchingJibunItems.length}건`)
+          if (matchingJibunItems.length > 0) {
+            console.log('[smart-trade] DEBUG JIBUN MATCH SAMPLE:', JSON.stringify(matchingJibunItems[0]))
+          }
+
+          // 전체 유니크 지번 목록 (처음 20개만)
+          const uniqueJibuns = [...new Set(allRawItems.map(item => String(item.jibun || '').match(/^(\d+)/)?.[1]).filter(Boolean))]
+          console.log('[smart-trade] DEBUG UNIQUE JIBUNS (first 20):', uniqueJibuns.slice(0, 20))
+        }
 
         // 수동 필터링 테스트
         if (dong) {
